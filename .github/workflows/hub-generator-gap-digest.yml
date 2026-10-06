@@ -80,4 +80,4 @@ jobs:
         if: always()
         uses: ./.github/actions/fail-if-slack-failed
         with:
-          outcomes: "${{ steps.slack-secrets.outcome }}"
+          outcomes: "${{ (steps.slack-secrets.outcome == 'success' && steps.slack-secrets.outputs.SLACK_BOT_TOKEN == '') && 'failure' || steps.slack-secrets.outcome }}"

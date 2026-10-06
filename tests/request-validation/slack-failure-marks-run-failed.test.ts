@@ -93,6 +93,19 @@ describe.each(WORKFLOWS)('%s', (file) => {
     }
   });
 
+  it('also fails when a token step succeeded but produced an empty token', () => {
+    for (const steps of jobs) {
+      const outcomes = steps[steps.length - 1]?.outcomes ?? '';
+      const tokenSteps = steps.filter((st) => st.uses === './.github/actions/slack-token');
+      expect(tokenSteps.length).toBeGreaterThan(0);
+      for (const st of tokenSteps) {
+        expect(outcomes, `token step "${st.name}" is not checked for an empty token`).toContain(
+          `steps.${st.id}.outputs.SLACK_BOT_TOKEN == ''`,
+        );
+      }
+    }
+  });
+
   it('passes the outcome of every Slack step that is allowed to fail silently', () => {
     for (const steps of jobs) {
       const outcomes = steps[steps.length - 1]?.outcomes ?? '';

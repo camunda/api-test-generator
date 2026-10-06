@@ -8,7 +8,9 @@ inputs:
   outcomes:
     description: >-
       Space-separated outcomes of the Slack steps, for example
-      "${{ steps.slack-secrets.outcome }} ${{ steps.notify.outcome }}".
+      "${{ steps.slack-secrets.outcome }} ${{ steps.notify.outcome }}". For a token step, pass
+      "${{ (steps.T.outcome == 'success' && steps.T.outputs.SLACK_BOT_TOKEN == '') && 'failure' || steps.T.outcome }}"
+      so that a step that succeeded but produced an empty token counts as a failure too (every post would be skipped).
     required: true
 
 runs:
