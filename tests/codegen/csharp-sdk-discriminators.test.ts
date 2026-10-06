@@ -1,5 +1,9 @@
 import { describe, expect, test } from 'vitest';
-import { buildCsharpDiscriminatorTable } from '../../materializer/src/csharp-sdk/discriminators.js';
+import {
+  buildCsharpDiscriminatorTable,
+  type CsharpDiscriminator,
+  chooseCsharpDiscriminator,
+} from '../../materializer/src/csharp-sdk/discriminators.js';
 
 /**
  * Regression coverage for the inline-schema visit-key collision (PR #668
@@ -151,5 +155,76 @@ describe('buildCsharpDiscriminatorTable — inline schema visit-key collisions',
     };
 
     expect(() => buildCsharpDiscriminatorTable(bundle)).not.toThrow();
+  });
+});
+
+/**
+ * Regression coverage for `chooseCsharpDiscriminator` (PR #668 review,
+ * adversarial finding): once the table-build fix above started allowing
+ * MULTIPLE discriminator entries to share the same `path` (one per inline
+ * sibling branch), `chooseCsharpDiscriminator` still located its entry with
+ * `entries.find((candidate) => candidate.path === path)` — always the
+ * FIRST matching entry — so a value shaped for a later sibling entry was
+ * scored against the wrong entry's subtypes and silently mismatched.
+ * `chooseCsharpDiscriminator` had no unit tests at all before this fix.
+ */
+describe('chooseCsharpDiscriminator — multiple entries sharing one path', () => {
+  const byId: CsharpDiscriminator = {
+    path: 'source',
+    propertyName: 'byId',
+    subtypes: [{ value: 'IdRef', properties: ['id'], required: ['id'] }],
+  };
+  const byKey: CsharpDiscriminator = {
+    path: 'source',
+    propertyName: 'byKey',
+    subtypes: [{ value: 'KeyRef', properties: ['key'], required: ['key'] }],
+  };
+  const entries: CsharpDiscriminator[] = [byId, byKey];
+
+  test('matches a value shaped for the FIRST same-path entry', () => {
+    expect(chooseCsharpDiscriminator({ id: '1' }, entries, 'source')).toEqual({
+      name: 'byId',
+      value: 'IdRef',
+    });
+  });
+
+  test('matches a value shaped for a LATER same-path entry, not just the first', () => {
+    // Pre-fix: `.find()` locked onto `byId` and this value (which has no
+    // `id` and would fail `byId`'s subtype checks) returned undefined
+    // instead of resolving against the `byKey` entry.
+    expect(chooseCsharpDiscriminator({ key: 'k1' }, entries, 'source')).toEqual({
+      name: 'byKey',
+      value: 'KeyRef',
+    });
+  });
+
+  test('prefers the entry whose own discriminator property is already present', () => {
+    // If the value already carries one entry's discriminator property, that
+    // entry must be skipped (matching the pre-existing single-entry
+    // behaviour) even though it is listed first.
+    expect(
+      chooseCsharpDiscriminator({ byId: 'IdRef', id: '1' }, entries, 'source'),
+    ).toBeUndefined();
+  });
+
+  test('returns undefined when no same-path entry matches the value shape', () => {
+    expect(chooseCsharpDiscriminator({ unrelated: true }, entries, 'source')).toBeUndefined();
+  });
+
+  test('picks the more specific subtype across entries when several match', () => {
+    const broad: CsharpDiscriminator = {
+      path: 'source',
+      propertyName: 'byAny',
+      subtypes: [{ value: 'AnyRef', properties: ['id', 'extra'], required: [] }],
+    };
+    const specific: CsharpDiscriminator = {
+      path: 'source',
+      propertyName: 'byIdExact',
+      subtypes: [{ value: 'IdExactRef', properties: ['id'], required: ['id'] }],
+    };
+    expect(chooseCsharpDiscriminator({ id: '1' }, [broad, specific], 'source')).toEqual({
+      name: 'byIdExact',
+      value: 'IdExactRef',
+    });
   });
 });

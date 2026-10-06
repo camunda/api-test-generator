@@ -191,16 +191,32 @@ export function chooseCsharpDiscriminator(
   entries: readonly CsharpDiscriminator[],
   path: string,
 ): { name: string; value: string } | undefined {
-  const entry = entries.find((candidate) => candidate.path === path);
-  if (!entry || Object.hasOwn(value, entry.propertyName)) return undefined;
-  const candidates = entry.subtypes
-    .filter((subtype) =>
-      subtype.required
-        .filter((name) => name !== entry.propertyName)
-        .every((name) => Object.hasOwn(value, name)),
-    )
-    .filter((subtype) => [...Object.keys(value)].every((name) => subtype.properties.includes(name)))
-    .sort((left, right) => right.required.length - left.required.length);
+  // `buildCsharpDiscriminatorTable` can legitimately produce MULTIPLE entries
+  // sharing the same `path` — distinct inline `oneOf`/`anyOf` sibling
+  // branches each carry their own discriminator (see
+  // "finds discriminators in every inline sibling branch of a oneOf under a
+  // $ref parent" in discriminators.test.ts). Picking only the FIRST
+  // path-matching entry (`entries.find(...)`) silently locked every value at
+  // that path onto one entry's subtype set, even when the value actually
+  // matched a sibling entry instead — the same class of bug the table-build
+  // fix solved at discovery time, reappearing here at selection time. Score
+  // every subtype across EVERY matching entry and pick the best overall
+  // match instead of the first entry's best match.
+  const matching = entries.filter((candidate) => candidate.path === path);
+  const candidates = matching.flatMap((entry) => {
+    if (Object.hasOwn(value, entry.propertyName)) return [];
+    return entry.subtypes
+      .filter((subtype) =>
+        subtype.required
+          .filter((name) => name !== entry.propertyName)
+          .every((name) => Object.hasOwn(value, name)),
+      )
+      .filter((subtype) =>
+        [...Object.keys(value)].every((name) => subtype.properties.includes(name)),
+      )
+      .map((subtype) => ({ name: entry.propertyName, value: subtype.value, subtype }));
+  });
+  candidates.sort((left, right) => right.subtype.required.length - left.subtype.required.length);
   const selected = candidates[0];
-  return selected ? { name: entry.propertyName, value: selected.value } : undefined;
+  return selected ? { name: selected.name, value: selected.value } : undefined;
 }
