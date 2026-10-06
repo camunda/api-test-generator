@@ -185,7 +185,17 @@ describe('request-validation: capability-gated fields (#404)', () => {
         capabilityGates: GATE,
       });
       const tenantIdScenarios = scenarios.filter((s) => s.target === 'tenantId');
-      expect(tenantIdScenarios.length).toBeGreaterThan(0);
+      // Pin the exact surviving set: the fixture's schema
+      // (minLength:1, maxLength:31, pattern:'^[a-z]+$') produces 5 raw
+      // mutations — belowMinLength, emptyString, and patternMismatch are
+      // blank-like and excluded; only aboveMaxLength and wayAboveMaxLength
+      // survive. A `toBeGreaterThan(0)` count alone can't tell correct
+      // exclusion apart from a regression that ALSO wrongly excludes one of
+      // the two non-blank survivors.
+      expect(tenantIdScenarios.map((s) => s.constraintKind).sort()).toEqual([
+        'aboveMaxLength',
+        'wayAboveMaxLength',
+      ]);
       for (const s of tenantIdScenarios) {
         // No blank-value mutation survives.
         const body = s.requestBody;
@@ -264,7 +274,13 @@ describe('request-validation: capability-gated fields (#404)', () => {
       const scenarios = generateParamConstraintViolations([opOptionalQueryTenantId], {
         capabilityGates: GATE,
       });
-      expect(scenarios.length).toBeGreaterThan(0);
+      // Pin the exact surviving set: the fixture's schema
+      // (minLength:1, maxLength:5, pattern:'^[a-z]+$') produces 3 raw
+      // mutations — pattern ('\n') and length-min ('') are blank-like and
+      // excluded; only length-max survives. A count-only assertion can't
+      // tell correct exclusion apart from a regression that also wrongly
+      // excludes the one non-blank survivor.
+      expect(scenarios.map((s) => s.constraintKind)).toEqual(['length-max']);
       for (const s of scenarios) {
         expect(s.params?.tenantId).not.toBe('');
         expect(s.expectedStatus).toBe(400);
