@@ -1517,3 +1517,192 @@ describe('resolveCsharpDiscriminatorChain — continues past an explicit ref alr
     expect(result.ownerChain).toEqual(new Set([SUCCESS_REF, TEXT_REF]));
   });
 });
+
+/**
+ * Regression coverage for PR #668 review (round 10, adversarial finding):
+ * the round-9 `extraProperties`/`extraRequired` threading only covered the
+ * `allOf` sibling loop in `walkSchema` — the `oneOf`/`anyOf` branch descent
+ * and the `discriminator.mapping` target descent both still called
+ * `walkSchema` WITHOUT forwarding `extraProperties`/`extraRequired`, so
+ * they silently defaulted back to `[]`. A chained same-object discriminator
+ * reached through a `oneOf`/`anyOf` branch (or a `mapping` target) at the
+ * SAME path as an ancestor's common fields lost those common fields
+ * entirely — `collectSubtypes` for the nested discriminator's own subtypes
+ * then rejected a value carrying them as an unrecognised "extra" property.
+ * Each `describe` below exercises one of the three concrete propagation
+ * gaps the finding cited.
+ */
+describe('buildCsharpDiscriminatorTable — common fields survive a oneOf/anyOf branch descent into a nested discriminator', () => {
+  const bundle = {
+    paths: {
+      '/jobs': {
+        post: {
+          operationId: 'activateJob',
+          requestBody: {
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/Wrapper' } },
+            },
+          },
+        },
+      },
+    },
+    components: {
+      schemas: {
+        // `common` is declared directly on the WRAPPER (a sibling of its
+        // own `discriminator`/`oneOf`, not merged via `allOf`). `Success`
+        // — one of the wrapper's own oneOf branches — declares a FURTHER
+        // same-object discriminator (`kind`) of its own. Before the fix,
+        // descending into the `Success` branch reset `extraProperties` to
+        // `[]`, so `kind`'s own subtype table entries never saw `common`.
+        Wrapper: {
+          type: 'object',
+          properties: { common: { type: 'string' } },
+          required: ['common'],
+          discriminator: { propertyName: 'family' },
+          oneOf: [
+            { $ref: '#/components/schemas/Success' },
+            { $ref: '#/components/schemas/Failure' },
+          ],
+        },
+        Success: {
+          type: 'object',
+          discriminator: { propertyName: 'kind' },
+          oneOf: [{ $ref: '#/components/schemas/Text' }],
+        },
+        Text: { type: 'object', properties: { text: { type: 'string' } }, required: ['text'] },
+        Failure: { type: 'object', properties: { reason: { type: 'string' } } },
+      },
+    },
+  };
+
+  test("the nested `kind` discriminator's subtype carries the wrapper's own `common` field/requirement", () => {
+    const table = buildCsharpDiscriminatorTable(bundle);
+    const entries = table.activateJob ?? [];
+    const kindEntry = entries.find((entry) => entry.propertyName === 'kind');
+    const text = kindEntry?.subtypes.find((s) => s.value === 'Text');
+    expect(text?.properties).toEqual(expect.arrayContaining(['text', 'common']));
+    expect(text?.required).toEqual(expect.arrayContaining(['common']));
+  });
+
+  test('chooseCsharpDiscriminator selects the nested branch for a value combining the wrapper common field', () => {
+    const table = buildCsharpDiscriminatorTable(bundle);
+    const entries = table.activateJob ?? [];
+    const kindEntry = entries.filter((entry) => entry.propertyName === 'kind');
+    expect(
+      chooseCsharpDiscriminator(
+        { common: 'c', text: 'hi' },
+        kindEntry,
+        '',
+        new Set(['#/components/schemas/Success']),
+      ),
+    ).toEqual({ name: 'kind', value: 'Text', ref: '#/components/schemas/Text' });
+  });
+});
+
+describe('buildCsharpDiscriminatorTable — common fields survive a discriminator.mapping target descent into a nested discriminator', () => {
+  const bundle = {
+    paths: {
+      '/jobs': {
+        post: {
+          operationId: 'activateJob',
+          requestBody: {
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/Wrapper' } },
+            },
+          },
+        },
+      },
+    },
+    components: {
+      schemas: {
+        Wrapper: {
+          type: 'object',
+          properties: { common: { type: 'string' } },
+          required: ['common'],
+          discriminator: {
+            propertyName: 'family',
+            mapping: { success: '#/components/schemas/Success' },
+          },
+        },
+        // `Success` is reached ONLY through `discriminator.mapping`, never
+        // as a `oneOf`/`anyOf` branch — exercising the mapping-descent call
+        // specifically, not the oneOf/anyOf one above.
+        Success: {
+          type: 'object',
+          discriminator: { propertyName: 'kind' },
+          oneOf: [{ $ref: '#/components/schemas/Text' }],
+        },
+        Text: { type: 'object', properties: { text: { type: 'string' } }, required: ['text'] },
+      },
+    },
+  };
+
+  test("the nested `kind` discriminator's subtype carries the wrapper's own `common` field/requirement", () => {
+    const table = buildCsharpDiscriminatorTable(bundle);
+    const entries = table.activateJob ?? [];
+    const kindEntry = entries.find((entry) => entry.propertyName === 'kind');
+    const text = kindEntry?.subtypes.find((s) => s.value === 'Text');
+    expect(text?.properties).toEqual(expect.arrayContaining(['text', 'common']));
+    expect(text?.required).toEqual(expect.arrayContaining(['common']));
+  });
+});
+
+describe("buildCsharpDiscriminatorTable — the enclosing schema's own direct properties merge into its allOf siblings", () => {
+  const bundle = {
+    paths: {
+      '/jobs': {
+        post: {
+          operationId: 'activateJob',
+          requestBody: {
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/Wrapper' } },
+            },
+          },
+        },
+      },
+    },
+    components: {
+      schemas: {
+        // `common` is declared DIRECTLY on the wrapper, legally alongside
+        // its OWN `allOf` — not as a separate allOf sibling part (that case
+        // is already covered by the round-9 fixture above). Before this
+        // fix, the allOf loop's sibling-property union only pulled in
+        // OTHER allOf parts' fields, never the enclosing schema's own.
+        Wrapper: {
+          type: 'object',
+          properties: { common: { type: 'string' } },
+          required: ['common'],
+          allOf: [
+            {
+              type: 'object',
+              discriminator: { propertyName: 'kind' },
+              oneOf: [{ $ref: '#/components/schemas/A' }, { $ref: '#/components/schemas/B' }],
+            },
+          ],
+        },
+        A: { type: 'object', properties: { a: { type: 'string' } }, required: ['a'] },
+        B: { type: 'object', properties: { b: { type: 'string' } } },
+      },
+    },
+  };
+
+  test("every subtype carries the wrapper's own direct `common` property and requirement", () => {
+    const table = buildCsharpDiscriminatorTable(bundle);
+    const subtypes = (table.activateJob ?? []).flatMap((d) => d.subtypes);
+    const a = subtypes.find((s) => s.value === 'A');
+    const b = subtypes.find((s) => s.value === 'B');
+    expect(a?.properties).toEqual(expect.arrayContaining(['a', 'common']));
+    expect(a?.required).toEqual(expect.arrayContaining(['common']));
+    expect(b?.properties).toEqual(expect.arrayContaining(['b', 'common']));
+  });
+
+  test('chooseCsharpDiscriminator selects the matching branch for a value combining the direct common field', () => {
+    const table = buildCsharpDiscriminatorTable(bundle);
+    const entries = table.activateJob ?? [];
+    expect(chooseCsharpDiscriminator({ common: 'c', a: 'x' }, entries, '')).toEqual({
+      name: 'kind',
+      value: 'A',
+      ref: '#/components/schemas/A',
+    });
+  });
+});

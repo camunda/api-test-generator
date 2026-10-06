@@ -419,6 +419,24 @@ function walkSchema(
     // attach to that subtype's `ref` field, so the two line up at render
     // time. An inline branch (no `$ref`) has no identity to gate on, so it
     // falls back to the incoming owner either way.
+    // The enclosing schema's own directly-declared `properties`/`required`
+    // are legal to sit alongside `allOf`/`oneOf`/`anyOf`/`discriminator.mapping`
+    // in JSON Schema, and belong to the SAME object as any nested
+    // discriminator reached through those keywords — exactly like a sibling
+    // `allOf` part's fields. Fold them into whatever this call already
+    // inherited so every descent below (allOf siblings, oneOf/anyOf
+    // branches, mapping targets) sees them (PR #668 review, round 10:
+    // extends the "Previously missed" advisory from round 9, which only
+    // covered allOf siblings, to the enclosing schema's own fields AND to
+    // the oneOf/anyOf/mapping descents below, which previously dropped
+    // `extraProperties`/`extraRequired` entirely instead of threading them
+    // through).
+    const ownProperties = isRecord(resolved.properties) ? Object.keys(resolved.properties) : [];
+    const ownRequired = Array.isArray(resolved.required)
+      ? resolved.required.filter((name): name is string => typeof name === 'string')
+      : [];
+    const inheritedProperties = [...new Set([...extraProperties, ...ownProperties])];
+    const inheritedRequired = [...new Set([...extraRequired, ...ownRequired])];
     const allOfParts = resolved.allOf;
     if (Array.isArray(allOfParts)) {
       for (const part of allOfParts) {
@@ -427,11 +445,12 @@ function walkSchema(
         // get merged by `properties`/`allOf`-only `collectProperties`/
         // `collectRequired` on the part itself. Gather every OTHER sibling
         // part's own properties/required (plus whatever this call already
-        // inherited) and thread it through so a value combining a `common`
-        // branch with a discriminator/`oneOf` branch is still recognised
-        // (PR #668 review, round 9: "Previously missed" advisory).
-        const siblingProperties = new Set(extraProperties);
-        const siblingRequired = new Set(extraRequired);
+        // inherited, including the enclosing schema's own fields above) and
+        // thread it through so a value combining a `common` branch with a
+        // discriminator/`oneOf` branch is still recognised (PR #668 review,
+        // round 9: "Previously missed" advisory).
+        const siblingProperties = new Set(inheritedProperties);
+        const siblingRequired = new Set(inheritedRequired);
         for (const other of allOfParts) {
           if (other === part) continue;
           for (const name of collectProperties(other, stores)) siblingProperties.add(name);
@@ -456,7 +475,17 @@ function walkSchema(
         for (const part of parts) {
           const branchRef = isRecord(part) && typeof part.$ref === 'string' ? part.$ref : undefined;
           const branchOwner = propertyName !== undefined ? (branchRef ?? ownerRef) : ownerRef;
-          walkSchema(part, path, stores, output, visited, activeRefs, branchOwner);
+          walkSchema(
+            part,
+            path,
+            stores,
+            output,
+            visited,
+            activeRefs,
+            branchOwner,
+            inheritedProperties,
+            inheritedRequired,
+          );
         }
       }
     }
@@ -492,6 +521,8 @@ function walkSchema(
           visited,
           activeRefs,
           normalizedRef,
+          inheritedProperties,
+          inheritedRequired,
         );
       }
     }
