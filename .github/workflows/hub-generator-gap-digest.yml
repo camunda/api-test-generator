@@ -59,6 +59,8 @@ jobs:
 
       - name: Fetch Slack bot token from Vault
         id: slack-secrets
+        # A manual run defaults to a dry run that posts nothing, so it needs no token.
+        if: ${{ github.event_name != 'workflow_dispatch' || !inputs.dry_run }}
         continue-on-error: true
         uses: ./.github/actions/slack-token
         with:

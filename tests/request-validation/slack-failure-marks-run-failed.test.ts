@@ -123,3 +123,15 @@ describe.each(WORKFLOWS)('%s', (file) => {
     }
   });
 });
+
+describe('workflows whose manual run is a dry run that posts nothing', () => {
+  it.each([
+    'hub-generator-gap-digest',
+    'hub-response-coverage',
+  ])('%s fetches no Slack token in a dry run, so a Vault problem cannot fail it', (file) => {
+    for (const steps of stepsOf(file)) {
+      const token = steps.find((st) => st.uses === './.github/actions/slack-token');
+      expect(token?.if, 'the token step needs an if that skips a dry run').toMatch(/dry_run/);
+    }
+  });
+});
