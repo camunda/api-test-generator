@@ -151,6 +151,13 @@ describe('per-area coverage gap issues', () => {
     expect(issues[0][4]).toEqual(['f1', 'f2']);
   });
 
+  it('ends every area issue with a link to the guide on fixing a gap', () => {
+    const [[, body]] = areaIssues([gap('f1', 'Files')]);
+    expect(body).toContain(
+      'How to fix a gap: [guide](https://github.com/camunda/api-test-generator/blob/main/docs/hub-response-coverage-report.md#closing-a-gap)',
+    );
+  });
+
   it('files an endpoint without an area under Other', () => {
     const [[title]] = areaIssues([{ ...ok('x'), cells: { '2xx': 'gap' } }]);
     expect(title).toBe('[hub-response-coverage] Other: missing response or bad-request tests');

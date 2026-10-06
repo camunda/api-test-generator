@@ -50,6 +50,9 @@ export interface Digest {
   waiting: number;
 }
 
+const COOKBOOK_URL =
+  'https://github.com/camunda/api-test-generator/blob/main/docs/hub-pr-check-cookbook.md';
+
 export function buildDigest(items: Item[], now: Date): Digest {
   const overdue = items
     .filter((i) => i.hubState === 'merged')
@@ -72,6 +75,9 @@ export function buildDigest(items: Item[], now: Date): Digest {
   }
   if (waiting > 0)
     lines.push(`_${waiting} more tracked for camunda-hub PRs that have not merged yet._`);
+  lines.push(
+    `<${COOKBOOK_URL}#keeping-track-of-pending-generator-fixes|📖 What to do about these>`,
+  );
   return { text: lines.join('\n'), overdue, toClose, waiting };
 }
 

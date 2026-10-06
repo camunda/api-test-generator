@@ -102,3 +102,12 @@ describe('postDigest', () => {
     ).rejects.toThrow('Slack post failed: not_in_channel');
   });
 });
+
+describe('buildDigest link', () => {
+  it('ends the digest with a link to what to do, and stays empty when nothing is overdue', () => {
+    expect(buildDigest([item({})], now).text).toContain(
+      '<https://github.com/camunda/api-test-generator/blob/main/docs/hub-pr-check-cookbook.md#keeping-track-of-pending-generator-fixes|📖 What to do about these>',
+    );
+    expect(buildDigest([], now).text).toBe('');
+  });
+});

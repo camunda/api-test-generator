@@ -645,6 +645,7 @@ def issue_body(s, rows, args):
     ]
     if args.run_url:
         lines += ['', f'Full table: {args.run_url}']
+    lines += ['', f'How to fix a gap: [guide]({GUIDE_URL}#closing-a-gap)']
     return '\n'.join(lines) + '\n'
 
 
@@ -679,6 +680,7 @@ def area_issues(rows, args):
         ] + gap_table(gaps)
         if args.run_url:
             lines += ['', f'Full table: {args.run_url}']
+        lines += ['', f'How to fix a gap: [guide]({GUIDE_URL}#closing-a-gap)']
         out.append((f'{AREA_TITLE_PREFIX}{area}: missing response or bad-request tests', '\n'.join(lines) + '\n', area,
                     len(gaps), [g['operationId'] for g in gaps]))
     return out
