@@ -19,8 +19,7 @@ import { computeUniqueBindings } from '../playwright/ctxSeeding.js';
 import {
   type CsharpDiscriminator,
   type CsharpDiscriminatorTable,
-  chooseCsharpDiscriminator,
-  findExplicitCsharpDiscriminatorRef,
+  resolveCsharpDiscriminatorChain,
 } from './discriminators.js';
 import {
   type CsharpOperationMap,
@@ -850,16 +849,19 @@ function emitJsonRequestDataLines(
     for (const { fieldName } of fields.deferred) {
       if (!Object.hasOwn(rootValue, fieldName)) rootValue[fieldName] = null;
     }
-    let rootOwnerChain: ReadonlySet<string> = new Set();
-    const rootDiscriminator = chooseCsharpDiscriminator(rootValue, discriminators, '');
-    if (rootDiscriminator !== undefined && !Object.hasOwn(rootValue, rootDiscriminator.name)) {
+    // Resolve every discriminator eligible at the root, not just the first:
+    // the root's own selected branch can itself declare a SECOND
+    // discriminator on the same (root) object, which only becomes eligible
+    // once the first's ref is in the owner chain (PR #668 review, round 7).
+    const { fields: rootFields, ownerChain: rootOwnerChain } = resolveCsharpDiscriminatorChain(
+      rootValue,
+      discriminators,
+      '',
+    );
+    for (const [name, tagValue] of rootFields) {
       lines.push(
-        `${indent}${dataVar}[${stringLiteral(rootDiscriminator.name)}] = ${renderCsharpValue(rootDiscriminator.value, indent)};`,
+        `${indent}${dataVar}[${stringLiteral(name)}] = ${renderCsharpValue(tagValue, indent)};`,
       );
-      if (rootDiscriminator.ref !== undefined) rootOwnerChain = new Set([rootDiscriminator.ref]);
-    } else {
-      const explicitRef = findExplicitCsharpDiscriminatorRef(rootValue, discriminators, '');
-      if (explicitRef !== undefined) rootOwnerChain = new Set([explicitRef]);
     }
     for (const [fieldName, value] of fields.inline) {
       lines.push(
@@ -1047,28 +1049,13 @@ function renderCsharpValue(
   if (isRecord(value)) {
     const entries: string[] = [];
     const fields = Object.entries(value);
-    const discriminator = chooseCsharpDiscriminator(value, discriminators, path, ownerChain);
-    let nextOwnerChain = ownerChain;
-    if (discriminator !== undefined && !Object.hasOwn(value, discriminator.name)) {
-      fields.unshift([discriminator.name, discriminator.value]);
-      if (discriminator.ref !== undefined) {
-        nextOwnerChain = new Set([...ownerChain, discriminator.ref]);
-      }
-    } else {
-      // The discriminator field can already be explicit in the data (the
-      // scenario sets it directly rather than relying on shape inference).
-      // Still record which branch that selects, so a nested discriminator
-      // scoped to it is recognised even though nothing needs injecting here.
-      const explicitRef = findExplicitCsharpDiscriminatorRef(
-        value,
-        discriminators,
-        path,
-        ownerChain,
-      );
-      if (explicitRef !== undefined) {
-        nextOwnerChain = new Set([...ownerChain, explicitRef]);
-      }
-    }
+    // Resolves every discriminator eligible at this object, not just the
+    // first: the branch this object selects can itself declare a SECOND
+    // discriminator on the SAME object, which only becomes eligible once
+    // the first's ref is in the owner chain (PR #668 review, round 7).
+    const { fields: discriminatorFields, ownerChain: nextOwnerChain } =
+      resolveCsharpDiscriminatorChain(value, discriminators, path, ownerChain);
+    fields.unshift(...discriminatorFields);
     for (const [k, v] of fields) {
       const rendered = renderCsharpValue(
         v,
