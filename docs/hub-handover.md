@@ -223,6 +223,10 @@ Messages for a PR run on a **draft** are not posted to Slack on purpose; the com
 - **#515:** whether the classifier may open fix PRs.
 - **#584:** suppress `replaceWorkspaceEnvironments` (open since 2026-09-17).
 - **#583:** the Hub-developer cookbook draft, which overlaps section 4 and the PR-check cookbook. Merge or close.
+- **Should a coverage gap fail the PR check?** Today it stays green on purpose: the PR author cannot fix a missing generator test.
+  The gap opens an issue (assigned to the PR author when their own spec change caused it) and a Slack alert. Now that the Hub team owns the generator,
+  a failing check for "this PR adds an endpoint with no test" is a fair policy. Revisit once the check is required on camunda-hub PRs.
+  The two issues a gap can open (`Coverage gap` and `Generator gap`) overlap; decide whether to merge them.
 - **Re-enable check ignores the close reason.** An issue closed as "not planned" is treated as fixed. Not yet fixed.
 - **Lifecycle gaps:** ProjectSnapshot and Version have no create-read-delete test (they are not in `entity-kinds.json`).
 - **Spec hints proposal** (a draft for the Hub API owners): an optional field on each documented 4xx saying which calls provoke it,

@@ -121,10 +121,12 @@ To re-run in CI without a new push, dispatch `trigger-api-test-generator.yml` in
 
 - *No status on my PR:* drafts, forks, `self-managed/*` bases and docs/frontend-only PRs are
   skipped by design. Mark the PR ready, or dispatch it by hand.
-- *Green despite a coverage gap:* intentional. Missing coverage alone is never a failing check
-  (#480); the gap is on the status description, the tracking issue and Slack (yellow headline).
-  The repo-wide view of missing tests (not tied to one PR) is the weekly report, see
-  [hub-response-coverage-report.md](hub-response-coverage-report.md).
+- *Green despite a coverage gap:* intentional. A missing test is not a failing test, and the author of the
+  camunda-hub PR cannot fix it (the fix is in the generator), so the check stays green while the gap is made
+  visible: the status description, a tracking issue `[hub-pr-check] Coverage gap on camunda-hub#N`, and Slack
+  (yellow headline). When the PR's own spec change caused the gap, it also gets an issue assigned to the PR
+  author and a comment on the PR. The repo-wide view of missing tests (not tied to one PR) is the weekly
+  report, see [hub-response-coverage-report.md](hub-response-coverage-report.md).
 - *Red but "not a Hub bug":* the check is informational, not required, while reliability proves out.
 - *Slack edited instead of a new message:* same PR, same failure fingerprint.
 - *The classifier said `unknown`:* it is told to prefer that over guessing `product`, because
