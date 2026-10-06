@@ -13,17 +13,25 @@ interface Opts {
    * the keys of `resourceFixtures`: projectKey, folderKey, parentFolderKey,
    * workspaceKey, …). A wrong-type value on one of these never reaches
    * body validation: the @PreAuthorize gate resolves the malformed key
-   * first, so a scalar wrong-type (`123`, `true`) short-circuits to 403
-   * and a structural one (`{}`, `[]`) currently 500s (a Hub bug —
-   * unhandled non-scalar key). Neither is the expected 400, so emitting a
-   * body-type-mismatch on an authz-resolved key field is a guaranteed
-   * false-positive. Verified live 2026-07-03: a non-key string field with
-   * the same mutations correctly returns 400, confirming the bypass is
+   * first, so a scalar wrong-type (`123`, `true`) short-circuits to 403.
+   * That is not the expected 400, so emitting a scalar body-type-mismatch
+   * on an authz-resolved key field is a guaranteed false-positive. A
+   * structural value (`{}`, `[]`) used to 500 too (camunda-hub#25926, fixed);
+   * see `nonScalarKeyOperations` for where it is tested again. Verified live
+   * 2026-07-03: a non-key string field with the same mutations correctly returns 400, confirming the bypass is
    * specific to authz-resolved keys. Skipped here rather than
    * re-expected-as-403 so the suite keeps asserting strict body-validation
    * (400) everywhere it actually runs. Analogous to `unenforcedStringFormats`.
    */
   resourceKeyFields?: ReadonlySet<string>;
+  /**
+   * Operations whose authorization gate rejects an object or array value for a
+   * resource-key body field with 400 (camunda/camunda-hub#25926, fixed in
+   * camunda-hub#29809). For these, `{}` and `[]` on a key field are emitted
+   * again, expecting 400. Numbers and booleans on a key field stay skipped
+   * everywhere: the gate answers 403 for them by design.
+   */
+  nonScalarKeyOperations?: ReadonlySet<string>;
 }
 
 const TYPE_MISMATCH_TABLE: Record<string, unknown[]> = {
@@ -49,11 +57,15 @@ export function generateBodyTypeMismatch(ops: OperationModel[], opts: Opts): Val
       const t = Array.isArray(f.type) ? f.type[0] : f.type;
       if (!t || !TYPE_MISMATCH_TABLE[t]) continue;
       // #427 — skip authz-resolved resource-key fields: the server resolves
-      // them before body validation, so a wrong-type value yields 403/500,
-      // never the expected 400.
-      if (opts.resourceKeyFields?.has(f.path[f.path.length - 1])) continue;
+      // them before body validation, so a scalar wrong-type value yields 403,
+      // never the expected 400. Object/array values are kept (400) for the
+      // operations listed in nonScalarKeyOperations.
+      const isKey = opts.resourceKeyFields?.has(f.path[f.path.length - 1]) ?? false;
+      if (isKey && !opts.nonScalarKeyOperations?.has(op.operationId)) continue;
       let perField = 0;
       for (const wrong of TYPE_MISMATCH_TABLE[t]) {
+        // A key field only gets the object/array values (400); scalars are 403 by design.
+        if (isKey && (wrong === null || typeof wrong !== 'object')) continue;
         if (opts.capPerOperation && produced >= opts.capPerOperation) break;
         if (opts.maxPerField && perField >= opts.maxPerField) break;
         const mutated = structuredClone(baseline);

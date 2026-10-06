@@ -17,6 +17,16 @@
     "projectSnapshotKey": "RV_FIXTURE_PROJECT_SNAPSHOT_KEY",
     "assetKey": "RV_FIXTURE_CATALOG_ASSET_KEY"
   },
+  "nonScalarKeyOperations": [
+    "createFile",
+    "updateFile",
+    "createFolder",
+    "updateFolder",
+    "createProject",
+    "updateProject",
+    "createProjectSnapshot",
+    "createVersion"
+  ],
   "pathResourceFixtures": {
     "projectKey": "RV_FIXTURE_V2_PROJECT_KEY"
   },
@@ -73,12 +83,6 @@
         "auth-deny"
       ],
       "reason": "The baseline body's email is the placeholder 'x', and Hub validates the email format before the authority check, so the denied request answers 400 instead of 403 (verified live). Needs a format-valid baseline value for email fields; every other keyed or bodied operation reaches the 403."
-    }
-  ],
-  "knownIssues": [
-    {
-      "summary": "Wrong-type tests on resource-key body fields (projectKey, folderKey, …) are skipped — Hub 403s/500s on a malformed key instead of 400",
-      "url": "https://github.com/camunda/camunda-hub/issues/25926"
     }
   ],
   "knownProblemDetailShapeGaps": [
