@@ -35,6 +35,7 @@ does not yet understand a new endpoint, or that the test run itself had a proble
 | "api-test-generator not yet handling a new/changed endpoint" | The generator's, not a Hub bug | When your spec change caused it, an issue `Generator gap on camunda-hub#N` is opened, and assigned to you if GitHub allows it (see the note under "Who gets told what"). Ask in `#camunda-hub-pr-e2e-results` for help |
 | "Likely a real regression from this PR" | Probably yours | Read the change the alert points to. The tests are right and Hub now answers differently |
 | "Could not confirm" | Unknown | Open the failing test in the run's report (steps below) |
+| Every test of **one new endpoint** fails with 404, and you added it behind a feature flag | Nobody's bug: the test Hub does not switch your flag on | Add the flag to `docker/docker-compose.hub.yml` **in the api-test-generator repo** (a PR there, then re-run the check), or suppress the endpoint with a reason and an issue. Details under "Common failure patterns" |
 
 Still stuck? Post the run link in `#camunda-hub-pr-e2e-results`. Every alert carries the links you need.
 
@@ -46,7 +47,7 @@ Still stuck? Post the run link in `#camunda-hub-pr-e2e-results`. Every alert car
 | [hub-pr-live-check](https://github.com/camunda/api-test-generator/actions/workflows/hub-pr-live-check.yml) | The live-Hub run on pull requests to *this* repo (changes to the generator itself). Not on camunda-hub PRs |
 | [hub-ondemand-test](https://github.com/camunda/api-test-generator/actions/workflows/hub-ondemand-test.yml) | Run the generated suite by hand for any branch of this repo (Run workflow) |
 
-**Words used in this page**
+**Words used in this page and in the nightly cookbook**
 
 - **Generated suite:** the tests, written by the generator from the spec. Nobody edits them by hand.
 - **Generator gap:** the generator has no test, or a wrong test, for an endpoint. Not a Hub bug.
@@ -61,12 +62,7 @@ Still stuck? Post the run link in `#camunda-hub-pr-e2e-results`. Every alert car
 
 ## Who owns what
 
-- **Generator owner:** the Hub team once the handover is done (until then, the test automation team). The generator owner
-  acts on the spec-bump, re-enable and weekly-report posts, and on the weekly coverage issues.
-- **Medic:** `hub-medic`. After the handover it also covers the generator and the pipeline. Until the workflows are
-  changed, alerts about the generator still ping `test-automation-medic`.
-- **The PR check is informational, not required:** a red check does not block merging.
-- **A normal night** has 0 failed tests. Known Hub bugs are skipped, not run, so they do not count as failures. Any number above 0 is news.
+See "Who owns what" in [hub-nightly-cookbook.md](hub-nightly-cookbook.md). In short: the Hub team owns the generator after the handover, `hub-medic` is the medic, and this check is **informational, not required**.
 
 ---
 

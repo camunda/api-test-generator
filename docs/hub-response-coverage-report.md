@@ -59,9 +59,12 @@ Across positive and negative tests
   `EdgeLifecycle/<Edge>.lifecycle.spec.ts` was generated. A new link is listed by its add operation until the edge is added.
 - "Endpoints with no test at all" are listed with the issue that explains each one, taken from the `knownIssue` URL on the endpoint's
   entry in `positive-suppress.json` or `request-validation.json`. An endpoint with no such entry is listed bare, which means nobody has explained it yet.
+- **What counts as covered.** A test that exists in the generated files and asserts that response. A test skipped because of a known
+  Hub bug is **not** counted as tested: it stays in the "of" number and shows as held in the full table. The one exception is
+  the "Every kind of bad request" line, which leaves such endpoints out of both numbers.
 - 500 responses are not counted. 403 is counted but not part of the "missing a test" roll-up (it is tracked separately).
 - "Every kind of bad request" counts kinds with at least one test (missing required field, wrong type, bad enum, and so on), not how many tests each kind has.
-  It is only as complete as the generator's own rules for when a kind applies, so for body-schema kinds treat it as an upper bound.
+  It is only as complete as the generator's own rules for when a kind applies, so for body-schema kinds treat it as an upper bound: the headline can overstate real coverage.
 
 ## How it runs
 

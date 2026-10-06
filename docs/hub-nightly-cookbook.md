@@ -147,7 +147,7 @@ Skipped tests point to a Hub bug. This job watches those bugs. When one closes, 
 | ⚠️ … no generator token was available | The job could not open a PR this time | Nothing, it retries next run |
 | ⚠️ … opening the unskip PR failed | The PR could not be created | Open the workflow run |
 | 📋 … is closed as **fixed**, no specific operation(s) to auto-unskip | A suite-wide skip whose Hub bug is fixed. Nothing can be done automatically | Remove its entry from `knownIssues` in `configs/camunda-hub/request-validation.json` (and any generator skip it describes), then regenerate and run the suite |
-| 📋 … is closed as **not planned** | Hub will not fix it, so the skip must stay | Set `"acknowledgedNotPlanned": true` on its `knownIssues` entry. The alert then stops. Until you do, it repeats every day |
+| 📋 … is closed as **not planned** | Hub will not fix it, so the skip must stay | Set `"acknowledgedNotPlanned": true` on its `knownIssues` entry in `configs/camunda-hub/request-validation.json`. The alert then stops. Until you do, it repeats every day |
 
 **Not watched:** the "partly checked" items in the negative thread (`knownProblemDetailShapeGaps` in
 `request-validation.json`) are not covered by this check, so nothing tells you when their Hub issue closes. Look at the
@@ -163,21 +163,38 @@ Counts how many endpoints have a test for every response the spec lists, split i
 with the change since last week in brackets. Gaps become issues. Read
 [hub-response-coverage-report.md](hub-response-coverage-report.md).
 
+**Is a gap bad?** It is a to-do, not an incident. Nothing is broken. A line such as "Lifecycle tests (create, read, delete): 4 of 6
+resources. Missing: ProjectSnapshot, Version" means those two resources have no single test that creates, reads and deletes
+one, while their individual endpoint tests still exist. Today those two are simply not added yet; no Hub bug excludes
+them. The generator owner fixes it by adding the resource to `configs/camunda-hub/ontology/entity-kinds.json`. Lifecycle gaps open no
+issue, so only the weekly report shows them.
+
+## What the workflows depend on
+
+If one of these breaks, the matching alerts stop or fail. The owner and the rotation of each are to be named in the handover.
+
+| Dependency | Used for | Where it is configured |
+|---|---|---|
+| GitHub App `camunda/qa-processes` | Cloning the private camunda-hub repo, opening and editing issues and comments | Vault, `secret/data/products/qa/ci/github.com/apps/camunda/qa-processes` |
+| Vault login (JWT role and an approle) | Every workflow reads its secrets from Vault | Repo secrets `VAULT_ADDR`, `VAULT_JWT_PATH`, `VAULT_JWT_ROLE`, `VAULT_JWT_AUDIENCE`, `VAULT_ROLE_ID`, `VAULT_SECRET_ID` |
+| Slack bot token | Every post in the Slack channels | Vault, read by `.github/actions/slack-token` |
+| TestRail credentials | Publishing the nightly results | Vault, `secret/data/products/qa/ci/common` |
+| `ANTHROPIC_API_KEY` | The classifier on PRs and the nightly triage | Repo secret |
+| Container registry login | Pulling the PR's Hub image | Repo secrets `CAMUNDA_CONTAINER_REGISTRY_USER` and `_PASSWORD` |
+
 ## Who to ask
 
 - Anything in this channel you cannot place: write in the channel.
-- The generator itself (new endpoint, wrong test, skip): `test-automation-medic`.
+- The generator itself (new endpoint, wrong test, skip): `test-automation-medic` today, `hub-medic` after the handover.
 - A Hub behaviour question: `hub-medic`.
 
 ## Words used
 
+More terms (medic, ontology, live check, invariant tests, fingerprint) are in the glossary of [hub-pr-check-cookbook.md](hub-pr-check-cookbook.md).
+
 - **Pin:** the camunda-hub commit the invariant tests are checked against.
 - **Skip:** a test left out on purpose because of a tracked Hub limitation, with an issue link. It can stay after the issue closes, when Hub will not fix it.
 - **Suite-wide skip:** a skip that is not tied to one endpoint.
-- **Medic:** a Slack group on call for a test area (`hub-medic`).
-- **Invariant tests:** tests in the generator repo that check the generated output against one pinned camunda-hub spec.
-- **Live check:** the `hub-pr-live-check` workflow, which runs the generated suite against a live Hub for pull requests to the generator repo itself.
-- **Ontology:** the config files in `configs/camunda-hub/ontology/` that tell the generator how each resource is created, read, deleted and linked.
 - **TestRail:** the test-management tool the nightly results are also published to.
 - **Vault:** the secrets store the workflows read their tokens from.
 - **Unmapped operation / coverage gap:** an endpoint with no generated test at all.
