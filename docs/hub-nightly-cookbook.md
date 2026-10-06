@@ -12,7 +12,7 @@
 - **Medic:** `hub-medic`. After the handover it also covers the generator and the pipeline. Until the workflows are
   changed, alerts about the generator still ping `test-automation-medic`.
 - **The PR check is informational, not required:** a red check does not block merging.
-- **A normal night** has 0 failed tests. Known Hub bugs are skipped, not run, so they do not count as failures. Any number above 0 is news. For scale, on 3 to 6 October the positive suite passed 99 to 146 tests and the negative suite 661, with 0 failures.
+- **A normal night** has 0 failed tests. Known Hub bugs are either skipped (the test is left out) or only partly checked (the test runs without one assertion), so they do not count as failures. Any number above 0 is news. For scale, on 3 to 6 October the positive suite passed 99 to 146 tests and the negative suite 661, with 0 failures.
 
 ## Start here
 
@@ -59,7 +59,8 @@ While Slack is down you can still read the night's result: open the nightly run,
 |---|---|---|
 | ❌ failed above 0, triage says **product** | Probably Hub's | Open the issue linked in the thread. If there is none, filing failed or the finding is marked *report only*: read the finding in the triage run. `hub-medic` is pinged only when a new Hub issue was filed |
 | Triage says **test-generation** | The generator's, not a Hub bug | Nothing, unless asked. When a fix PR or suppress PR was opened it is linked in the thread and `test-automation-medic` is pinged. When none was (the fix was not safe, or opening it failed) the finding is *report only*: read it in the triage run |
-| Triage says **infrastructure** or **flakiness** | Neither | Nothing at first. If the same failure shows up several nights in a row, raise it in the channel |
+| Triage says **infrastructure** | Neither: the run itself had a problem | Nothing at first. If the same failure shows up several nights in a row, raise it in the channel |
+| Triage says **flakiness** | A real defect that comes and goes: a test defect (race, bad wait) or a Hub defect (race, missed signal) | Do not wait. Look at it the same day: read the finding in the triage thread, then hand it to the generator owner if the test is at fault or to `hub-medic` if Hub is |
 | Triage says **known issue** | Already tracked | Nothing. The linked Hub issue is the work item |
 | A spec-bump or re-enable post | The generator owner's | See the sections below |
 
