@@ -2,12 +2,28 @@ export interface CsharpDiscriminatorSubtype {
   value: string;
   properties: string[];
   required: string[];
+  // The subtype's own resolved `$ref` (when it has one). Selecting this
+  // subtype at render time pushes `ref` onto the active "owner chain" (see
+  // `CsharpDiscriminator.ownerRef` below), so a nested discriminator one
+  // level down whose `ownerRef` is THIS ref is recognised as belonging to
+  // the branch that was actually selected.
+  ref?: string;
 }
 
 export interface CsharpDiscriminator {
   path: string;
   propertyName: string;
   subtypes: CsharpDiscriminatorSubtype[];
+  // The ref of the nearest enclosing subtype whose OWN properties this
+  // entry was discovered inside, if any. `undefined` means the entry is
+  // unconditionally applicable (e.g. the top-level entry, or one reached
+  // without ever descending into a oneOf/anyOf/mapping branch's own
+  // property tree). Two sibling branches (e.g. `Success` and `Failure`)
+  // can each define their OWN polymorphic property at the SAME path (e.g.
+  // `payload`) with different, unrelated subtype sets; without this tag,
+  // `chooseCsharpDiscriminator` could apply one branch's mapping while
+  // actually rendering the other (PR #668 review, round 5).
+  ownerRef?: string;
 }
 
 export type CsharpDiscriminatorTable = Readonly<Record<string, CsharpDiscriminator[]>>;
@@ -190,6 +206,7 @@ function collectUnmappedSubtypes(
       value: name.split('/').at(-1) ?? name,
       properties: [...collectProperties(subtype, stores)],
       required: [...collectRequired(subtype, stores)],
+      ref: name,
     });
   }
   return subtypes;
@@ -222,6 +239,7 @@ function collectSubtypes(
         value,
         properties: [...collectProperties(normalizedRef, stores)],
         required: [...collectRequired(normalizedRef, stores)],
+        ref: typeof normalizedRef === 'string' ? normalizedRef : undefined,
       });
     }
   }
@@ -247,6 +265,14 @@ function walkSchema(
   output: CsharpDiscriminator[],
   visited: Set<string>,
   activeRefs: Set<string>,
+  // The ref of the nearest enclosing `oneOf`/`anyOf`/`mapping` ALTERNATIVE
+  // we have committed to on the current descent (see
+  // `CsharpDiscriminator.ownerRef`). Unchanged across plain structural
+  // descent (`properties`, `items`, `allOf` merge) — those aren't a choice
+  // between alternatives, so nothing new is "selected". Refined to a
+  // branch's own `$ref` only at the exact point we recurse into THAT
+  // branch from a `oneOf`/`anyOf`/`mapping` loop below.
+  ownerRef: string | undefined = undefined,
 ): void {
   const resolved = resolveSchema(schema, stores);
   if (!resolved) return;
@@ -287,23 +313,74 @@ function walkSchema(
       path,
       propertyName,
       subtypes: collectSubtypes(resolved, stores),
+      ownerRef,
     });
   }
+
+  // Once we descend into THIS schema's own `properties`/`items`, that is a
+  // plain structural descent — NOT a branch choice — so discriminators
+  // found there inherit the SAME owner as this schema itself (whatever
+  // `ownerRef` this call was given). Ownership only changes at the single
+  // point where we commit to ONE of several alternatives: see the
+  // `oneOf`/`anyOf`/`mapping` loop below, which computes a NEW owner (that
+  // branch's own ref) for its own recursive call rather than here. Tagging
+  // every ref-resolved schema's descendants with ITS OWN ref — regardless
+  // of whether reaching it required choosing among alternatives — wrongly
+  // gates even unconditional nested discriminators (e.g. a top-level
+  // request-body schema's own nested property) behind an owner ref that
+  // never gets added to any render-time owner chain, since nothing ever
+  // "selects" it.
 
   if (ref !== undefined) activeRefs.add(ref);
   try {
     if (isRecord(resolved.properties)) {
       for (const [name, property] of Object.entries(resolved.properties)) {
-        walkSchema(property, path ? `${path}.${name}` : name, stores, output, visited, activeRefs);
+        walkSchema(
+          property,
+          path ? `${path}.${name}` : name,
+          stores,
+          output,
+          visited,
+          activeRefs,
+          ownerRef,
+        );
       }
     }
     if (isRecord(resolved.items)) {
-      walkSchema(resolved.items, `${path}[]`, stores, output, visited, activeRefs);
+      walkSchema(resolved.items, `${path}[]`, stores, output, visited, activeRefs, ownerRef);
     }
-    for (const key of ['allOf', 'oneOf', 'anyOf']) {
+    // `allOf` branches merge into THIS schema (not an alternative), so they
+    // inherit the incoming owner unchanged. `oneOf`/`anyOf` branches ARE
+    // alternatives — but picking one is only a TRACKED discriminator
+    // decision when THIS schema itself declares `discriminator.propertyName`
+    // (`propertyName !== undefined`, i.e. we just pushed/would-have-pushed a
+    // table entry for it above). A `oneOf` with no `discriminator` keyword
+    // at all (structural-only union, resolved by required-field shape, not
+    // a discriminator property) has NO table entry and thus no mechanism
+    // that could ever add a branch's ref to the render-time owner chain —
+    // gating its descendants on such a branch would permanently orphan
+    // them, since nothing ever "selects" it. So: only compute a NEW owner
+    // (that branch's own ref) when this schema DOES declare a
+    // discriminator; otherwise the branch inherits the incoming owner
+    // unchanged, same as `allOf`. The branch's own ref is taken from the
+    // SAME raw `$ref` string `collectSubtypes`/`collectUnmappedSubtypes`
+    // attach to that subtype's `ref` field, so the two line up at render
+    // time. An inline branch (no `$ref`) has no identity to gate on, so it
+    // falls back to the incoming owner either way.
+    const allOfParts = resolved.allOf;
+    if (Array.isArray(allOfParts)) {
+      for (const part of allOfParts) {
+        walkSchema(part, path, stores, output, visited, activeRefs, ownerRef);
+      }
+    }
+    for (const key of ['oneOf', 'anyOf']) {
       const parts = resolved[key];
       if (Array.isArray(parts)) {
-        for (const part of parts) walkSchema(part, path, stores, output, visited, activeRefs);
+        for (const part of parts) {
+          const branchRef = isRecord(part) && typeof part.$ref === 'string' ? part.$ref : undefined;
+          const branchOwner = propertyName !== undefined ? (branchRef ?? ownerRef) : ownerRef;
+          walkSchema(part, path, stores, output, visited, activeRefs, branchOwner);
+        }
       }
     }
     // A `discriminator.mapping` target does not have to also appear as a
@@ -320,17 +397,24 @@ function walkSchema(
     // as `oneOf`/`anyOf` branches: `visited` (keyed on `ref:path`) already
     // dedupes a target also reached via `oneOf`/`anyOf`, and `activeRefs`
     // already guards the cycle case, so this reuses the same machinery.
-    const mapping = discriminator && isRecord(discriminator.mapping) ? discriminator.mapping : undefined;
+    // The mapping target IS a committed alternative exactly like a
+    // `oneOf`/`anyOf` branch, so its own normalized ref becomes the owner
+    // for anything nested inside it, matching `collectSubtypes`'s mapping
+    // subtype `ref`.
+    const mapping =
+      discriminator && isRecord(discriminator.mapping) ? discriminator.mapping : undefined;
     if (mapping) {
       for (const target of Object.values(mapping)) {
         if (typeof target !== 'string') continue;
+        const normalizedRef = normalizeMappingRef(target);
         walkSchema(
-          { $ref: normalizeMappingRef(target) },
+          { $ref: normalizedRef },
           path,
           stores,
           output,
           visited,
           activeRefs,
+          normalizedRef,
         );
       }
     }
@@ -349,9 +433,7 @@ export function buildCsharpDiscriminatorTable(bundle: unknown): CsharpDiscrimina
   }
   const stores: ComponentStores = {
     schemas: bundle.components.schemas,
-    requestBodies: isRecord(bundle.components.requestBodies)
-      ? bundle.components.requestBodies
-      : {},
+    requestBodies: isRecord(bundle.components.requestBodies) ? bundle.components.requestBodies : {},
   };
   if (!isRecord(bundle.paths)) return {};
 
@@ -377,7 +459,15 @@ export function chooseCsharpDiscriminator(
   value: Record<string, unknown>,
   entries: readonly CsharpDiscriminator[],
   path: string,
-): { name: string; value: string } | undefined {
+  // Refs of subtypes already selected at ANCESTOR levels during this
+  // render (see `renderCsharpValue`). An entry whose `ownerRef` is set
+  // requires that ref to be in this chain — otherwise it belongs to a
+  // sibling branch that was NOT the one actually selected, and must not be
+  // used to tag-select a value rendered under a different branch (PR #668
+  // review, round 5: a nested polymorphic property redeclared differently,
+  // or not at all, by a sibling union member).
+  ownerChain: ReadonlySet<string> = new Set(),
+): { name: string; value: string; ref?: string } | undefined {
   // `buildCsharpDiscriminatorTable` can legitimately produce MULTIPLE entries
   // sharing the same `path` — distinct inline `oneOf`/`anyOf` sibling
   // branches each carry their own discriminator (see
@@ -389,7 +479,11 @@ export function chooseCsharpDiscriminator(
   // fix solved at discovery time, reappearing here at selection time. Score
   // every subtype across EVERY matching entry and pick the best overall
   // match instead of the first entry's best match.
-  const matching = entries.filter((candidate) => candidate.path === path);
+  const matching = entries.filter(
+    (candidate) =>
+      candidate.path === path &&
+      (candidate.ownerRef === undefined || ownerChain.has(candidate.ownerRef)),
+  );
   const candidates = matching.flatMap((entry) => {
     if (Object.hasOwn(value, entry.propertyName)) return [];
     return entry.subtypes
@@ -405,5 +499,36 @@ export function chooseCsharpDiscriminator(
   });
   candidates.sort((left, right) => right.subtype.required.length - left.subtype.required.length);
   const selected = candidates[0];
-  return selected ? { name: selected.name, value: selected.value } : undefined;
+  return selected
+    ? { name: selected.name, value: selected.value, ref: selected.subtype.ref }
+    : undefined;
+}
+
+// `chooseCsharpDiscriminator` deliberately excludes an entry whose
+// `propertyName` the value ALREADY carries explicitly (it has nothing to
+// inject there). But a value that sets its discriminator field directly
+// (rather than relying on shape inference) still SELECTS a branch, and a
+// NESTED discriminator scoped to that branch (via `ownerRef`) must still be
+// recognised when rendering the value's own properties — otherwise an
+// explicit top-level selection would silently block every nested
+// discriminator beneath it (PR #668 review, round 5). This returns the
+// selected subtype's `ref` for that case, without affecting injection.
+export function findExplicitCsharpDiscriminatorRef(
+  value: Record<string, unknown>,
+  entries: readonly CsharpDiscriminator[],
+  path: string,
+  ownerChain: ReadonlySet<string> = new Set(),
+): string | undefined {
+  const matching = entries.filter(
+    (candidate) =>
+      candidate.path === path &&
+      (candidate.ownerRef === undefined || ownerChain.has(candidate.ownerRef)),
+  );
+  for (const entry of matching) {
+    const explicitValue = value[entry.propertyName];
+    if (typeof explicitValue !== 'string') continue;
+    const subtype = entry.subtypes.find((candidate) => candidate.value === explicitValue);
+    if (subtype?.ref !== undefined) return subtype.ref;
+  }
+  return undefined;
 }

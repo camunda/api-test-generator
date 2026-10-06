@@ -3,6 +3,7 @@ import {
   buildCsharpDiscriminatorTable,
   type CsharpDiscriminator,
   chooseCsharpDiscriminator,
+  findExplicitCsharpDiscriminatorRef,
 } from '../../materializer/src/csharp-sdk/discriminators.js';
 
 /**
@@ -385,10 +386,7 @@ describe('buildCsharpDiscriminatorTable — partial discriminator mappings', () 
               // `oneOf` below but has no mapping entry of its own.
               mapping: { byId: '#/components/schemas/ById' },
             },
-            oneOf: [
-              { $ref: '#/components/schemas/ById' },
-              { $ref: '#/components/schemas/ByKey' },
-            ],
+            oneOf: [{ $ref: '#/components/schemas/ById' }, { $ref: '#/components/schemas/ByKey' }],
           },
           ById: { type: 'object', properties: { id: { type: 'string' } } },
           ByKey: { type: 'object', properties: { key: { type: 'string' } } },
@@ -397,9 +395,7 @@ describe('buildCsharpDiscriminatorTable — partial discriminator mappings', () 
     };
 
     const table = buildCsharpDiscriminatorTable(bundle);
-    const subtypeValues = (table.activateJob ?? []).flatMap((d) =>
-      d.subtypes.map((s) => s.value),
-    );
+    const subtypeValues = (table.activateJob ?? []).flatMap((d) => d.subtypes.map((s) => s.value));
     expect(subtypeValues).toContain('byId');
     expect(subtypeValues).toContain('ByKey');
     const byKey = (table.activateJob ?? [])
@@ -438,9 +434,7 @@ describe('buildCsharpDiscriminatorTable — partial discriminator mappings', () 
     };
 
     const table = buildCsharpDiscriminatorTable(bundle);
-    const subtypeValues = (table.activateJob ?? []).flatMap((d) =>
-      d.subtypes.map((s) => s.value),
-    );
+    const subtypeValues = (table.activateJob ?? []).flatMap((d) => d.subtypes.map((s) => s.value));
     expect(subtypeValues).toEqual(['byId']);
   });
 
@@ -476,10 +470,7 @@ describe('buildCsharpDiscriminatorTable — partial discriminator mappings', () 
               // Bare schema name, not a `$ref` string — valid per spec.
               mapping: { byId: 'ById' },
             },
-            oneOf: [
-              { $ref: '#/components/schemas/ById' },
-              { $ref: '#/components/schemas/ByKey' },
-            ],
+            oneOf: [{ $ref: '#/components/schemas/ById' }, { $ref: '#/components/schemas/ByKey' }],
           },
           ById: { type: 'object', properties: { id: { type: 'string' } } },
           ByKey: { type: 'object', properties: { key: { type: 'string' } } },
@@ -576,9 +567,7 @@ describe('buildCsharpDiscriminatorTable — implicit anyOf subtype mapping', () 
     };
 
     const table = buildCsharpDiscriminatorTable(bundle);
-    const subtypeValues = (table.createWidget ?? []).flatMap((d) =>
-      d.subtypes.map((s) => s.value),
-    );
+    const subtypeValues = (table.createWidget ?? []).flatMap((d) => d.subtypes.map((s) => s.value));
     expect(subtypeValues.sort()).toEqual(['BlueWidget', 'RedWidget']);
   });
 });
@@ -842,5 +831,166 @@ describe('chooseCsharpDiscriminator — multiple entries sharing one path', () =
       name: 'byIdExact',
       value: 'IdExactRef',
     });
+  });
+});
+
+/**
+ * Regression coverage for PR #668 review finding (round 5): walking every
+ * union branch's OWN property tree at the same `path` loses which parent
+ * branch a nested discriminator belongs to. Two sibling branches (`Success`
+ * and `Failure`) can each define their OWN polymorphic `payload` property —
+ * or one can leave it non-polymorphic / absent entirely — and without an
+ * owner tag, `chooseCsharpDiscriminator` applied whichever entry it found at
+ * that path regardless of which branch was actually selected.
+ */
+describe('buildCsharpDiscriminatorTable — ownerRef tags a nested discriminator to its branch', () => {
+  const bundle = {
+    paths: {
+      '/results': {
+        post: {
+          operationId: 'createResult',
+          requestBody: {
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/Result' } },
+            },
+          },
+        },
+      },
+    },
+    components: {
+      schemas: {
+        Result: {
+          type: 'object',
+          discriminator: { propertyName: 'status' },
+          oneOf: [
+            { $ref: '#/components/schemas/Success' },
+            { $ref: '#/components/schemas/Failure' },
+          ],
+        },
+        // Only `Success` defines a polymorphic `payload`; `Failure`'s
+        // `payload` (if any) is a plain, non-discriminated object.
+        Success: {
+          type: 'object',
+          properties: {
+            payload: { $ref: '#/components/schemas/Payload' },
+          },
+        },
+        Failure: {
+          type: 'object',
+          properties: {
+            payload: { type: 'object', properties: { text: { type: 'string' } } },
+          },
+        },
+        Payload: {
+          type: 'object',
+          discriminator: { propertyName: 'kind' },
+          oneOf: [{ $ref: '#/components/schemas/TextPayload' }],
+        },
+        TextPayload: { type: 'object', properties: { text: { type: 'string' } } },
+      },
+    },
+  };
+
+  test('tags the nested payload entry with the owning Success ref, not unconditional', () => {
+    const table = buildCsharpDiscriminatorTable(bundle);
+    const payloadEntry = (table.createResult ?? []).find((d) => d.path === 'payload');
+    expect(payloadEntry?.ownerRef).toBe('#/components/schemas/Success');
+  });
+
+  test('tags the top-level Success/Failure entry with no owner (unconditional)', () => {
+    const table = buildCsharpDiscriminatorTable(bundle);
+    const topEntry = (table.createResult ?? []).find((d) => d.path === '');
+    expect(topEntry?.ownerRef).toBeUndefined();
+    expect(topEntry?.subtypes.map((s) => s.ref)).toEqual([
+      '#/components/schemas/Success',
+      '#/components/schemas/Failure',
+    ]);
+  });
+});
+
+/**
+ * Regression coverage for `chooseCsharpDiscriminator`'s new `ownerChain`
+ * parameter and `findExplicitCsharpDiscriminatorRef` (PR #668 review, round
+ * 5): a same-path entry scoped to a specific branch (`ownerRef`) must be
+ * excluded from selection unless that branch's ref is in the active owner
+ * chain, and an EXPLICIT discriminator field in the data must still surface
+ * its branch's ref so a nested discriminator further down recognises it.
+ */
+describe('chooseCsharpDiscriminator / findExplicitCsharpDiscriminatorRef — owner chain scoping', () => {
+  const successPayload: CsharpDiscriminator = {
+    path: 'payload',
+    propertyName: 'kind',
+    ownerRef: '#/components/schemas/Success',
+    subtypes: [{ value: 'Text', properties: ['text'], required: ['text'] }],
+  };
+  const topLevel: CsharpDiscriminator = {
+    path: '',
+    propertyName: 'status',
+    subtypes: [
+      {
+        value: 'Success',
+        properties: ['payload'],
+        required: [],
+        ref: '#/components/schemas/Success',
+      },
+      {
+        value: 'Failure',
+        properties: ['payload'],
+        required: [],
+        ref: '#/components/schemas/Failure',
+      },
+    ],
+  };
+
+  test('excludes an owner-scoped entry when the owner is not in the chain', () => {
+    expect(
+      chooseCsharpDiscriminator({ text: 'hi' }, [successPayload], 'payload', new Set()),
+    ).toBeUndefined();
+    expect(
+      chooseCsharpDiscriminator(
+        { text: 'hi' },
+        [successPayload],
+        'payload',
+        new Set(['#/components/schemas/Failure']),
+      ),
+    ).toBeUndefined();
+  });
+
+  test('includes an owner-scoped entry once its owner ref is in the chain, and surfaces the selected ref', () => {
+    expect(
+      chooseCsharpDiscriminator(
+        { text: 'hi' },
+        [successPayload],
+        'payload',
+        new Set(['#/components/schemas/Success']),
+      ),
+    ).toEqual({ name: 'kind', value: 'Text', ref: undefined });
+  });
+
+  test('an unconditional entry (no ownerRef) applies regardless of the chain', () => {
+    expect(chooseCsharpDiscriminator({}, [topLevel], '', new Set())).toEqual({
+      name: 'status',
+      value: 'Success',
+      ref: '#/components/schemas/Success',
+    });
+  });
+
+  test('findExplicitCsharpDiscriminatorRef resolves the ref of an already-explicit field', () => {
+    expect(
+      findExplicitCsharpDiscriminatorRef({ status: 'Failure' }, [topLevel], '', new Set()),
+    ).toBe('#/components/schemas/Failure');
+  });
+
+  test('findExplicitCsharpDiscriminatorRef respects owner-chain scoping too', () => {
+    const scopedTop: CsharpDiscriminator = { ...topLevel, ownerRef: '#/components/schemas/Other' };
+    expect(
+      findExplicitCsharpDiscriminatorRef({ status: 'Failure' }, [scopedTop], '', new Set()),
+    ).toBeUndefined();
+  });
+
+  test('findExplicitCsharpDiscriminatorRef returns undefined for an unrecognised explicit value', () => {
+    expect(
+      findExplicitCsharpDiscriminatorRef({ status: 'Unknown' }, [topLevel], '', new Set()),
+    ).toBeUndefined();
   });
 });
