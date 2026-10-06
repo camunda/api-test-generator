@@ -37,6 +37,14 @@ does not yet understand a new endpoint, or that the test run itself had a proble
 
 Still stuck? Post the run link in `#camunda-hub-pr-e2e-results`. Every alert carries the links you need.
 
+**Where to look (GitHub Actions pages, in `camunda/api-test-generator`)**
+
+| Page | Shows |
+|---|---|
+| [hub-pr-check](https://github.com/camunda/api-test-generator/actions/workflows/hub-pr-check.yml) | The check that runs on every camunda-hub PR: every run, its result, and the reports. Start here for a red check |
+| [hub-pr-live-check](https://github.com/camunda/api-test-generator/actions/workflows/hub-pr-live-check.yml) | The live-Hub run on pull requests to *this* repo (changes to the generator itself). Not on camunda-hub PRs |
+| [hub-ondemand-test](https://github.com/camunda/api-test-generator/actions/workflows/hub-ondemand-test.yml) | Run the generated suite by hand for any branch of this repo (Run workflow) |
+
 **Words used in this page**
 
 - **Generated suite:** the tests, written by the generator from the spec. Nobody edits them by hand.

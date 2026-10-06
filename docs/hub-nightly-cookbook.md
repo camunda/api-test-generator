@@ -26,6 +26,17 @@ The spec-bump and re-enable posts are silent when there is nothing to report.
 Slack token makes every workflow finish green without posting. Open the Actions tab of `camunda/api-test-generator`
 and look at `nightly-camunda-hub`.
 
+**Where to look (GitHub Actions pages, in `camunda/api-test-generator`)**
+
+| Page | Shows |
+|---|---|
+| [nightly-camunda-hub](https://github.com/camunda/api-test-generator/actions/workflows/nightly-camunda-hub.yml) | The 02:00 run behind the nightly posts |
+| [triage-camunda-hub-nightly](https://github.com/camunda/api-test-generator/actions/workflows/triage-camunda-hub-nightly.yml) | The triage behind the digest |
+| [spec-bump-check](https://github.com/camunda/api-test-generator/actions/workflows/spec-bump-check.yml) | The 03:00 spec check |
+| [hub-known-issue-reenable-check](https://github.com/camunda/api-test-generator/actions/workflows/hub-known-issue-reenable-check.yml) | The 04:00 re-enable check |
+| [hub-response-coverage](https://github.com/camunda/api-test-generator/actions/workflows/hub-response-coverage.yml) | The weekly coverage report (Run workflow starts a dry run) |
+| [hub-ondemand-test](https://github.com/camunda/api-test-generator/actions/workflows/hub-ondemand-test.yml) | Run the generated suite by hand for any branch |
+
 **Is it my problem?**
 
 | The message shows | Whose problem | Do this |
