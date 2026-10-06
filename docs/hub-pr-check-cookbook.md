@@ -1,8 +1,8 @@
 # Hub PR Check Cookbook
 
 > **Goal:** if the `api-test-generator/hub-suite` check on your camunda-hub PR is red, or a Slack alert names
-> your PR, you can tell in a few minutes whether it is your problem and what to do. "Start here" needs no
-> knowledge of the generator. The sections after it are reference for people who maintain the check. The check is
+> your PR, you can tell in a few minutes whether it is your problem and what to do. "Start here" assumes
+> you know Hub, not how the generator works; its few terms (generator gap, classifier, fingerprint) are explained in "Words used". The sections after it are reference for people who maintain the check. The check is
 > **informational, not required**: a red result does not block merging.
 
 Messages in `#camunda-hub-nightly-test-results` (nightly run, triage, spec bump, re-enable check, weekly report) are explained in

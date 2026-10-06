@@ -1,7 +1,7 @@
 # Hub Nightly Channel Cookbook
 
 > **Goal:** read any message in `#camunda-hub-nightly-test-results` and know what it means, whether it is
-> yours to act on, and what to do. The "Start here" part needs no knowledge of the generator.
+> yours to act on, and what to do. You need to know Hub, not how the generator works; the few terms it uses (pin, skip, triage, medic) are explained in "Words used" at the end.
 > Messages about a single camunda-hub PR are in `#camunda-hub-pr-e2e-results` instead; see
 > [hub-pr-check-cookbook.md](hub-pr-check-cookbook.md).
 
