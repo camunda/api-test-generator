@@ -505,7 +505,7 @@ export function loadRequestValidationConfig(
   }
   if ('nonScalarKeyOperations' in parsed) {
     const v = parsed.nonScalarKeyOperations;
-    if (!Array.isArray(v) || !v.every((x) => typeof x === 'string' && x.length > 0)) {
+    if (!Array.isArray(v) || !v.every((x) => typeof x === 'string' && x.trim().length > 0)) {
       throw new Error(
         `Invalid ${configPath}: "nonScalarKeyOperations" must be an array of non-empty strings.`,
       );
