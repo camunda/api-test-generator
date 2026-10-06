@@ -1711,6 +1711,16 @@ describe('C# SDK Emitter — chained same-object discriminators (PR #668 review,
   // a nested property) -- and `Text`'s own `tag` discriminator chains a
   // THIRD level deep, same object again, to prove the resolver isn't
   // hardcoded to exactly two levels.
+  //
+  // NOTE: these `properties` lists are NOT hand-flattened to include a
+  // nested subtype's own fields (e.g. `Success` does not list `text`,
+  // which belongs only to `Text`) -- `collectProperties`/`collectSubtypes`
+  // never produce that shape (they merge a WRAPPER's own sibling
+  // properties into its direct subtypes, never a nested `oneOf` branch's
+  // fields). `chooseCsharpDiscriminator` sees past this transitively via
+  // `collectChainedSubtypeProperties` (PR #668 review, round 8 /
+  // adversarial finding, process round 5) -- a hand-flattened fixture here
+  // would mask exactly the bug that finding caught.
   const DISCRIMINATORS: CsharpDiscriminatorTable = {
     createProcessInstance: [
       {
@@ -1719,7 +1729,7 @@ describe('C# SDK Emitter — chained same-object discriminators (PR #668 review,
         subtypes: [
           {
             value: 'Success',
-            properties: ['family', 'kind', 'text'],
+            properties: ['family', 'kind'],
             required: [],
             ref: SUCCESS_REF,
           },
@@ -1730,15 +1740,11 @@ describe('C# SDK Emitter — chained same-object discriminators (PR #668 review,
         path: 'result',
         propertyName: 'kind',
         ownerRef: SUCCESS_REF,
-        // Real subtype property lists are built from the WHOLE transitive
-        // `allOf` chain (`collectProperties`), so `Text`'s own list also
-        // carries its ancestor `Success`'s fields -- not just the fields
-        // `Text` itself adds.
         subtypes: [
           {
             value: 'Text',
-            properties: ['family', 'kind', 'text'],
-            required: ['text'],
+            properties: ['kind', 'tag'],
+            required: [],
             ref: TEXT_REF,
           },
         ],
@@ -1747,9 +1753,7 @@ describe('C# SDK Emitter — chained same-object discriminators (PR #668 review,
         path: 'result',
         propertyName: 'tag',
         ownerRef: TEXT_REF,
-        subtypes: [
-          { value: 'Plain', properties: ['family', 'kind', 'tag', 'text'], required: ['text'] },
-        ],
+        subtypes: [{ value: 'Plain', properties: ['tag', 'text'], required: ['text'] }],
       },
     ],
   };
@@ -1819,7 +1823,7 @@ describe('C# SDK Emitter — chained same-object discriminators (PR #668 review,
           subtypes: [
             {
               value: 'Success',
-              properties: ['family', 'kind', 'text'],
+              properties: ['family', 'kind'],
               required: [],
               ref: SUCCESS_REF,
             },
@@ -1829,7 +1833,7 @@ describe('C# SDK Emitter — chained same-object discriminators (PR #668 review,
           path: '',
           propertyName: 'kind',
           ownerRef: SUCCESS_REF,
-          subtypes: [{ value: 'Text', properties: ['family', 'kind', 'text'], required: ['text'] }],
+          subtypes: [{ value: 'Text', properties: ['kind', 'text'], required: ['text'] }],
         },
       ],
     };

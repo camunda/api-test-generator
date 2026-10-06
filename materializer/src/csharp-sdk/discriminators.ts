@@ -490,6 +490,59 @@ export function buildCsharpDiscriminatorTable(bundle: unknown): CsharpDiscrimina
   return table;
 }
 
+// A subtype's OWN `properties` (its directly-declared fields, plus the
+// wrapper's common fields merged in by `collectSubtypes`) never include the
+// fields of a FURTHER discriminator nested one level down on the SAME
+// object (e.g. `Success` itself only declares `kind`, never `Text`'s own
+// `text` — that field belongs to `Text`, a *separate* schema `collectProperties`
+// never follows into because it only walks `properties`/`allOf`, not
+// `oneOf`/`anyOf`). So a value whose fields live entirely on the INNER
+// subtype (`{ text: 'hi' }`, no explicit `family`/`kind`) fails the outer
+// candidate's "every key in value is a known property" subset check before
+// `resolveCsharpDiscriminatorChain`'s loop ever gets a chance to add
+// `Success`'s ref to the owner chain and recurse into `kind` — the loop
+// never starts (PR #668 review, round 8; adversarial finding, round 5 of
+// this process). Fixing this requires the subset check to recognise that
+// selecting `ref` doesn't just expose `ref`'s own properties: it also
+// exposes every property reachable through a CHAIN of further same-object
+// discriminators owned (transitively) by `ref`, since choosing `Success`
+// and then `Text` and then `Plain` is exactly the scenario
+// `resolveCsharpDiscriminatorChain` is designed to walk. This computes that
+// transitive closure: own properties, plus (for every entry at the SAME
+// `path` owned by `ref`) every one of ITS subtypes' own properties,
+// recursively. `visited` guards a cycle (a chain can't visit the same ref
+// twice, matching `resolveCsharpDiscriminatorChain`'s own termination
+// argument).
+function collectChainedSubtypeProperties(
+  ref: string,
+  own: readonly string[],
+  entries: readonly CsharpDiscriminator[],
+  path: string,
+  visited: Set<string> = new Set(),
+): Set<string> {
+  const properties = new Set(own);
+  if (visited.has(ref)) return properties;
+  visited.add(ref);
+  for (const entry of entries) {
+    if (entry.path !== path || entry.ownerRef !== ref) continue;
+    for (const subtype of entry.subtypes) {
+      for (const name of subtype.properties) properties.add(name);
+      if (subtype.ref !== undefined) {
+        for (const name of collectChainedSubtypeProperties(
+          subtype.ref,
+          subtype.properties,
+          entries,
+          path,
+          visited,
+        )) {
+          properties.add(name);
+        }
+      }
+    }
+  }
+  return properties;
+}
+
 export function chooseCsharpDiscriminator(
   value: Record<string, unknown>,
   entries: readonly CsharpDiscriminator[],
@@ -519,18 +572,52 @@ export function chooseCsharpDiscriminator(
       candidate.path === path &&
       (candidate.ownerRef === undefined || ownerChain.has(candidate.ownerRef)),
   );
+  // A key already sitting on `value` under some OTHER same-path entry's own
+  // `propertyName` (set explicitly by the caller, or injected by an EARLIER
+  // pass of `resolveCsharpDiscriminatorChain`'s loop) is self-evidently
+  // accounted for — it IS a declared discriminator field at this exact
+  // path, whichever branch it belongs to — so it must not count against a
+  // DIFFERENT entry's subset check just because that entry's own subtype
+  // schema doesn't happen to declare it (`family` sitting on `probe` has
+  // nothing to do with whether `Text`'s shape "explains" it; `family` is
+  // explained by the entry that owns it).
+  const knownDiscriminatorNames = new Set(
+    entries
+      .filter((entry) => entry.path === path && Object.hasOwn(value, entry.propertyName))
+      .map((entry) => entry.propertyName),
+  );
   const candidates = matching.flatMap((entry) => {
     if (Object.hasOwn(value, entry.propertyName)) return [];
-    return entry.subtypes
-      .filter((subtype) =>
-        subtype.required
-          .filter((name) => name !== entry.propertyName)
-          .every((name) => Object.hasOwn(value, name)),
-      )
-      .filter((subtype) =>
-        [...Object.keys(value)].every((name) => subtype.properties.includes(name)),
-      )
-      .map((subtype) => ({ name: entry.propertyName, value: subtype.value, subtype }));
+    return (
+      entry.subtypes
+        .filter((subtype) =>
+          subtype.required
+            .filter((name) => name !== entry.propertyName)
+            .every((name) => Object.hasOwn(value, name)),
+        )
+        // A subtype whose `ref` is already in the owner chain was already
+        // selected by an EARLIER pass (or by the caller's `initialOwnerChain`)
+        // — re-offering it as a candidate here would spuriously re-derive an
+        // already-decided field instead of letting a DIFFERENT, not-yet-owned
+        // entry at this path make progress.
+        .filter((subtype) => subtype.ref === undefined || !ownerChain.has(subtype.ref))
+        .filter((subtype) => {
+          // A subtype's own `properties` doesn't include fields that only
+          // belong to a further same-object discriminator chained beneath it
+          // (see `collectChainedSubtypeProperties` above) — expand the
+          // allowed set to that transitive closure before rejecting a value
+          // whose fields actually live on the SELECTED branch, just further
+          // down the chain.
+          const allowed =
+            subtype.ref !== undefined
+              ? collectChainedSubtypeProperties(subtype.ref, subtype.properties, entries, path)
+              : new Set(subtype.properties);
+          return [...Object.keys(value)].every(
+            (name) => allowed.has(name) || knownDiscriminatorNames.has(name),
+          );
+        })
+        .map((subtype) => ({ name: entry.propertyName, value: subtype.value, subtype }))
+    );
   });
   candidates.sort((left, right) => right.subtype.required.length - left.subtype.required.length);
   const selected = candidates[0];
@@ -563,7 +650,16 @@ export function findExplicitCsharpDiscriminatorRef(
     const explicitValue = value[entry.propertyName];
     if (typeof explicitValue !== 'string') continue;
     const subtype = entry.subtypes.find((candidate) => candidate.value === explicitValue);
-    if (subtype?.ref !== undefined) return subtype.ref;
+    // A ref already in `ownerChain` was already added by an EARLIER pass of
+    // `resolveCsharpDiscriminatorChain`'s loop (or by the caller's
+    // `initialOwnerChain`) — returning it again makes the caller's
+    // `!ownerChain.has(explicitRef)` check fail, which stops the loop before
+    // it ever reaches a LATER same-path entry (e.g. an intermediate `kind`
+    // tag chained under the outer `family` tag) whose explicit value is
+    // sitting right there in `value`. Skip it and keep scanning the
+    // remaining entries instead of returning on the first (possibly stale)
+    // match (PR #668 review, round 8).
+    if (subtype?.ref !== undefined && !ownerChain.has(subtype.ref)) return subtype.ref;
   }
   return undefined;
 }
