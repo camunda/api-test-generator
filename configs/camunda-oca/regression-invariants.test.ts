@@ -10810,7 +10810,7 @@ describeForThisConfig('bundled-spec invariants: capability-gated fields (#404)',
         // characters backslash + `n`, not an actual newline — unescape the
         // common sequences before judging blankness, or a real newline
         // value would silently slip past `.trim()` (Copilot review).
-        const bodyFieldMatch = block.match(new RegExp(`${leaf}:\\s*'([^']*)'`));
+        const bodyFieldMatch = block.match(new RegExp(`${escapeRegex(leaf)}:\\s*'([^']*)'`));
         const rawValue = bodyFieldMatch?.[1];
         const value = rawValue?.replace(/\\(n|t|r|\\|')/g, (_m, c: string) =>
           c === 'n' ? '\n' : c === 't' ? '\t' : c === 'r' ? '\r' : c === '\\' ? '\\' : "'",
@@ -10834,6 +10834,22 @@ describeForThisConfig('bundled-spec invariants: capability-gated fields (#404)',
         'blank/whitespace mutation value, and every surviving mutation must assert ' +
         'expectDetailContains — see #404.',
     ).toEqual([]);
+  });
+
+  it('the FLAT-gated body-field regex tolerates a gated field name containing a regex metacharacter', () => {
+    // The body-field matcher above interpolates a gated field's leaf name
+    // (from config, not a fixed literal) into `new RegExp(...)`. Without
+    // escaping, a future gated field name containing a regex metacharacter
+    // would either silently change match semantics or throw a SyntaxError,
+    // crashing this entire invariant file's run — not reproducible with
+    // today's only gated field (`tenantId`, pure alphanumerics), so this
+    // exercises the matcher directly against a synthetic metachar name. An
+    // unescaped `(` demonstrates the crash: it leaves an unterminated group.
+    const leaf = 'tenant(Id';
+    const block = "    tenant(Id: 'abc',\n";
+    expect(() => new RegExp(`${escapeRegex(leaf)}:\\s*'([^']*)'`)).not.toThrow();
+    const match = block.match(new RegExp(`${escapeRegex(leaf)}:\\s*'([^']*)'`));
+    expect(match?.[1]).toBe('abc');
   });
 
   it('every generated request-validation scenario targeting a NESTED gated field expects 200 + empty items', () => {
