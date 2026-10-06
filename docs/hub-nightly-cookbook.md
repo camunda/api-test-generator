@@ -48,6 +48,8 @@ and look at `nightly-camunda-hub`.
   on purpose (the tests are left out) or only partly checked (the test still runs but one assertion, such as the error-body
   shape, is not made), because of a Hub issue, with its link. A green run does **not** fully cover those. An item can stay
   listed after its issue is closed, when Hub closed it as not planned.
+  The re-enable check (below) does **not** watch the partly checked items (`knownProblemDetailShapeGaps`, for example the empty
+  401 body), so nobody is told when their issue closes: follow those issues yourself.
 - **`⚠️ config drift: positive-suppress lists X not in the current spec`**: an operation the config skips no longer exists
   upstream (renamed or removed). The generator owner updates `configs/camunda-hub/positive-suppress.json`.
 
@@ -122,6 +124,9 @@ Skipped tests point to a Hub bug. This job watches those bugs. When one closes, 
 | ⚠️ … opening the unskip PR failed | The PR could not be created | Open the workflow run |
 | 📋 … is closed as **fixed**, no specific operation(s) to auto-unskip | A suite-wide skip whose Hub bug is fixed. Nothing can be done automatically | Remove its entry from `knownIssues` in `configs/camunda-hub/request-validation.json` (and any generator skip it describes), then regenerate and run the suite |
 | 📋 … is closed as **not planned** | Hub will not fix it, so the skip must stay | Set `"acknowledgedNotPlanned": true` on its `knownIssues` entry. The alert then stops. Until you do, it repeats every day |
+
+**Not watched:** the "partly checked" items in the negative thread (`knownProblemDetailShapeGaps` in
+`request-validation.json`) are not covered by this check. When their Hub issue closes, remove the entry by hand.
 
 **Check why the issue closed.** If Hub closed it as "not planned", the skip must stay. The check does not read the close
 reason for skips tied to one operation yet, so for those it is a human check.

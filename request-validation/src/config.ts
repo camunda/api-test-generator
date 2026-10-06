@@ -213,7 +213,7 @@ export interface RequestValidationConfig {
    * in the nightly's "skipped due to known issues" Slack thread alongside the
    * per-entry `knownIssue`s.
    */
-  knownIssues?: KnownIssue[];
+  knownIssues?: SuiteKnownIssue[];
   /**
    * Operations that answer 400 (not 403 or 500) when a resource-key body field
    * (a key of `resourceFixtures`) holds an object or array. For each, the body
@@ -262,10 +262,13 @@ export interface KnownIssue {
   url: string;
   /** Optional in-repo tracking issue (e.g. #419 for the version exclusion). */
   tracker?: string;
-  /**
-   * Suite-wide `knownIssues` only: set to true once the Hub issue is closed as not planned and the skip is kept on
-   * purpose, so the daily re-enable check stops reporting it.
-   */
+}
+
+/**
+ * A suite-wide `knownIssues[]` entry. Only these can be acknowledged: set `acknowledgedNotPlanned` to true once the Hub
+ * issue is closed as not planned and the skip is kept on purpose, so the daily re-enable check stops reporting it.
+ */
+export interface SuiteKnownIssue extends KnownIssue {
   acknowledgedNotPlanned?: boolean;
 }
 
@@ -321,7 +324,7 @@ function isKnownIssue(v: unknown): v is KnownIssue {
   );
 }
 
-function isSuiteKnownIssue(v: unknown): v is KnownIssue {
+function isSuiteKnownIssue(v: unknown): v is SuiteKnownIssue {
   if (!isPlainObject(v)) return false;
   const { acknowledgedNotPlanned, ...rest } = v;
   return (
