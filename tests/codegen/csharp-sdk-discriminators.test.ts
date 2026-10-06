@@ -1095,11 +1095,22 @@ describe('resolveCsharpDiscriminatorChain — same-object chained discriminators
   const SUCCESS_REF = '#/components/schemas/Success';
   const TEXT_REF = '#/components/schemas/TextKind';
 
+  // NOTE: these `properties`/`required` lists are deliberately NOT
+  // hand-flattened to include a nested subtype's fields (e.g. `Success`
+  // does NOT list `text`, which belongs only to `Text`) — that flattening
+  // is not a shape `collectSubtypes`/`buildCsharpDiscriminatorTable` ever
+  // produces (it merges a WRAPPER's own sibling properties into its direct
+  // subtypes, never a nested `oneOf` branch's fields). `chooseCsharpDiscriminator`
+  // is responsible for seeing past this via `collectChainedSubtypeProperties`
+  // (PR #668 review, round 8 / adversarial finding, process round 5) — see
+  // `realistic chained oneOf-within-oneOf schema (no hand-flattening)` below
+  // for an end-to-end regression built from `buildCsharpDiscriminatorTable`
+  // itself.
   const family: CsharpDiscriminator = {
     path: 'result',
     propertyName: 'family',
     subtypes: [
-      { value: 'Success', properties: ['family', 'kind', 'text'], required: [], ref: SUCCESS_REF },
+      { value: 'Success', properties: ['family', 'kind'], required: [], ref: SUCCESS_REF },
       { value: 'Failure', properties: ['family'], required: [] },
     ],
   };
@@ -1107,17 +1118,13 @@ describe('resolveCsharpDiscriminatorChain — same-object chained discriminators
     path: 'result',
     propertyName: 'kind',
     ownerRef: SUCCESS_REF,
-    subtypes: [
-      { value: 'Text', properties: ['family', 'kind', 'text'], required: ['text'], ref: TEXT_REF },
-    ],
+    subtypes: [{ value: 'Text', properties: ['kind', 'tag'], required: [], ref: TEXT_REF }],
   };
   const tag: CsharpDiscriminator = {
     path: 'result',
     propertyName: 'tag',
     ownerRef: TEXT_REF,
-    subtypes: [
-      { value: 'Plain', properties: ['family', 'kind', 'tag', 'text'], required: ['text'] },
-    ],
+    subtypes: [{ value: 'Plain', properties: ['tag', 'text'], required: ['text'] }],
   };
   const entries = [family, kind, tag];
 
@@ -1144,6 +1151,21 @@ describe('resolveCsharpDiscriminatorChain — same-object chained discriminators
     expect(result.ownerChain).toEqual(new Set([SUCCESS_REF, TEXT_REF]));
   });
 
+  test('explicit tags at BOTH the outer AND intermediate level still resolve the remainder (PR #668 review, round 8)', () => {
+    // `family` and `kind` are both explicit, pointing at the same already-
+    // selected `Success`/`TextKind` refs that `findExplicitCsharpDiscriminatorRef`
+    // would otherwise keep re-returning -- it must skip past the already-
+    // recorded `family` match to reach the still-unresolved `kind` match
+    // instead of stalling before `tag` is ever considered.
+    const result = resolveCsharpDiscriminatorChain(
+      { family: 'Success', kind: 'Text', text: 'hi' },
+      entries,
+      'result',
+    );
+    expect(result.fields).toEqual([['tag', 'Plain']]);
+    expect(result.ownerChain).toEqual(new Set([SUCCESS_REF, TEXT_REF]));
+  });
+
   test('a branch with no further same-object discriminator terminates after one field', () => {
     const result = resolveCsharpDiscriminatorChain({ family: 'Failure' }, entries, 'result');
     expect(result.fields).toEqual([]);
@@ -1162,6 +1184,92 @@ describe('resolveCsharpDiscriminatorChain — same-object chained discriminators
       ['tag', 'Plain'],
     ]);
     expect(result.ownerChain).toEqual(new Set([SUCCESS_REF, TEXT_REF]));
+  });
+
+  /**
+   * Adversarial finding (process round 5): the unit tests above all hand-
+   * construct each entry's `properties` list to already include the
+   * transitively-nested inner subtype's fields — a shape
+   * `buildCsharpDiscriminatorTable` never actually produces, since
+   * `collectProperties` only walks `properties`/`allOf`, never `oneOf`/
+   * `anyOf`. Verified directly against `buildCsharpDiscriminatorTable`'s
+   * real output (no hand-flattening) that the implicit (no explicit outer
+   * tag in the request body) case the round-7 commit claims to resolve
+   * actually resolves, through a REAL `Result -oneOf-> Success -oneOf
+   * (own discriminator)-> Text -oneOf (own discriminator)-> Plain` chain.
+   */
+  test('realistic chained oneOf-within-oneOf schema (no hand-flattening)', () => {
+    const bundle = {
+      paths: {
+        '/results': {
+          post: {
+            operationId: 'createResult',
+            requestBody: {
+              content: {
+                'application/json': { schema: { $ref: '#/components/schemas/Result' } },
+              },
+            },
+          },
+        },
+      },
+      components: {
+        schemas: {
+          Result: {
+            type: 'object',
+            properties: {
+              result: {
+                type: 'object',
+                discriminator: { propertyName: 'family' },
+                oneOf: [
+                  { $ref: '#/components/schemas/Success' },
+                  { $ref: '#/components/schemas/Failure' },
+                ],
+              },
+            },
+          },
+          Success: {
+            type: 'object',
+            discriminator: { propertyName: 'kind' },
+            properties: { family: { type: 'string' }, kind: { type: 'string' } },
+            oneOf: [{ $ref: '#/components/schemas/TextKind' }],
+          },
+          Failure: {
+            type: 'object',
+            properties: { family: { type: 'string' } },
+          },
+          TextKind: {
+            type: 'object',
+            discriminator: { propertyName: 'tag' },
+            properties: { kind: { type: 'string' }, tag: { type: 'string' } },
+            oneOf: [{ $ref: '#/components/schemas/Plain' }],
+          },
+          Plain: {
+            type: 'object',
+            required: ['text'],
+            properties: { tag: { type: 'string' }, text: { type: 'string' } },
+          },
+        },
+      },
+    };
+
+    const table = buildCsharpDiscriminatorTable(bundle);
+    const entries = table.createResult ?? [];
+    expect(entries.map((e) => e.propertyName).sort()).toEqual(['family', 'kind', 'tag']);
+
+    // None of the real entries' subtype `properties` lists include a
+    // sibling-nested subtype's own fields (confirming the fixtures above
+    // were the unrealistic flattening, not this one).
+    const successEntry = entries.find((e) => e.propertyName === 'family');
+    const success = successEntry?.subtypes.find((s) => s.value === 'Success');
+    expect(success?.properties).not.toContain('text');
+    expect(success?.properties).not.toContain('tag');
+
+    const result = resolveCsharpDiscriminatorChain({ text: 'hi' }, entries, 'result');
+    expect(result.fields).toEqual([
+      ['family', 'Success'],
+      ['kind', 'TextKind'],
+      ['tag', 'Plain'],
+    ]);
   });
 });
 
