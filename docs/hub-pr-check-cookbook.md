@@ -31,7 +31,7 @@ does not yet understand a new endpoint, or that the test run itself had a proble
 |---|---|---|
 | "infrastructure failure" or "looks flaky" | Not yours, not Hub's. The run itself had a problem | Re-run it (see "Re-run without a new push" below). If it keeps failing, ask in `#camunda-hub-pr-e2e-results` |
 | "Hub PR image did not start" | Possibly yours: Hub did not become ready | Open the run, find the step "Wait for Hub to be ready", read the startup error |
-| "api-test-generator not yet handling a new/changed endpoint" | The generator's, not a Hub bug | An issue `Generator gap on camunda-hub#N` is opened and assigned to you when your spec change caused it. Ask in `#camunda-hub-pr-e2e-results` for help |
+| "api-test-generator not yet handling a new/changed endpoint" | The generator's, not a Hub bug | When your spec change caused it, an issue `Generator gap on camunda-hub#N` is opened, and assigned to you if GitHub allows it (see the note under "Who gets told what"). Ask in `#camunda-hub-pr-e2e-results` for help |
 | "Likely a real regression from this PR" | Probably yours | Read the change the alert points to. The tests are right and Hub now answers differently |
 | "Could not confirm" | Unknown | Open the failing test in the run's report (steps below) |
 
@@ -97,15 +97,20 @@ camunda-hub PR (non-draft, not a fork, base not self-managed/*)
 | product (lower), infra, flaky, unknown, **with evidence** (a failing spec or unmapped operations) | `failure` | yes, test-automation-medic | no | none |
 | any **suite** failure with **no evidence** (the suite ran but left no readable report, and nothing says what failed; not startup or pre-suite) | `failure` | one quiet reply per PR per day, nobody pinged until the 3rd time that day | no | none |
 | generator-gap on an operation the PR did not touch | `failure` | yes, test-automation-medic | no | none (Slack only; the nightly sees the same gap later) |
-| generator-gap caused by the PR's own spec change (high confidence) | `failure` | yes, test-automation-medic | **yes**, one sticky comment | **`Generator gap on camunda-hub#N`**, assigned to the PR author |
+| generator-gap caused by the PR's own spec change (high confidence) | `failure` | yes, test-automation-medic | **yes**, one sticky comment | **`Generator gap on camunda-hub#N`**, assigned to the PR author when possible (see below) |
 
 **One more issue can appear in any row:** if some endpoints have no generated test at all, `[hub-pr-check] Coverage gap
 on camunda-hub#N` is opened (labels `missing-coverage` and `hub`, not assigned) and closed again once every endpoint
 has a test. It is separate from the `Generator gap` issue above.
 
 When the generator gap is caused by the PR's own spec change, an issue
-`[hub-pr-check] Generator gap on camunda-hub#N` is also opened in this repo and assigned to the
-camunda-hub PR's author. It is edited in place on later pushes and closes itself on a green run.
+`[hub-pr-check] Generator gap on camunda-hub#N` is also opened in this repo. It is edited in place on later pushes and
+closes itself on a green run.
+
+**Assignment is best effort.** The issue is assigned to the camunda-hub PR's author only when that author is a plain GitHub
+login (bots such as `dependabot[bot]` are skipped) and has access to this repo. If GitHub rejects the login, the run logs a
+warning and the issue stays **unassigned**. The title always names the camunda-hub PR, so if you find no assignee, ask in
+`#camunda-hub-pr-e2e-results`. The `Coverage gap` issue is a different issue and is never assigned.
 
 Every Slack reply lists the source PR and commit, then one line of links: the run, the camunda-hub run that triggered it, and this cookbook.
 
@@ -188,8 +193,8 @@ in api-test-generator against any branch.
 - *Green despite a coverage gap:* intentional. A missing test is not a failing test, and the author of the
   camunda-hub PR cannot fix it (the fix is in the generator), so the check stays green while the gap is made
   visible: the status description, a tracking issue `[hub-pr-check] Coverage gap on camunda-hub#N`, and Slack
-  (yellow headline). When the PR's own spec change caused the gap, it also gets an issue assigned to the PR
-  author and a comment on the PR. The repo-wide view of missing tests (not tied to one PR) is the weekly
+  (yellow headline). When the PR's own spec change caused the gap, it also gets a separate `Generator gap` issue
+  (assigned to the PR author when possible) and a comment on the PR. The repo-wide view of missing tests (not tied to one PR) is the weekly
   report, see [hub-response-coverage-report.md](hub-response-coverage-report.md).
 - *Red but "not a Hub bug":* the check is informational, not required, while reliability proves out.
 - *Slack edited instead of a new message:* the PR failed the same way again, so its message was updated. See "Why a Slack message is sometimes edited instead of posted again" above.
@@ -201,8 +206,8 @@ in api-test-generator against any branch.
 - **Where:** open issues with the `generator-gap` label. There is **one issue per camunda-hub PR**, not one per
   endpoint: the title names the PR (`[hub-pr-check] Generator gap on camunda-hub#N`) and the body lists every
   endpoint that needs work. It is opened only when the PR's own spec change caused the gap.
-- **Who:** the author of that camunda-hub PR (assigned automatically; reassign freely, it will not
-  be overwritten).
+- **Who:** the author of that camunda-hub PR, assigned automatically when possible (not for bots, and not for an author without
+  access to this repo; then it stays unassigned). Reassign freely, it will not be overwritten.
 - **Not the same as the weekly report.** The weekly coverage report opens an index issue plus one issue per API
   area. Those are repo-wide, not tied to any PR or author, so they are **not assigned**. Someone on the Hub
   team has to pick them up (see [hub-response-coverage-report.md](hub-response-coverage-report.md)).
