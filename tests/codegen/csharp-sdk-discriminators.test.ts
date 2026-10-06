@@ -909,6 +909,92 @@ describe('buildCsharpDiscriminatorTable — ownerRef tags a nested discriminator
 });
 
 /**
+ * Regression coverage for PR #668 review round 6 (adversarial finding): a
+ * schema SHARED by two sibling `oneOf`/`anyOf` branches at the SAME nested
+ * path (e.g. both `BranchA.payload` and `BranchB.payload` point at the same
+ * `Base` schema, which itself declares its own discriminator) must get ONE
+ * table entry per owning branch, not just the first-visited branch's. Before
+ * including `ownerRef` in `walkSchema`'s `visited` dedup key, the second
+ * branch's otherwise-identical entry was silently dropped, so
+ * `chooseCsharpDiscriminator` could never select `Base`'s nested
+ * discriminator when the second-visited branch was the one actually chosen
+ * at render time.
+ */
+describe('buildCsharpDiscriminatorTable — shared nested schema reached via two sibling branches', () => {
+  const bundle = {
+    paths: {
+      '/wraps': {
+        post: {
+          operationId: 'createWrap',
+          requestBody: {
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/Wrap' } },
+            },
+          },
+        },
+      },
+    },
+    components: {
+      schemas: {
+        Wrap: {
+          type: 'object',
+          discriminator: { propertyName: 'kind' },
+          oneOf: [
+            { $ref: '#/components/schemas/BranchA' },
+            { $ref: '#/components/schemas/BranchB' },
+          ],
+        },
+        // Both sibling branches declare a `payload` property pointing at the
+        // SAME `Base` schema — `Base`'s own discriminator is logically
+        // independent of which branch was chosen.
+        BranchA: {
+          type: 'object',
+          properties: { payload: { $ref: '#/components/schemas/Base' } },
+        },
+        BranchB: {
+          type: 'object',
+          properties: { payload: { $ref: '#/components/schemas/Base' } },
+        },
+        Base: {
+          type: 'object',
+          discriminator: { propertyName: 'baseKind' },
+          oneOf: [{ $ref: '#/components/schemas/TextPayload' }],
+        },
+        TextPayload: { type: 'object', properties: { text: { type: 'string' } } },
+      },
+    },
+  };
+
+  test('produces one wrap.payload entry per owning sibling branch, not just the first-visited one', () => {
+    const table = buildCsharpDiscriminatorTable(bundle);
+    const payloadEntries = (table.createWrap ?? []).filter((d) => d.path === 'payload');
+    const owners = payloadEntries.map((entry) => entry.ownerRef).sort();
+    expect(owners).toEqual(['#/components/schemas/BranchA', '#/components/schemas/BranchB'].sort());
+  });
+
+  test('chooseCsharpDiscriminator selects Base.baseKind regardless of which sibling branch owns the render', () => {
+    const table = buildCsharpDiscriminatorTable(bundle);
+    const payloadEntries = (table.createWrap ?? []).filter((d) => d.path === 'payload');
+    expect(
+      chooseCsharpDiscriminator(
+        {},
+        payloadEntries,
+        'payload',
+        new Set(['#/components/schemas/BranchA']),
+      ),
+    ).toEqual({ name: 'baseKind', value: 'TextPayload', ref: '#/components/schemas/TextPayload' });
+    expect(
+      chooseCsharpDiscriminator(
+        {},
+        payloadEntries,
+        'payload',
+        new Set(['#/components/schemas/BranchB']),
+      ),
+    ).toEqual({ name: 'baseKind', value: 'TextPayload', ref: '#/components/schemas/TextPayload' });
+  });
+});
+
+/**
  * Regression coverage for `chooseCsharpDiscriminator`'s new `ownerChain`
  * parameter and `findExplicitCsharpDiscriminatorRef` (PR #668 review, round
  * 5): a same-path entry scoped to a specific branch (`ownerRef`) must be
