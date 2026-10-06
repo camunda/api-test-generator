@@ -18,7 +18,7 @@ import type {
 // step, and the consuming step declares HTTP 409). See #342 for the
 // omitWhenUnbound half of the same contract.
 import { computeUniqueBindings } from '../playwright/ctxSeeding.js';
-import { camelCase } from '../playwright/stepRenderer.js';
+import { camelCase, stepNeedsAwaitForOp } from '../playwright/stepRenderer.js';
 import { type OperationMapSource, toPythonLiteral } from './sdk-mapping.js';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -390,6 +390,15 @@ export function renderPythonSuite(
   if (hasSeedBindings) {
     lines.push('from support.seeding import init_spec_salt, seed_binding');
   }
+  const needsAwaitEventually = collection.scenarios.some((scenario) => {
+    const ecOps = new Set(
+      scenario.operations.filter((o) => o.eventuallyConsistent).map((o) => o.operationId),
+    );
+    return (scenario.requestPlan ?? []).some((step) => stepNeedsAwaitForOp(step, ecOps));
+  });
+  if (needsAwaitEventually) {
+    lines.push('from support.await_eventually import await_eventually');
+  }
   lines.push('from typing import Any, Dict');
   lines.push('');
   lines.push('# Sentinel distinguishing "field absent" from an explicit JSON null');
@@ -533,6 +542,9 @@ export function renderPythonSuite(
       );
     }
     const isErrorScenario = scenario.expectedResult?.kind === 'error';
+    const ecOps = new Set(
+      scenario.operations.filter((o) => o.eventuallyConsistent).map((o) => o.operationId),
+    );
     for (let i = 0; i < requestPlan.length; i++) {
       const isFinal = i === requestPlan.length - 1;
       renderPythonRequestStep(
@@ -541,6 +553,7 @@ export function renderPythonSuite(
         i,
         omitWhenUnboundFieldNames,
         isFinal && !isErrorScenario ? scenario.responseShapeFields : undefined,
+        stepNeedsAwaitForOp(requestPlan[i], ecOps),
       );
       const waits = requestPlan[i].eventualWaitsAfter ?? [];
       for (let w = 0; w < waits.length; w++) {
@@ -560,6 +573,7 @@ function renderPythonRequestStep(
   index: number,
   omitWhenUnboundFieldNames: ReadonlySet<string>,
   responseShapeFields?: EndpointScenario['responseShapeFields'],
+  awaitEventually = false,
 ): void {
   const stepNum = index + 1;
   const responseVar = `response_${stepNum}`;
@@ -631,19 +645,27 @@ function renderPythonRequestStep(
   // request() method to avoid a TypeError at test-run time (Copilot PR #574 review).
   const bodylessConvenienceVerbs = new Set(['get', 'delete', 'options', 'head']);
   const hasBodyArg = requestArgs.some((arg) => /^(json|data|files)=/.test(arg));
+  const callLines: string[] = [];
   if (hasBodyArg && bodylessConvenienceVerbs.has(methodName)) {
-    lines.push(`    ${responseVar} = await client.request(`);
-    lines.push(`        '${step.method.toUpperCase()}',`);
-    for (const arg of requestArgs) {
-      lines.push(`        ${arg},`);
-    }
+    callLines.push('client.request(');
+    callLines.push(`    '${step.method.toUpperCase()}',`);
+  } else {
+    callLines.push(`client.${methodName}(`);
+  }
+  for (const arg of requestArgs) callLines.push(`    ${arg},`);
+  callLines.push(')');
+  if (awaitEventually) {
+    lines.push(`    ${responseVar} = await await_eventually(`);
+    lines.push(`        lambda: ${callLines[0]}`);
+    for (const l of callLines.slice(1, -1)) lines.push(`        ${l}`);
+    lines.push('        ),');
+    lines.push(`        operation_id='${step.operationId}',`);
+    lines.push(`        method='${step.method.toUpperCase()}',`);
+    if (!step.extract?.length) lines.push('        require_items=False,');
     lines.push('    )');
   } else {
-    lines.push(`    ${responseVar} = await client.${methodName}(`);
-    for (const arg of requestArgs) {
-      lines.push(`        ${arg},`);
-    }
-    lines.push('    )');
+    lines.push(`    ${responseVar} = await ${callLines[0]}`);
+    for (const l of callLines.slice(1)) lines.push(`    ${l}`);
   }
   lines.push(`    assert ${responseVar}.status_code == ${step.expect.status}, ${responseVar}.text`);
 
