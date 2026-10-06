@@ -4,6 +4,7 @@ import {
   type CsharpDiscriminator,
   chooseCsharpDiscriminator,
   findExplicitCsharpDiscriminatorRef,
+  resolveCsharpDiscriminatorChain,
 } from '../../materializer/src/csharp-sdk/discriminators.js';
 
 /**
@@ -1078,5 +1079,150 @@ describe('chooseCsharpDiscriminator / findExplicitCsharpDiscriminatorRef — own
     expect(
       findExplicitCsharpDiscriminatorRef({ status: 'Unknown' }, [topLevel], '', new Set()),
     ).toBeUndefined();
+  });
+});
+
+/**
+ * Regression coverage for PR #668 review finding (round 7):
+ * `chooseCsharpDiscriminator`/`findExplicitCsharpDiscriminatorRef` each only
+ * see entries eligible under the `ownerChain` they are GIVEN, so a single
+ * call per object can never pick up a SECOND discriminator at the SAME path
+ * that only becomes eligible once the FIRST one's ref is added to the
+ * chain. `resolveCsharpDiscriminatorChain` loops both resolvers at the same
+ * path until a pass adds no new owner ref.
+ */
+describe('resolveCsharpDiscriminatorChain — same-object chained discriminators (PR #668 review, round 7)', () => {
+  const SUCCESS_REF = '#/components/schemas/Success';
+  const TEXT_REF = '#/components/schemas/TextKind';
+
+  const family: CsharpDiscriminator = {
+    path: 'result',
+    propertyName: 'family',
+    subtypes: [
+      { value: 'Success', properties: ['family', 'kind', 'text'], required: [], ref: SUCCESS_REF },
+      { value: 'Failure', properties: ['family'], required: [] },
+    ],
+  };
+  const kind: CsharpDiscriminator = {
+    path: 'result',
+    propertyName: 'kind',
+    ownerRef: SUCCESS_REF,
+    subtypes: [
+      { value: 'Text', properties: ['family', 'kind', 'text'], required: ['text'], ref: TEXT_REF },
+    ],
+  };
+  const tag: CsharpDiscriminator = {
+    path: 'result',
+    propertyName: 'tag',
+    ownerRef: TEXT_REF,
+    subtypes: [
+      { value: 'Plain', properties: ['family', 'kind', 'tag', 'text'], required: ['text'] },
+    ],
+  };
+  const entries = [family, kind, tag];
+
+  test('injects a chain of implicit same-object discriminators and returns the full owner chain', () => {
+    const result = resolveCsharpDiscriminatorChain({ text: 'hi' }, entries, 'result');
+    expect(result.fields).toEqual([
+      ['family', 'Success'],
+      ['kind', 'Text'],
+      ['tag', 'Plain'],
+    ]);
+    expect(result.ownerChain).toEqual(new Set([SUCCESS_REF, TEXT_REF]));
+  });
+
+  test('recognises an explicit outer tag and still chains the rest from it', () => {
+    const result = resolveCsharpDiscriminatorChain(
+      { family: 'Success', text: 'hi' },
+      entries,
+      'result',
+    );
+    expect(result.fields).toEqual([
+      ['kind', 'Text'],
+      ['tag', 'Plain'],
+    ]);
+    expect(result.ownerChain).toEqual(new Set([SUCCESS_REF, TEXT_REF]));
+  });
+
+  test('a branch with no further same-object discriminator terminates after one field', () => {
+    const result = resolveCsharpDiscriminatorChain({ family: 'Failure' }, entries, 'result');
+    expect(result.fields).toEqual([]);
+    expect(result.ownerChain).toEqual(new Set());
+  });
+
+  test('starting mid-chain (an already-resolved ownerChain) still resolves the remainder', () => {
+    const result = resolveCsharpDiscriminatorChain(
+      { text: 'hi' },
+      entries,
+      'result',
+      new Set([SUCCESS_REF]),
+    );
+    expect(result.fields).toEqual([
+      ['kind', 'Text'],
+      ['tag', 'Plain'],
+    ]);
+    expect(result.ownerChain).toEqual(new Set([SUCCESS_REF, TEXT_REF]));
+  });
+});
+
+/**
+ * Regression coverage for PR #668 review "Previously missed" advisory
+ * (round 7): a discriminated wrapper can declare its OWN common fields as
+ * siblings of `discriminator`/`oneOf` (not merged into every branch via
+ * `allOf`). A branch's own subtype schema then has no properties beyond
+ * what it adds itself, so a value that ALSO sets the wrapper's common
+ * fields was rejected as "extra properties" by `chooseCsharpDiscriminator`,
+ * which silently omitted the discriminator entirely instead of selecting
+ * the matching branch.
+ */
+describe('buildCsharpDiscriminatorTable — wrapper-declared common fields merge into every subtype', () => {
+  const bundle = {
+    paths: {
+      '/jobs': {
+        post: {
+          operationId: 'activateJob',
+          requestBody: {
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/Wrapper' } },
+            },
+          },
+        },
+      },
+    },
+    components: {
+      schemas: {
+        Wrapper: {
+          type: 'object',
+          // `common` is declared directly on the wrapper, NOT folded into
+          // `A`/`B` via `allOf` — the pre-existing pattern this fix adds to.
+          properties: { common: { type: 'string' } },
+          required: ['common'],
+          discriminator: { propertyName: 'kind' },
+          oneOf: [{ $ref: '#/components/schemas/A' }, { $ref: '#/components/schemas/B' }],
+        },
+        A: { type: 'object', properties: { a: { type: 'string' } }, required: ['a'] },
+        B: { type: 'object', properties: { b: { type: 'string' } } },
+      },
+    },
+  };
+
+  test('every subtype carries the wrapper-declared common property and requirement', () => {
+    const table = buildCsharpDiscriminatorTable(bundle);
+    const subtypes = (table.activateJob ?? []).flatMap((d) => d.subtypes);
+    const a = subtypes.find((s) => s.value === 'A');
+    const b = subtypes.find((s) => s.value === 'B');
+    expect(a?.properties).toEqual(expect.arrayContaining(['a', 'common']));
+    expect(a?.required).toEqual(expect.arrayContaining(['common']));
+    expect(b?.properties).toEqual(expect.arrayContaining(['b', 'common']));
+  });
+
+  test('chooseCsharpDiscriminator selects the matching branch for a value that also sets the common field', () => {
+    const table = buildCsharpDiscriminatorTable(bundle);
+    const entries = table.activateJob ?? [];
+    expect(chooseCsharpDiscriminator({ common: 'c', a: 'x' }, entries, '')).toEqual({
+      name: 'kind',
+      value: 'A',
+      ref: '#/components/schemas/A',
+    });
   });
 });

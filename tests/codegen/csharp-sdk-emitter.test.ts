@@ -1688,3 +1688,172 @@ describe('C# SDK Emitter — discriminators at the request root (PR #668 review,
     expect(files[0].content).toContain('["kind"] = "Text"');
   });
 });
+
+/**
+ * Regression coverage for PR #668 review finding (round 7): a single
+ * `renderCsharpValue`/`emitJsonRequestDataLines` resolution pass can never
+ * see a discriminator whose `ownerRef` that SAME pass is about to add to the
+ * chain -- so a wrapper's own discriminator (`family`) and a SECOND
+ * discriminator the SELECTED branch declares on the SAME object (`kind`)
+ * were never both resolved: only `family` was injected/recognised, and
+ * `kind` -- gated on `family`'s own branch ref -- was silently dropped even
+ * though it shares the wrapper's object, not a child field.
+ * `resolveCsharpDiscriminatorChain` loops both resolvers at the same path
+ * until a pass adds no new owner ref, so a chain of same-object
+ * discriminators resolves fully regardless of depth.
+ */
+describe('C# SDK Emitter — chained same-object discriminators (PR #668 review, round 7)', () => {
+  const SUCCESS_REF = '#/components/schemas/Success';
+  const TEXT_REF = '#/components/schemas/TextKind';
+
+  // `result` is tagged `family`; the `Success` branch it selects ALSO
+  // declares its OWN `kind` discriminator on that SAME `result` object (not
+  // a nested property) -- and `Text`'s own `tag` discriminator chains a
+  // THIRD level deep, same object again, to prove the resolver isn't
+  // hardcoded to exactly two levels.
+  const DISCRIMINATORS: CsharpDiscriminatorTable = {
+    createProcessInstance: [
+      {
+        path: 'result',
+        propertyName: 'family',
+        subtypes: [
+          {
+            value: 'Success',
+            properties: ['family', 'kind', 'text'],
+            required: [],
+            ref: SUCCESS_REF,
+          },
+          { value: 'Failure', properties: ['family'], required: [] },
+        ],
+      },
+      {
+        path: 'result',
+        propertyName: 'kind',
+        ownerRef: SUCCESS_REF,
+        // Real subtype property lists are built from the WHOLE transitive
+        // `allOf` chain (`collectProperties`), so `Text`'s own list also
+        // carries its ancestor `Success`'s fields -- not just the fields
+        // `Text` itself adds.
+        subtypes: [
+          {
+            value: 'Text',
+            properties: ['family', 'kind', 'text'],
+            required: ['text'],
+            ref: TEXT_REF,
+          },
+        ],
+      },
+      {
+        path: 'result',
+        propertyName: 'tag',
+        ownerRef: TEXT_REF,
+        subtypes: [
+          { value: 'Plain', properties: ['family', 'kind', 'tag', 'text'], required: ['text'] },
+        ],
+      },
+    ],
+  };
+
+  test('implicitly injects a chain of same-object discriminators, three levels deep', async () => {
+    const emitter = createCsharpEmitter(OPERATION_MAP, { discriminators: DISCRIMINATORS });
+    const files = await emitter.emit(
+      {
+        ...SAMPLE_COLLECTION,
+        scenarios: [
+          {
+            ...SAMPLE_COLLECTION.scenarios[0],
+            requestPlan: [
+              {
+                ...CREATE_PROCESS_INSTANCE_REQUEST_STEP,
+                bodyKind: 'json',
+                // None of `family`, `kind`, `tag` are explicit: shape
+                // inference must select `Success` -> `Text` -> `Plain` and
+                // inject all three tags onto the SAME `result` object.
+                bodyTemplate: { result: { text: 'hi' } },
+                expect: { status: 200 },
+              } satisfies RequestStep,
+            ],
+          },
+        ],
+      },
+      EMIT_CTX,
+    );
+    expect(files[0].content).toContain('["family"] = "Success"');
+    expect(files[0].content).toContain('["kind"] = "Text"');
+    expect(files[0].content).toContain('["tag"] = "Plain"');
+  });
+
+  test('recognises an explicit outer tag and still resolves the rest of the same-object chain', async () => {
+    const emitter = createCsharpEmitter(OPERATION_MAP, { discriminators: DISCRIMINATORS });
+    const files = await emitter.emit(
+      {
+        ...SAMPLE_COLLECTION,
+        scenarios: [
+          {
+            ...SAMPLE_COLLECTION.scenarios[0],
+            requestPlan: [
+              {
+                ...CREATE_PROCESS_INSTANCE_REQUEST_STEP,
+                bodyKind: 'json',
+                // `family` is explicit; `kind`/`tag` must still be resolved
+                // from the branch it selects.
+                bodyTemplate: { result: { family: 'Success', text: 'hi' } },
+                expect: { status: 200 },
+              } satisfies RequestStep,
+            ],
+          },
+        ],
+      },
+      EMIT_CTX,
+    );
+    expect(files[0].content).toContain('["kind"] = "Text"');
+    expect(files[0].content).toContain('["tag"] = "Plain"');
+  });
+
+  test('resolves a chained same-object discriminator at the request root too', async () => {
+    const rootDiscriminators: CsharpDiscriminatorTable = {
+      createProcessInstance: [
+        {
+          path: '',
+          propertyName: 'family',
+          subtypes: [
+            {
+              value: 'Success',
+              properties: ['family', 'kind', 'text'],
+              required: [],
+              ref: SUCCESS_REF,
+            },
+          ],
+        },
+        {
+          path: '',
+          propertyName: 'kind',
+          ownerRef: SUCCESS_REF,
+          subtypes: [{ value: 'Text', properties: ['family', 'kind', 'text'], required: ['text'] }],
+        },
+      ],
+    };
+    const emitter = createCsharpEmitter(OPERATION_MAP, { discriminators: rootDiscriminators });
+    const files = await emitter.emit(
+      {
+        ...SAMPLE_COLLECTION,
+        scenarios: [
+          {
+            ...SAMPLE_COLLECTION.scenarios[0],
+            requestPlan: [
+              {
+                ...CREATE_PROCESS_INSTANCE_REQUEST_STEP,
+                bodyKind: 'json',
+                bodyTemplate: { text: 'hi' },
+                expect: { status: 200 },
+              } satisfies RequestStep,
+            ],
+          },
+        ],
+      },
+      EMIT_CTX,
+    );
+    expect(files[0].content).toContain('["family"] = "Success"');
+    expect(files[0].content).toContain('["kind"] = "Text"');
+  });
+});

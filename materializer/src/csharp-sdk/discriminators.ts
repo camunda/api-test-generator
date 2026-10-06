@@ -255,7 +255,27 @@ function collectSubtypes(
   const seenRefs = new Set(mappedRefs);
   subtypes.push(...collectUnmappedSubtypes(oneOf, seenRefs, stores));
   subtypes.push(...collectUnmappedSubtypes(anyOf, seenRefs, stores));
-  return subtypes;
+
+  // A discriminated wrapper can declare its own common fields as SIBLINGS of
+  // `oneOf`/`anyOf`/`discriminator` (not merged into every branch via
+  // `allOf`) — e.g. `{ discriminator, oneOf: [A, B], properties: { common },
+  // required: [common] }`. Every branch's actual runtime shape still carries
+  // those common fields, so a subtype whose property list only reflects its
+  // OWN schema rejects an otherwise-matching value that also sets them, and
+  // `chooseCsharpDiscriminator` silently omits the discriminator instead of
+  // selecting the matching branch (PR #668 review, round 7: "Previously
+  // missed" advisory). `collectProperties`/`collectRequired` on the WRAPPER
+  // schema itself only walk its own `properties`/`allOf` — never `oneOf`/
+  // `anyOf` — so this adds exactly the wrapper's own directly-declared
+  // fields, without re-pulling in a sibling branch's fields.
+  const wrapperProperties = collectProperties(schema, stores);
+  const wrapperRequired = collectRequired(schema, stores);
+  if (wrapperProperties.size === 0 && wrapperRequired.size === 0) return subtypes;
+  return subtypes.map((subtype) => ({
+    ...subtype,
+    properties: [...new Set([...subtype.properties, ...wrapperProperties])],
+    required: [...new Set([...subtype.required, ...wrapperRequired])],
+  }));
 }
 
 function walkSchema(
@@ -546,4 +566,59 @@ export function findExplicitCsharpDiscriminatorRef(
     if (subtype?.ref !== undefined) return subtype.ref;
   }
   return undefined;
+}
+
+export interface ResolvedCsharpDiscriminators {
+  // Discriminator fields to inject at this path, in resolution order (an
+  // outer wrapper's own tag before a subtype's own nested tag on the SAME
+  // object).
+  fields: [string, string][];
+  ownerChain: ReadonlySet<string>;
+}
+
+// `chooseCsharpDiscriminator`/`findExplicitCsharpDiscriminatorRef` each
+// resolve only the entries eligible under the `ownerChain` they are GIVEN —
+// neither call can see an entry whose `ownerRef` that very call is about to
+// add to the chain. So a single call per object misses a discriminator that
+// shares its OWNER's path: a `family`-tagged wrapper whose selected branch
+// (e.g. `Success`) itself declares its OWN `kind` discriminator on the SAME
+// object is never revisited to inject/recognise `kind` (PR #668 review,
+// round 7). This loops both resolvers at the SAME `path`, re-running after
+// each owner-chain growth so a newly-eligible same-path entry is picked up,
+// until a pass adds no new ref. Already-decided fields are folded into a
+// local `probe` copy of `value` before the next pass, so a later pass's
+// `Object.hasOwn` checks never re-select the same entry for the same
+// property name. Termination is guaranteed without a separate recursion
+// guard: `ownerChain` only grows, each distinct ref can be added at most
+// once (the `!ownerChain.has(ref)` check short-circuits a repeat), and
+// `entries` is a finite table, so the loop is bounded by the number of
+// distinct owner refs reachable from `path`.
+export function resolveCsharpDiscriminatorChain(
+  value: Record<string, unknown>,
+  entries: readonly CsharpDiscriminator[],
+  path: string,
+  initialOwnerChain: ReadonlySet<string> = new Set(),
+): ResolvedCsharpDiscriminators {
+  const fields: [string, string][] = [];
+  let ownerChain = initialOwnerChain;
+  let probe: Record<string, unknown> = value;
+  for (;;) {
+    const discriminator = chooseCsharpDiscriminator(probe, entries, path, ownerChain);
+    if (discriminator !== undefined && !Object.hasOwn(probe, discriminator.name)) {
+      fields.push([discriminator.name, discriminator.value]);
+      probe = { ...probe, [discriminator.name]: discriminator.value };
+      if (discriminator.ref !== undefined && !ownerChain.has(discriminator.ref)) {
+        ownerChain = new Set([...ownerChain, discriminator.ref]);
+        continue;
+      }
+      break;
+    }
+    const explicitRef = findExplicitCsharpDiscriminatorRef(probe, entries, path, ownerChain);
+    if (explicitRef !== undefined && !ownerChain.has(explicitRef)) {
+      ownerChain = new Set([...ownerChain, explicitRef]);
+      continue;
+    }
+    break;
+  }
+  return { fields, ownerChain };
 }
