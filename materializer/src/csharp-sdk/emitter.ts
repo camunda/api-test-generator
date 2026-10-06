@@ -829,14 +829,41 @@ function emitJsonRequestDataLines(
 ): string[] {
   const dataVar = `${requestVar}Data`;
   const lines = [`${indent}var ${dataVar} = new Dictionary<string, object?>();`];
+  const discriminators = discriminatorTable?.[operationId] ?? [];
   if (fields.kind === 'scalar') {
     lines.push(
-      `${indent}${dataVar}["body"] = ${renderCsharpValue(fields.value, indent, 'body', discriminatorTable?.[operationId])};`,
+      `${indent}${dataVar}["body"] = ${renderCsharpValue(fields.value, indent, 'body', discriminators)};`,
     );
   } else if (fields.kind === 'record') {
+    // The JSON body itself can be a discriminated union at the request
+    // root (path `''`): every field above is rendered separately, so
+    // without resolving the root branch FIRST, neither an implicit
+    // injection at the root nor an explicit root-level tag is ever seen,
+    // and each field starts with an empty owner chain -- silently
+    // dropping any nested discriminator scoped to the branch the root
+    // actually selected (PR #668 review, round 6). Resolve the root
+    // branch from every known field name (inline values plus deferred
+    // field names, which are present at runtime even though their value
+    // isn't known at codegen time) before rendering any field.
+    const rootValue: Record<string, unknown> = {};
+    for (const [fieldName, value] of fields.inline) rootValue[fieldName] = value;
+    for (const { fieldName } of fields.deferred) {
+      if (!Object.hasOwn(rootValue, fieldName)) rootValue[fieldName] = null;
+    }
+    let rootOwnerChain: ReadonlySet<string> = new Set();
+    const rootDiscriminator = chooseCsharpDiscriminator(rootValue, discriminators, '');
+    if (rootDiscriminator !== undefined && !Object.hasOwn(rootValue, rootDiscriminator.name)) {
+      lines.push(
+        `${indent}${dataVar}[${stringLiteral(rootDiscriminator.name)}] = ${renderCsharpValue(rootDiscriminator.value, indent)};`,
+      );
+      if (rootDiscriminator.ref !== undefined) rootOwnerChain = new Set([rootDiscriminator.ref]);
+    } else {
+      const explicitRef = findExplicitCsharpDiscriminatorRef(rootValue, discriminators, '');
+      if (explicitRef !== undefined) rootOwnerChain = new Set([explicitRef]);
+    }
     for (const [fieldName, value] of fields.inline) {
       lines.push(
-        `${indent}${dataVar}[${stringLiteral(fieldName)}] = ${renderCsharpValue(value, indent, fieldName, discriminatorTable?.[operationId])};`,
+        `${indent}${dataVar}[${stringLiteral(fieldName)}] = ${renderCsharpValue(value, indent, fieldName, discriminators, rootOwnerChain)};`,
       );
     }
     for (const { fieldName, binding } of fields.deferred) {
