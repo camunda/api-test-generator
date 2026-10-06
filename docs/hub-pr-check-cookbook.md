@@ -146,15 +146,20 @@ To re-run in CI without a new push, dispatch `trigger-api-test-generator.yml` in
   author and a comment on the PR. The repo-wide view of missing tests (not tied to one PR) is the weekly
   report, see [hub-response-coverage-report.md](hub-response-coverage-report.md).
 - *Red but "not a Hub bug":* the check is informational, not required, while reliability proves out.
-- *Slack edited instead of a new message:* same PR, same failure fingerprint.
+- *Slack edited instead of a new message:* the PR failed the same way again, so its message was updated. See "Why a Slack message is sometimes edited instead of posted again" above.
 - *The classifier said `unknown`:* it is told to prefer that over guessing `product`, because
   `product` at high confidence pages hub-medic.
 
 ## Keeping track of pending generator fixes
 
-- **Where:** open issues with the `generator-gap` label. Each title names the camunda-hub PR.
+- **Where:** open issues with the `generator-gap` label. There is **one issue per camunda-hub PR**, not one per
+  endpoint: the title names the PR (`[hub-pr-check] Generator gap on camunda-hub#N`) and the body lists every
+  endpoint that needs work. It is opened only when the PR's own spec change caused the gap.
 - **Who:** the author of that camunda-hub PR (assigned automatically; reassign freely, it will not
   be overwritten).
+- **Not the same as the weekly report.** The weekly coverage report opens an index issue plus one issue per API
+  area. Those are repo-wide, not tied to any PR or author, so they are **not assigned**. Someone on the Hub
+  team has to pick them up (see [hub-response-coverage-report.md](hub-response-coverage-report.md)).
 - **Daily nudge:** `hub-generator-gap-digest.yml` posts to `#camunda-hub-pr-e2e-results` on weekdays
   at 07:00 UTC, listing issues whose camunda-hub PR has merged and whose issue is still open,
   oldest merge first. Silent when there is nothing overdue.
