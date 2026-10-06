@@ -202,6 +202,14 @@ in api-test-generator against any branch.
 
 ## Common failure patterns
 
+- **A new endpoint behind a feature flag fails with 404s.** The generator tests every operation in the spec, whether or not its
+  flag is on. Hub under test is started with a fixed list of flags, set in this repo's `docker/docker-compose.hub.yml`, not
+  by your PR. If your flag is not in that list, the endpoint is not registered and answers 404, so its success and
+  bad-request tests all fail (the nightly fails the same way until it is fixed). It is not a Hub bug. Fix it by adding the
+  flag to `docker/docker-compose.hub.yml` in this repo (the environment variable name must match how Hub reads the
+  property; see the comments in that file), or, if the endpoint should not be tested yet, by suppressing it with a reason
+  and a tracking issue. The alert may call it a generator gap or a product failure; check for 404 on every test of that
+  endpoint first.
 - **New endpoint, nothing generated.** Operation is in `unmappedOperations`. The ontology and
   scenario templates do not cover it yet. Not a Hub bug; the coverage-gap issue tracks it.
 - **Changed response shape.** Generated assertions expect the old schema. Generator gap.
