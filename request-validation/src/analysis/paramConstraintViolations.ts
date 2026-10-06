@@ -1,5 +1,5 @@
 import type { OperationModel, ParameterModel, ValidationScenario } from '../model/types.js';
-import { isBlankValue } from '../util/capabilityGate.js';
+import { type CapabilityGateInfo, isBlankValue } from '../util/capabilityGate.js';
 import {
   buildValidValue,
   isUrlCollapsingPathSegment,
@@ -21,7 +21,7 @@ interface Opts {
    * non-blank mutation is flipped to expect the capability rejection
    * instead of the parameter's own constraint violation.
    */
-  capabilityGates?: ReadonlyMap<string, { disabledDetailContains: string }>;
+  capabilityGates?: ReadonlyMap<string, CapabilityGateInfo>;
 }
 
 function buildViolations(
@@ -84,7 +84,7 @@ function buildViolations(
 function eligibleViolations(
   p: ParameterModel,
   r: ResolvedParamSchema,
-  capabilityGates: ReadonlyMap<string, { disabledDetailContains: string }> | undefined,
+  capabilityGates: ReadonlyMap<string, CapabilityGateInfo> | undefined,
 ): { kind: string; invalid: string }[] {
   const violations = buildViolations(p, r);
   const gate = !p.required ? capabilityGates?.get(p.name) : undefined;
@@ -106,7 +106,7 @@ function eligibleViolations(
  */
 export function isParamConstraintEligible(
   op: OperationModel,
-  capabilityGates?: ReadonlyMap<string, { disabledDetailContains: string }>,
+  capabilityGates?: ReadonlyMap<string, CapabilityGateInfo>,
 ): boolean {
   return op.parameters.some((p) => {
     if (p.in !== 'path' && p.in !== 'query') return false;
@@ -164,7 +164,7 @@ export function generateParamConstraintViolations(
           type: 'param-constraint-violation',
           target: `${p.in}.${p.name}`,
           params,
-          expectedStatus: 400,
+          expectedStatus: gate?.disabledStatus ? Number(gate.disabledStatus) : 400,
           description: gate
             ? `${p.in === 'path' ? 'Path' : 'Query'} parameter ${p.name} is rejected because the capability is disabled, not for its ${v.kind} violation (#404)`
             : `${p.in === 'path' ? 'Path' : 'Query'} parameter ${p.name} ${v.kind} constraint violation`,

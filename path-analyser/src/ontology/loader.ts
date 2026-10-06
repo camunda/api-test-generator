@@ -888,7 +888,7 @@ export interface GlobalContextSeedsViews {
     fieldName: string;
     seedRule: string;
     omitWhenUnbound?: boolean;
-    capabilityGate?: { disabledDetailContains: string };
+    capabilityGate?: { disabledDetailContains: string; disabledStatus?: string };
     rationale?: string;
   }>;
 }

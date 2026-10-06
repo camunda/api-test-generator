@@ -11,7 +11,7 @@
 // `generateOptionalSubShapeVariants` plans is already optional by
 // construction, so only the flat/nested split needs checking.
 
-import type { DomainSemantics } from '../types.js';
+import type { CapabilityGate, DomainSemantics } from '../types.js';
 
 type GateSource = Pick<DomainSemantics, 'globalContextSeeds'>;
 
@@ -24,7 +24,7 @@ type GateSource = Pick<DomainSemantics, 'globalContextSeeds'>;
 export function capabilityGateFor(
   domain: GateSource | undefined,
   fieldPath: string,
-): { disabledDetailContains: string } | undefined {
+): CapabilityGate | undefined {
   if (fieldPath.includes('.')) return undefined;
   const seed = (domain?.globalContextSeeds ?? []).find((s) => s.fieldName === fieldPath);
   return seed?.capabilityGate;

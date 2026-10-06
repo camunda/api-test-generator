@@ -84,6 +84,10 @@ export const GlobalContextSeedSchema = z
     capabilityGate: z
       .object({
         disabledDetailContains: z.string().min(1),
+        disabledStatus: z
+          .string()
+          .regex(/^[0-9]{3}$/)
+          .optional(),
       })
       .strict()
       .optional(),

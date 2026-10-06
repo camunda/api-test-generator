@@ -32,6 +32,9 @@ import {
  */
 
 const GATE = new Map([['tenantId', { disabledDetailContains: 'multi-tenancy is disabled' }]]);
+const GATE_WITH_STATUS = new Map([
+  ['tenantId', { disabledDetailContains: 'tenant scoping is unavailable', disabledStatus: '403' }],
+]);
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return !!v && typeof v === 'object' && !Array.isArray(v);
@@ -226,6 +229,18 @@ describe('request-validation: capability-gated fields (#404)', () => {
         expect(s.expectDetailContains).toBeUndefined();
       }
     });
+
+    it('honors a gate-declared disabledStatus instead of the 400 default', () => {
+      const scenarios = generateConstraintViolations([opOptionalTenantId], {
+        capabilityGates: GATE_WITH_STATUS,
+      });
+      const tenantIdScenarios = scenarios.filter((s) => s.target === 'tenantId');
+      expect(tenantIdScenarios.length).toBeGreaterThan(0);
+      for (const s of tenantIdScenarios) {
+        expect(s.expectedStatus).toBe(403);
+        expect(s.expectDetailContains).toBe('tenant scoping is unavailable');
+      }
+    });
   });
 
   describe('generateParamConstraintViolations', () => {
@@ -285,6 +300,17 @@ describe('request-validation: capability-gated fields (#404)', () => {
       for (const s of scenarios) {
         expect(s.expectedStatus).toBe(400);
         expect(s.expectDetailContains).toBeUndefined();
+      }
+    });
+
+    it('honors a gate-declared disabledStatus instead of the 400 default', () => {
+      const scenarios = generateParamConstraintViolations([opOptionalQueryTenantId], {
+        capabilityGates: GATE_WITH_STATUS,
+      });
+      expect(scenarios.length).toBeGreaterThan(0);
+      for (const s of scenarios) {
+        expect(s.expectedStatus).toBe(403);
+        expect(s.expectDetailContains).toBe('tenant scoping is unavailable');
       }
     });
   });
@@ -370,6 +396,51 @@ describe('request-validation: capability-gated fields (#404)', () => {
       );
       expect(() => loadCapabilityGates(tmpRoot, 'probe')).toThrow(
         /capabilityGate\.disabledDetailContains must be a non-empty string/,
+      );
+    });
+
+    it('collects an optional disabledStatus alongside disabledDetailContains', () => {
+      fs.writeFileSync(
+        path.join(ontologyDir, 'global-context-seeds.json'),
+        JSON.stringify({
+          version: 1,
+          seeds: [
+            {
+              binding: 'tenantIdVar',
+              fieldName: 'tenantId',
+              seedRule: 'tenantIdVar',
+              capabilityGate: {
+                disabledDetailContains: 'tenant scoping is unavailable',
+                disabledStatus: '403',
+              },
+            },
+          ],
+        }),
+      );
+      const gates = loadCapabilityGates(tmpRoot, 'probe');
+      expect(gates.get('tenantId')).toEqual({
+        disabledDetailContains: 'tenant scoping is unavailable',
+        disabledStatus: '403',
+      });
+    });
+
+    it('throws when disabledStatus is not a 3-digit status string', () => {
+      fs.writeFileSync(
+        path.join(ontologyDir, 'global-context-seeds.json'),
+        JSON.stringify({
+          version: 1,
+          seeds: [
+            {
+              binding: 'tenantIdVar',
+              fieldName: 'tenantId',
+              seedRule: 'tenantIdVar',
+              capabilityGate: { disabledDetailContains: 'x', disabledStatus: 'nope' },
+            },
+          ],
+        }),
+      );
+      expect(() => loadCapabilityGates(tmpRoot, 'probe')).toThrow(
+        /capabilityGate\.disabledStatus must be a 3-digit status string/,
       );
     });
 

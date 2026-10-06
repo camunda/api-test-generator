@@ -2320,7 +2320,7 @@ export function generateOptionalSubShapeVariants(
       if (gate) {
         scenario.expectedResult = {
           kind: 'error',
-          code: '400',
+          code: gate.disabledStatus ?? '400',
           detailContains: gate.disabledDetailContains,
         };
       }

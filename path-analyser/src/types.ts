@@ -738,6 +738,14 @@ export interface GlobalContextSeed {
 export interface CapabilityGate {
   /** Substring the rejection response's `detail` must contain. */
   disabledDetailContains: string;
+  /**
+   * HTTP status the disabled-capability rejection returns. Defaults to
+   * `400` (confirmed for `tenantId`) when omitted — only set this when a
+   * future gated field's confirmed rejection status is something else
+   * (e.g. `403`), rather than hardcoding a different literal at each
+   * consuming generator.
+   */
+  disabledStatus?: string;
 }
 
 export interface SemanticTypeSpec {

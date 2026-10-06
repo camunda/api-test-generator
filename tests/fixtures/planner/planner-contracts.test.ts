@@ -1446,4 +1446,35 @@ describe('planner contracts: capability-gated optional leaf flips to expected re
     expect(filterVariant).toBeDefined();
     expect(filterVariant?.expectedResult).toBeUndefined();
   });
+
+  it('honors a gate-declared disabledStatus instead of the 400 default', () => {
+    const fixtureWithCustomStatus: OperationGraph = {
+      ...fixtureCapabilityGatedVariant,
+      domain: {
+        version: 1,
+        globalContextSeeds: [
+          {
+            binding: 'tenantIdVar',
+            fieldName: 'tenantId',
+            seedRule: 'tenantIdVar',
+            capabilityGate: {
+              disabledDetailContains: 'tenant scoping is unavailable',
+              disabledStatus: '403',
+            },
+          },
+        ],
+      },
+    };
+    const variants = generateOptionalSubShapeVariants(fixtureWithCustomStatus, 'deployResource', {
+      maxVariantsPerEndpoint: 10,
+    });
+    const tenantVariant = variants.scenarios.find((s) =>
+      s.populatesSubShape?.leafSemantics?.includes('TenantId'),
+    );
+    expect(tenantVariant?.expectedResult).toEqual({
+      kind: 'error',
+      code: '403',
+      detailContains: 'tenant scoping is unavailable',
+    });
+  });
 });

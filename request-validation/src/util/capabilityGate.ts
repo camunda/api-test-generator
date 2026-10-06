@@ -24,6 +24,13 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
   return !!v && typeof v === 'object' && !Array.isArray(v);
 }
 
+/** A field's capability-gate rejection, as declared in `global-context-seeds.json`. */
+export interface CapabilityGateInfo {
+  disabledDetailContains: string;
+  /** HTTP status the rejection returns. Defaults to 400 when omitted. */
+  disabledStatus?: string;
+}
+
 /**
  * Load the map of field name -> capability-gate rejection detail that
  * `configs/<config>/ontology/global-context-seeds.json` declares. Absent
@@ -33,7 +40,7 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
 export function loadCapabilityGates(
   repoRoot: string,
   configName: string,
-): Map<string, { disabledDetailContains: string }> {
+): Map<string, CapabilityGateInfo> {
   const seedsPath = path.join(
     repoRoot,
     'configs',
@@ -41,7 +48,7 @@ export function loadCapabilityGates(
     'ontology',
     'global-context-seeds.json',
   );
-  const out = new Map<string, { disabledDetailContains: string }>();
+  const out = new Map<string, CapabilityGateInfo>();
   if (!fs.existsSync(seedsPath)) return out;
   let parsed: unknown;
   try {
@@ -85,8 +92,18 @@ export function loadCapabilityGates(
         `Malformed ${seedsPath}: seeds[${i}].capabilityGate.disabledDetailContains must be a non-empty string.`,
       );
     }
+    const { disabledStatus } = entry.capabilityGate;
+    if (
+      disabledStatus !== undefined &&
+      (typeof disabledStatus !== 'string' || !/^[0-9]{3}$/.test(disabledStatus))
+    ) {
+      throw new Error(
+        `Malformed ${seedsPath}: seeds[${i}].capabilityGate.disabledStatus must be a 3-digit status string.`,
+      );
+    }
     out.set(entry.fieldName, {
       disabledDetailContains: entry.capabilityGate.disabledDetailContains,
+      ...(disabledStatus !== undefined ? { disabledStatus } : {}),
     });
   }
   return out;

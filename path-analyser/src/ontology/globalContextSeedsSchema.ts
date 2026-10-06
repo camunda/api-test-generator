@@ -118,6 +118,12 @@ export const globalContextSeedsSchema = {
               minLength: 1,
               description: "Substring the rejection response's `detail` must contain.",
             },
+            disabledStatus: {
+              type: 'string',
+              pattern: '^[0-9]{3}$',
+              description:
+                'HTTP status the disabled-capability rejection returns. Defaults to "400" (confirmed for tenantId) when omitted.',
+            },
           },
         },
         rationale: {

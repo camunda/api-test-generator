@@ -81,7 +81,7 @@ import { normalizeKind, type ValidationScenario } from '../src/model/types.js';
 import { RUNTIME_KEY_FIXTURE_NAMES } from '../src/runtimeKeyFixtureNames.js';
 import { loadSpec } from '../src/spec/loader.js';
 import { resolveSpecSource } from '../src/spec/source.js';
-import { loadCapabilityGates } from '../src/util/capabilityGate.js';
+import { type CapabilityGateInfo, loadCapabilityGates } from '../src/util/capabilityGate.js';
 import { isMultipartOnly, shouldSkipForMultipart } from '../src/util/multipartSkip.js';
 
 interface CliOptions {
@@ -190,7 +190,7 @@ async function main() {
     independentAuthGateMode: 'unavailable',
   };
   let fixturesSourceDir: string | undefined;
-  let capabilityGates: Map<string, { disabledDetailContains: string }> = new Map();
+  let capabilityGates: Map<string, CapabilityGateInfo> = new Map();
   if (repoRoot) {
     configName = getActiveConfigName(repoRoot);
     rvConfig = loadRequestValidationConfig(repoRoot, configName);

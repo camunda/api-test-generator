@@ -1,7 +1,7 @@
 import type { OperationModel, ValidationScenario } from '../model/types.js';
 import { buildBaselineBody } from '../schema/baseline.js';
 import { buildWalk, type WalkNode } from '../schema/walker.js';
-import { isBlankValue } from '../util/capabilityGate.js';
+import { type CapabilityGateInfo, isBlankValue } from '../util/capabilityGate.js';
 import { buildGuaranteedPatternMismatch } from '../util/patternMismatch.js';
 import { makeId } from './common.js';
 
@@ -30,7 +30,7 @@ interface Opts {
    * separately-confirmed case: never validated regardless of value, always
    * 200 with empty results.
    */
-  capabilityGates?: ReadonlyMap<string, { disabledDetailContains: string }>;
+  capabilityGates?: ReadonlyMap<string, CapabilityGateInfo>;
 }
 
 function isObject(v: unknown): v is Record<string, unknown> {
@@ -95,6 +95,7 @@ export function generateConstraintViolations(
         } else if (gate) {
           // Confirmed: any non-blank value is rejected while the
           // capability is off, independent of the value's own shape.
+          if (gate.disabledStatus) scenario.expectedStatus = Number(gate.disabledStatus);
           scenario.expectDetailContains = gate.disabledDetailContains;
           scenario.description = `${target} is rejected because the capability is disabled, not for its ${mut.kind} violation (#404)`;
         }
