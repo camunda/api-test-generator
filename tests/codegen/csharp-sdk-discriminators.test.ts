@@ -584,6 +584,79 @@ describe('buildCsharpDiscriminatorTable — implicit anyOf subtype mapping', () 
 });
 
 /**
+ * Regression coverage for PR #668 review finding (round 4, "previously
+ * missed"): `walkSchema` only descended into a schema's OWN `allOf` /
+ * `oneOf` / `anyOf` array entries. A mapping-only subtype — one reached
+ * exclusively through `discriminator.mapping`, using `allOf` inheritance
+ * (the SUBTYPE's schema carries `allOf: [{ $ref: <base with the
+ * discriminator> }]`, not the other way around) rather than appearing as a
+ * `oneOf`/`anyOf` branch of the base — was therefore never walked at all,
+ * so a discriminator nested inside ITS OWN properties (e.g.
+ * `Success.payload`) never made it into the table even though
+ * `collectSubtypes` already resolves that same mapping target correctly
+ * for subtype SELECTION.
+ */
+describe('buildCsharpDiscriminatorTable — mapping-only subtype traversal', () => {
+  test('finds a discriminator nested inside a subtype reached only via discriminator.mapping (allOf inheritance)', () => {
+    const bundle = {
+      paths: {
+        '/results': {
+          post: {
+            operationId: 'createResult',
+            requestBody: {
+              content: {
+                'application/json': { schema: { $ref: '#/components/schemas/Result' } },
+              },
+            },
+          },
+        },
+      },
+      components: {
+        schemas: {
+          Result: {
+            type: 'object',
+            discriminator: {
+              propertyName: 'status',
+              mapping: { success: '#/components/schemas/Success' },
+            },
+            // No oneOf/anyOf: `Success` is reachable ONLY via `mapping`.
+          },
+          // `Success` points BACK at `Result` via `allOf`, rather than
+          // `Result` listing `Success` under `oneOf`/`anyOf`.
+          Success: {
+            type: 'object',
+            allOf: [{ $ref: '#/components/schemas/Result' }],
+            properties: {
+              payload: { $ref: '#/components/schemas/Payload' },
+            },
+          },
+          Payload: {
+            type: 'object',
+            discriminator: { propertyName: 'kind' },
+            oneOf: [
+              { $ref: '#/components/schemas/TextPayload' },
+              { $ref: '#/components/schemas/JsonPayload' },
+            ],
+          },
+          TextPayload: { type: 'object', properties: { text: { type: 'string' } } },
+          JsonPayload: { type: 'object', properties: { data: { type: 'object' } } },
+        },
+      },
+    };
+
+    const table = buildCsharpDiscriminatorTable(bundle);
+    const paths = (table.createResult ?? []).map((d) => d.path);
+    expect(paths).toContain('');
+    expect(paths).toContain('payload');
+    const payloadEntry = (table.createResult ?? []).find((d) => d.path === 'payload');
+    expect(payloadEntry?.subtypes.map((s) => s.value).sort()).toEqual([
+      'JsonPayload',
+      'TextPayload',
+    ]);
+  });
+});
+
+/**
  * Regression coverage for PR #668 review finding (round 3): request bodies
  * expressed as `{ "$ref": "#/components/requestBodies/X" }` were silently
  * skipped by discriminator discovery because `resolveSchema` only resolved

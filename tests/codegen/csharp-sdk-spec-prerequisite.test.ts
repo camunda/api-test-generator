@@ -5,6 +5,7 @@ import { afterEach, describe, expect, test } from 'vitest';
 import {
   assertCsharpSpecPresent,
   csharpSpecBundlePath,
+  loadCsharpDiscriminatorTable,
 } from '../../materializer/src/csharp-sdk/specPrerequisite.js';
 
 /**
@@ -68,5 +69,79 @@ describe('assertCsharpSpecPresent', () => {
     writeFileSync(specPath, '{}');
 
     expect(() => assertCsharpSpecPresent(repoRoot)).not.toThrow();
+  });
+});
+
+/**
+ * Regression coverage for the gap `assertCsharpSpecPresent` deliberately
+ * leaves open (see its own doc comment and PR #668 review, "Validate
+ * discriminator table before clearing output"): existence-only checking
+ * lets a PARSEABLE bundle that is missing `components.schemas` (the exact
+ * fixture above, `'{}'`) pass the prerequisite check and then throw lazily
+ * inside `emit()`'s memoized discriminator getter — which the `--all`
+ * feature/variant loops in `materializer/src/index.ts` wrap in a per-file
+ * try/catch, swallowing a whole-run precondition failure as "this one
+ * scenario file failed". `loadCsharpDiscriminatorTable` is the eager,
+ * directly-callable replacement `runForTarget` now invokes BEFORE the C#
+ * output directory is wiped: it must throw for every bundle shape that
+ * would previously have failed only inside `emit()`, not just for a
+ * missing file.
+ */
+describe('loadCsharpDiscriminatorTable', () => {
+  const tempDirs: string[] = [];
+
+  function makeSyntheticRepoRoot(): string {
+    const repoRoot = mkdtempSync(path.join(tmpdir(), 'csharp-discriminator-load-'));
+    tempDirs.push(repoRoot);
+    const inheritedConfig = process.env.CONFIG?.trim();
+    const configs: Record<string, unknown> = { 'synthetic-config': {} };
+    if (inheritedConfig) configs[inheritedConfig] = {};
+    writeFileSync(
+      path.join(repoRoot, 'configs.json'),
+      JSON.stringify({ default: 'synthetic-config', configs }),
+    );
+    return repoRoot;
+  }
+
+  afterEach(() => {
+    for (const dir of tempDirs.splice(0)) {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('throws when the bundled spec file is missing', () => {
+    const repoRoot = makeSyntheticRepoRoot();
+    expect(() => loadCsharpDiscriminatorTable(repoRoot)).toThrow(
+      /C# SDK discriminator spec is missing/,
+    );
+  });
+
+  test('throws when a parseable bundle is missing components.schemas', () => {
+    const repoRoot = makeSyntheticRepoRoot();
+    const specPath = csharpSpecBundlePath(repoRoot);
+    mkdirSync(path.dirname(specPath), { recursive: true });
+    writeFileSync(specPath, '{}');
+
+    expect(() => loadCsharpDiscriminatorTable(repoRoot)).toThrow(
+      /missing components\.schemas/,
+    );
+  });
+
+  test('throws a clear error when the bundled spec is not valid JSON', () => {
+    const repoRoot = makeSyntheticRepoRoot();
+    const specPath = csharpSpecBundlePath(repoRoot);
+    mkdirSync(path.dirname(specPath), { recursive: true });
+    writeFileSync(specPath, '{not valid json');
+
+    expect(() => loadCsharpDiscriminatorTable(repoRoot)).toThrow(/not valid JSON/);
+  });
+
+  test('returns the discriminator table once the bundle has components.schemas', () => {
+    const repoRoot = makeSyntheticRepoRoot();
+    const specPath = csharpSpecBundlePath(repoRoot);
+    mkdirSync(path.dirname(specPath), { recursive: true });
+    writeFileSync(specPath, JSON.stringify({ components: { schemas: {} } }));
+
+    expect(() => loadCsharpDiscriminatorTable(repoRoot)).not.toThrow();
   });
 });

@@ -33,10 +33,9 @@ import type { EndpointScenarioCollection, GlobalContextSeed } from 'path-analyse
 import { parseCliArgs } from './cli-args.js';
 import { buildCoverage, type CoverageResult, templateOutputDir } from './coverage.js';
 import { buildCoverageSummary, loadSpecOperationIds } from './coverageSummary.js';
-import { buildCsharpDiscriminatorTable } from './csharp-sdk/discriminators.js';
 import { type CsharpOperationMap, createCsharpEmitter } from './csharp-sdk/emitter.js';
 import { materializeCsharpSupport } from './csharp-sdk/materialize-support.js';
-import { assertCsharpSpecPresent, csharpSpecBundlePath } from './csharp-sdk/specPrerequisite.js';
+import { loadCsharpDiscriminatorTable } from './csharp-sdk/specPrerequisite.js';
 import { createJsSdkEmitter } from './js-sdk/emitter.js';
 import { materializeSdkSupport } from './js-sdk/materialize-support.js';
 import { OperationMapJsonSource } from './js-sdk/sdk-mapping.js';
@@ -109,9 +108,7 @@ function loadCsharpMap(repoRoot: string): CsharpOperationMap {
 }
 
 function loadCsharpDiscriminators(repoRoot: string) {
-  assertCsharpSpecPresent(repoRoot);
-  const bundle: unknown = JSON.parse(fsSync.readFileSync(csharpSpecBundlePath(repoRoot), 'utf-8'));
-  return buildCsharpDiscriminatorTable(bundle);
+  return loadCsharpDiscriminatorTable(repoRoot);
 }
 
 /**
@@ -579,12 +576,22 @@ async function runForTarget(emitter: EmitterStrategy, env: TargetRunEnv): Promis
   // Validate the C# emitter's spec prerequisite BEFORE wiping its output
   // directory and OUTSIDE the per-file try/catch in the `--all` loops
   // below. Those catches are scoped to "this one scenario file failed to
-  // parse/emit"; a missing spec is a whole-run precondition failure and
-  // must abort before `fs.rm` below ever runs, or a healthy prior output
-  // directory gets wiped and replaced with nothing while the process
-  // still exits 0.
+  // parse/emit"; a missing or invalid spec is a whole-run precondition
+  // failure and must abort before `fs.rm` below ever runs, or a healthy
+  // prior output directory gets wiped and replaced with nothing while the
+  // process still exits 0.
+  //
+  // `loadCsharpDiscriminatorTable` checks file *existence* AND actually
+  // loads+validates the discriminator table — a parseable bundle that
+  // exists but is missing `components.schemas` (or otherwise fails
+  // discriminator discovery) would pass an existence-only check, and the
+  // actual failure would then surface lazily inside `emit()`'s memoized
+  // `getDiscriminators()` call, which IS inside the per-file try/catch of
+  // the `--all` loops below. That would swallow the error per scenario
+  // file, so the run would still exit 0 with an already-wiped, now-empty
+  // output directory (PR #668 review).
   if (emitter.id === 'csharp-sdk') {
-    assertCsharpSpecPresent(repoRoot);
+    loadCsharpDiscriminatorTable(repoRoot);
   }
 
   // Wipe before write so stale files from a previous spec version cannot
