@@ -572,6 +572,8 @@ These live under `configs/<active-config>/`:
 | `fixtures/` | BPMN, DMN, and form files used by deployment tests, plus `deployment-artifacts.json` registry |
 | `codegen/playwright/roles/<role>/` | Per-role bundles consumed by the materializer (`call-site.tmpl`, optional `imports.tmpl`, `support.<ext>` or `support.<ext>.tmpl`, `match.json`) |
 
+For **camunda-hub** the files under `configs/camunda-hub/` are `positive-suppress.json`, `request-validation.json`, `conflict-replay.json`, `search-paging.json`, `optional-fields.json`, `coverage-floors.json`, `spec-pin.json`, `ontology/`, `fixtures/` and `codegen/`. What each does is in the [weekly coverage guide](docs/hub-response-coverage-report.md) and the [PR-check cookbook](docs/hub-pr-check-cookbook.md); the table above describes the camunda-oca config.
+
 ## Environment Variables
 
 | Variable | Description |

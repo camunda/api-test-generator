@@ -12,7 +12,7 @@
 - **Medic:** `hub-medic`. After the handover it also covers the generator and the pipeline. Until the workflows are
   changed, alerts about the generator still ping `test-automation-medic`.
 - **The PR check is informational, not required:** a red check does not block merging.
-- **A normal night** has 0 failed tests. Known Hub bugs are skipped, not run, so they do not count as failures. Any number above 0 is news.
+- **A normal night** has 0 failed tests. Known Hub bugs are skipped, not run, so they do not count as failures. Any number above 0 is news. For scale, on 3 to 6 October the positive suite passed 99 to 146 tests and the negative suite 661, with 0 failures.
 
 ## Start here
 
@@ -39,6 +39,8 @@ Open [nightly-camunda-hub](https://github.com/camunda/api-test-generator/actions
    post. The tests may be fine. Ask the generator owner to check the Vault role and the Slack bot. Every scheduled Hub
    workflow (triage, spec-bump, re-enable, weekly report, gap digest) shows the same error.
 3. **The run is red for another reason.** Open the failing step.
+
+While Slack is down you can still read the night's result: open the nightly run, then the job summary and the report artifacts; the triage run keeps its digest as an artifact too. You do not need to re-post it.
 
 **Where to look (GitHub Actions pages, in `camunda/api-test-generator`)**
 
@@ -179,7 +181,7 @@ If one of these breaks, the matching alerts stop or fail. The owner and the rota
 |---|---|---|
 | GitHub App `camunda/qa-processes` | Cloning the private camunda-hub repo, opening and editing issues and comments | Vault, `secret/data/products/qa/ci/github.com/apps/camunda/qa-processes` |
 | Vault login (JWT role and an approle) | Every workflow reads its secrets from Vault | Repo secrets `VAULT_ADDR`, `VAULT_JWT_PATH`, `VAULT_JWT_ROLE`, `VAULT_JWT_AUDIENCE`, `VAULT_ROLE_ID`, `VAULT_SECRET_ID` |
-| Slack bot token | Every post in the Slack channels | Vault, read by `.github/actions/slack-token` |
+| Slack bot token | Every post in the Slack channels | Vault, `secret/data/products/qa/ci/common`, key `SLACK_BOT_USER_OAUTH_TOKEN`, read by `.github/actions/slack-token` |
 | TestRail credentials | Publishing the nightly results | Vault, `secret/data/products/qa/ci/common` |
 | `ANTHROPIC_API_KEY` | The classifier on PRs and the nightly triage | Repo secret |
 | Container registry login | Pulling the PR's Hub image | Repo secrets `CAMUNDA_CONTAINER_REGISTRY_USER` and `_PASSWORD` |
@@ -189,6 +191,7 @@ If one of these breaks, the matching alerts stop or fail. The owner and the rota
 - Anything in this channel you cannot place: write in the channel.
 - The generator itself (new endpoint, wrong test, skip): `test-automation-medic` today, `hub-medic` after the handover.
 - A Hub behaviour question: `hub-medic`.
+- Adding a generator PR next to a Hub change (labels, feature flags): see "Adding or changing an endpoint in Hub" in [hub-pr-check-cookbook.md](hub-pr-check-cookbook.md).
 
 ## Words used
 

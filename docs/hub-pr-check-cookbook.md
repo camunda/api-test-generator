@@ -62,7 +62,7 @@ Still stuck? Post the run link in `#camunda-hub-pr-e2e-results`. Every alert car
 
 ## Who owns what
 
-See "Who owns what" in [hub-nightly-cookbook.md](hub-nightly-cookbook.md). In short: the Hub team owns the generator after the handover, `hub-medic` is the medic, and this check is **informational, not required**.
+See "Who owns what" in [hub-nightly-cookbook.md](hub-nightly-cookbook.md). In short: the Hub team owns the generator after the handover. Medic: `hub-medic` after the handover; until the workflows are changed, generator alerts still ping `test-automation-medic`. This check is **informational, not required**.
 
 ## Adding or changing an endpoint in Hub: do you need a generator PR?
 
