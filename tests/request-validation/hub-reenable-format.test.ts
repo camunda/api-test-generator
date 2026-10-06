@@ -1,10 +1,11 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { chmodSync, cpSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
+const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '../..');
 const script = join(
   dirname(fileURLToPath(import.meta.url)),
   '../../.github/scripts/hub-reenable-format-slack.sh',
@@ -72,5 +73,55 @@ describe('re-enable check Slack message', () => {
 
   it('prints nothing when there is nothing to report', () => {
     expect(format([]).trim()).toBe('');
+  });
+});
+
+describe('re-enable check: suite-wide issues closed as not planned', () => {
+  /** Runs hub-reenable-check.sh in a scratch repo whose gh stub answers every issue with the given state. */
+  function runCheck(knownIssues: unknown[], ghAnswer: string) {
+    const dir = mkdtempSync(join(tmpdir(), 'reenable-check-'));
+    cpSync(join(repoRoot, '.github'), join(dir, '.github'), { recursive: true });
+    mkdirSync(join(dir, 'configs/camunda-hub'), { recursive: true });
+    writeFileSync(join(dir, 'configs/camunda-hub/positive-suppress.json'), '{"suppress":[]}');
+    writeFileSync(
+      join(dir, 'configs/camunda-hub/request-validation.json'),
+      JSON.stringify({ excludeOperations: [], knownIssues }),
+    );
+    mkdirSync(join(dir, 'bin'));
+    writeFileSync(
+      join(dir, 'bin/gh'),
+      `#!/usr/bin/env bash\nif [ "$1 $2" = "issue view" ]; then echo "${ghAnswer}"; fi\n`,
+    );
+    chmodSync(join(dir, 'bin/gh'), 0o755);
+    const summary = join(dir, 'summary.json');
+    execFileSync('bash', [join(dir, '.github/scripts/hub-reenable-check.sh')], {
+      cwd: dir,
+      env: {
+        ...process.env,
+        PATH: `${join(dir, 'bin')}:${process.env.PATH}`,
+        GH_TOKEN_HUB: 'x',
+        SUMMARY_FILE: summary,
+      },
+      stdio: 'ignore',
+    });
+    const items: { url: string; reason?: string }[] = JSON.parse(readFileSync(summary, 'utf8'));
+    return items.map((i) => i.url.split('/').pop());
+  }
+  const ki = (n: number, extra: object = {}) => ({
+    summary: `issue ${n}`,
+    url: `https://github.com/camunda/camunda-hub/issues/${n}`,
+    ...extra,
+  });
+
+  it('reports a not-planned closure until it is acknowledged on the entry', () => {
+    expect(
+      runCheck([ki(11, { acknowledgedNotPlanned: true }), ki(12)], 'CLOSED NOT_PLANNED'),
+    ).toEqual(['12']);
+  });
+
+  it('still reports an acknowledged entry once the issue was actually fixed', () => {
+    expect(runCheck([ki(11, { acknowledgedNotPlanned: true })], 'CLOSED COMPLETED')).toEqual([
+      '11',
+    ]);
   });
 });

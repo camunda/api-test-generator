@@ -262,6 +262,11 @@ export interface KnownIssue {
   url: string;
   /** Optional in-repo tracking issue (e.g. #419 for the version exclusion). */
   tracker?: string;
+  /**
+   * Suite-wide `knownIssues` only: set to true once the Hub issue is closed as not planned and the skip is kept on
+   * purpose, so the daily re-enable check stops reporting it.
+   */
+  acknowledgedNotPlanned?: boolean;
 }
 
 /**
@@ -309,7 +314,8 @@ function isKnownIssue(v: unknown): v is KnownIssue {
     v.summary.trim().length > 0 &&
     typeof v.url === 'string' &&
     v.url.trim().length > 0 &&
-    (v.tracker === undefined || (typeof v.tracker === 'string' && v.tracker.trim().length > 0))
+    (v.tracker === undefined || (typeof v.tracker === 'string' && v.tracker.trim().length > 0)) &&
+    (v.acknowledgedNotPlanned === undefined || typeof v.acknowledgedNotPlanned === 'boolean')
   );
 }
 

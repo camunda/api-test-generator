@@ -47,6 +47,7 @@ addOpScoped(requestValidationPath, 'excludeOperations', requestValidation.exclud
 const suiteWide = (requestValidation.knownIssues ?? []).map((ki) => ({
   url: ki.url,
   summary: ki.summary,
+  acknowledgedNotPlanned: ki.acknowledgedNotPlanned === true,
 }));
 
 console.log(

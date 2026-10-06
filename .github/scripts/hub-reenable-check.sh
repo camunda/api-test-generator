@@ -71,6 +71,12 @@ if [ "$suite_wide_count" -gt 0 ]; then
     reason=${view#* }
     echo "suite-wide: ${url} -> ${state:-unresolved} ${reason}"
     if [ "$state" = "CLOSED" ]; then
+      # A decline someone already looked at (acknowledgedNotPlanned on the entry) is not reported
+      # again: the skip stays on purpose, and repeating it every day would only be noise.
+      if [ "$reason" = "NOT_PLANNED" ] && [ "$(jq -r '.acknowledgedNotPlanned // false' <<<"$item")" = "true" ]; then
+        echo "suite-wide: ${url} closed as not planned and acknowledged — not reporting."
+        continue
+      fi
       add_summary "$(jq -nc --arg url "$url" --arg summary "$summary" --arg reason "$reason" \
         '{type: "suite_wide_closed", url: $url, summary: $summary, reason: $reason}')"
     fi

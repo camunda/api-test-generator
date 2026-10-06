@@ -118,10 +118,11 @@ Skipped tests point to a Hub bug. This job watches those bugs. When one closes, 
 | ⚠️ … breaks local generate/tests | Removing the skip makes generation or tests fail | Open the workflow run and investigate |
 | ⚠️ … no generator token was available | The job could not open a PR this time | Nothing, it retries next run |
 | ⚠️ … opening the unskip PR failed | The PR could not be created | Open the workflow run |
-| 📋 … has no specific operation(s) to auto-unskip | A suite-wide skip. Nothing can be done automatically | Remove its entry from `knownIssues` in `configs/camunda-hub/request-validation.json`, then regenerate and run the suite |
+| 📋 … is closed as **fixed**, no specific operation(s) to auto-unskip | A suite-wide skip whose Hub bug is fixed. Nothing can be done automatically | Remove its entry from `knownIssues` in `configs/camunda-hub/request-validation.json` (and any generator skip it describes), then regenerate and run the suite |
+| 📋 … is closed as **not planned** | Hub will not fix it, so the skip must stay | Set `"acknowledgedNotPlanned": true` on its `knownIssues` entry. The alert then stops. Until you do, it repeats every day |
 
 **Check why the issue closed.** If Hub closed it as "not planned", the skip must stay. The check does not read the close
-reason for skips tied to one operation yet, so this is a human check.
+reason for skips tied to one operation yet, so for those it is a human check.
 
 ## The weekly coverage report (Monday 05:00)
 

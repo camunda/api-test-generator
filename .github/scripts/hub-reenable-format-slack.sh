@@ -38,7 +38,7 @@ jq -r '
       + (if $reason == "NOT_PLANNED" then " as *not planned*" elif $reason == "COMPLETED" then " as *fixed*" else "" end)
       + ". It is a suite-wide skip, so it cannot be re-enabled automatically."
       + (if $reason == "NOT_PLANNED" then
-          "\n   Hub will not fix it, so the skip stays. Reword its `knownIssues` entry in `configs/camunda-hub/request-validation.json` to say so."
+          "\n   Hub will not fix it, so the skip stays. To stop this alert, set `\"acknowledgedNotPlanned\": true` on its `knownIssues` entry in `configs/camunda-hub/request-validation.json`."
         else
           "\n   To re-enable: remove its entry from `knownIssues` in `configs/camunda-hub/request-validation.json` and, if the entry says the generator skips certain tests, remove that skip too. Then regenerate, run the suite and check the tests pass."
         end)

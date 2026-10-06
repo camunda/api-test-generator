@@ -23,7 +23,7 @@ does not yet understand a new endpoint, or that the test run itself had a proble
 | Green (`success`) | The generated tests passed | Nothing |
 | Green, with `coverage gap: ...` in the description | Tests passed, but some endpoints have no generated test yet | Nothing is blocked. Someone should add tests later (see "Things that look wrong but are not" below) |
 | Red (`failure`) | Something failed | Follow the steps below |
-| No status at all | The check was skipped on purpose (draft PR, fork, docs-only change) | Mark the PR ready, or see "Things that look wrong but are not" below |
+| No status at all | Usually skipped on purpose (draft PR, fork, docs-only change). Rarely the status could not be posted | Open the "Trigger api-test-generator hub suite" job on your PR: it says whether the check ran or was skipped. If it ran, ask in `#camunda-hub-pr-e2e-results` |
 
 **If it is red, read the verdict line in the Slack alert (or the run summary). It says which case you are in:**
 
@@ -76,7 +76,7 @@ camunda-hub PR (non-draft, not a fork, base not self-managed/*)
 
 | You see | Meaning | First thing to check |
 |---|---|---|
-| No `api-test-generator/hub-suite` status at all | Skipped: draft PR, fork, `self-managed/*` base, or the path gate | The "Trigger api-test-generator hub suite" job summary on the PR (RUN or SKIPPED) |
+| No `api-test-generator/hub-suite` status at all | Usually skipped: draft PR, fork, `self-managed/*` base, or the path gate. Not proof of a skip: the status is also missing if the reporter could not get its App token | The "Trigger api-test-generator hub suite" job summary on the PR (RUN or SKIPPED) |
 | `success` | Every generated test passed | Nothing. Coverage gaps alone are also reported `success`; the description lists them |
 | `success` with `coverage gap: …` | Tests pass, but some operations have no generated test | The tracking issue `[hub-pr-check] Coverage gap on camunda-hub#N` |
 | `failure`, Slack says **startup** | The PR image never became ready | The run's "Wait for Hub to be ready" step |
@@ -189,7 +189,10 @@ in api-test-generator against any branch.
 ## Things that look wrong but are not
 
 - *No status on my PR:* drafts, forks, `self-managed/*` bases and docs/frontend-only PRs are
-  skipped by design. Mark the PR ready, or dispatch it by hand.
+  skipped by design, but a missing status does not prove that. It is also missing when the reporter could not mint
+  its GitHub App token (that step is allowed to fail without failing the run). First open the "Trigger
+  api-test-generator hub suite" job on the PR, or the `hub-pr-check.yml` run, to see whether the check ran. If it was
+  skipped, mark the PR ready or dispatch it by hand. If it ran, ask in `#camunda-hub-pr-e2e-results`.
 - *Green despite a coverage gap:* intentional. A missing test is not a failing test, and the author of the
   camunda-hub PR cannot fix it (the fix is in the generator), so the check stays green while the gap is made
   visible: the status description, a tracking issue `[hub-pr-check] Coverage gap on camunda-hub#N`, and Slack
