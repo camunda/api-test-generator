@@ -10900,7 +10900,9 @@ describeForThisConfig('bundled-spec invariants: capability-gated fields (#404)',
     );
     if (!existsSync(REQUEST_VALIDATION_DIR)) return;
     const path = join(REQUEST_VALIDATION_DIR, 'tenants-validation-api-tests.spec.ts');
-    if (!existsSync(path)) return;
+    if (!existsSync(path)) {
+      throw new Error('expected emitted spec tenants-validation-api-tests.spec.ts not found');
+    }
     const text = readFileSync(path, 'utf8');
     const matches = [...text.matchAll(/createTenant - Constraint violation tenantId \(#\d+\)/g)];
     expect(
