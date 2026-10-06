@@ -151,19 +151,41 @@ function collectRequired(
   return required;
 }
 
+// A `discriminator.mapping` value is either a full `$ref`-style string (any
+// `REF_PREFIXES` prefix) OR, per the OpenAPI discriminator object spec, a
+// BARE schema name that implicitly refers to `#/components/schemas/<name>`.
+// `oneOf`/`anyOf` branches always carry the full `$ref` form. Without
+// normalizing both to the same canonical string, a bare-name mapping value
+// fails BOTH an exact-string dedupe match against its own `oneOf`/`anyOf`
+// branch AND a `REF_PREFIXES` lookup when resolving its properties — so it
+// surfaces as two conflicting subtype entries for one branch: a broken one
+// (empty properties, keyed on the mapping's own `value`) from the mapping
+// path, and a correct one from the oneOf/anyOf path, instead of being
+// recognised as the same branch.
+function normalizeMappingRef(value: string): string {
+  for (const prefix of Object.keys(REF_PREFIXES)) {
+    if (value.startsWith(prefix)) return value;
+  }
+  return `#/components/schemas/${value}`;
+}
+
 // Builds one subtype entry per `oneOf`/`anyOf` branch not already covered by
 // an explicit `discriminator.mapping` entry. Used both for branches left over
 // after a PARTIAL mapping, and for a discriminator with NO mapping at all
-// (`mapping` is `undefined`, so every branch is "uncovered").
+// (`mapping` is `undefined`, so every branch is "uncovered"). `seenRefs` is
+// MUTATED (refs this call emits are added before returning): callers thread
+// the SAME set through the `oneOf` and `anyOf` calls so a `$ref` listed in
+// BOTH (unusual but spec-legal) is only emitted once, not duplicated.
 function collectUnmappedSubtypes(
   branches: unknown[],
-  mappedRefs: ReadonlySet<string>,
+  seenRefs: Set<string>,
   stores: ComponentStores,
 ): CsharpDiscriminatorSubtype[] {
   const subtypes: CsharpDiscriminatorSubtype[] = [];
   for (const subtype of branches) {
     const name = isRecord(subtype) && typeof subtype.$ref === 'string' ? subtype.$ref : undefined;
-    if (name === undefined || mappedRefs.has(name)) continue;
+    if (name === undefined || seenRefs.has(name)) continue;
+    seenRefs.add(name);
     subtypes.push({
       value: name.split('/').at(-1) ?? name,
       properties: [...collectProperties(subtype, stores)],
@@ -187,11 +209,19 @@ function collectSubtypes(
 
   if (mapping) {
     for (const [value, subtype] of Object.entries(mapping)) {
-      if (typeof subtype === 'string') mappedRefs.add(subtype);
+      // Normalize the mapping value's ref form (if it's a string at all —
+      // the spec requires it, but a malformed spec could supply something
+      // else, in which case it can't be deduped or resolved as a ref and is
+      // left as-is, matching the pre-existing behaviour for that case) BEFORE
+      // using it both to dedupe against oneOf/anyOf and to resolve
+      // properties, so a bare schema-name value resolves and dedupes
+      // identically to the full `$ref` form.
+      const normalizedRef = typeof subtype === 'string' ? normalizeMappingRef(subtype) : subtype;
+      if (typeof normalizedRef === 'string') mappedRefs.add(normalizedRef);
       subtypes.push({
         value,
-        properties: [...collectProperties(subtype, stores)],
-        required: [...collectRequired(subtype, stores)],
+        properties: [...collectProperties(normalizedRef, stores)],
+        required: [...collectRequired(normalizedRef, stores)],
       });
     }
   }
@@ -201,8 +231,12 @@ function collectSubtypes(
   // selection under their implicit schema-name value (per the OpenAPI
   // discriminator spec), so they must still be collected here rather than
   // dropped. When there is no mapping at all, every branch is "unmapped".
-  subtypes.push(...collectUnmappedSubtypes(oneOf, mappedRefs, stores));
-  subtypes.push(...collectUnmappedSubtypes(anyOf, mappedRefs, stores));
+  // `seenRefs` is seeded from `mappedRefs` and then shared across BOTH calls
+  // so a ref already mapped — or already emitted from `oneOf` — is never
+  // re-emitted from `anyOf`.
+  const seenRefs = new Set(mappedRefs);
+  subtypes.push(...collectUnmappedSubtypes(oneOf, seenRefs, stores));
+  subtypes.push(...collectUnmappedSubtypes(anyOf, seenRefs, stores));
   return subtypes;
 }
 
