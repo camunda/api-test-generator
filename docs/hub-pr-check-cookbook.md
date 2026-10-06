@@ -89,6 +89,23 @@ first push and the nightly never fails. Then:
 backstop, not a mistake by anyone. Keep whichever merges first and close the other. Whoever is on call for the nightly
 (`hub-medic` after the handover) watches the nightly; you do not need to wait for them to start the generator PR.
 
+## Can't fix it now? Suppress it as a bridge, and track it
+
+If a test cannot pass yet, suppress it so CI is not blocked, and track it so it does not stay suppressed forever.
+
+1. **Where.** `configs/camunda-hub/positive-suppress.json` drops an operation from the success suite.
+   `configs/camunda-hub/request-validation.json` (`excludeOperations`) drops an operation, or only some bad-request kinds,
+   from the negative suite. Each file's `$comment` explains the keys.
+2. **Add a `knownIssue`** (`summary` and `url`), unless the operation is left out on purpose and there is nothing to
+   revisit. The nightly's "known issues" thread is built from these, and the re-enable check watches them. The `url`
+   must be a camunda-hub issue (`https://github.com/camunda/camunda-hub/issues/N`); the check ignores any other URL.
+   Entries that share a URL must share a summary.
+3. **Who opens the issue.** For a Hub bug, whoever suppresses it files the camunda-hub issue and links it. A generator
+   gap is tracked by an issue in this repo, which the re-enable check cannot watch, so someone has to revisit it by hand.
+4. **Open the suppress PR with the two labels** from the section above.
+5. **It is a bridge.** When the Hub issue closes as fixed, the re-enable check opens a draft PR that removes the skip. If
+   Hub closed it as not planned, the skip stays; see the nightly cookbook.
+
 ---
 
 # Reference for maintainers

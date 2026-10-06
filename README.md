@@ -6,6 +6,11 @@ dependency graph, then emits scenario-driven test files with full request/respon
 Also emits **negative request-validation tests** (intended HTTP 400) covering ~24 distinct
 malformed-request scenario kinds.
 
+> **Owning or working with the camunda-hub suite?** Start with the cookbook that matches you:
+> [your PR check is red, or you are adding an endpoint](docs/hub-pr-check-cookbook.md) ·
+> [a message in the nightly Slack channel](docs/hub-nightly-cookbook.md) ·
+> [the weekly coverage report](docs/hub-response-coverage-report.md).
+
 ## Architecture
 
 ```
