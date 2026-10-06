@@ -4,6 +4,9 @@
 > your PR, you can tell in a few minutes whether it is your problem and what to do. No knowledge of the
 > generator needed. The sections after "Start here" are reference for people who maintain the check.
 
+Messages in `#camunda-hub-nightly-test-results` (nightly run, triage, spec bump, re-enable check, weekly report) are explained in
+[hub-nightly-cookbook.md](hub-nightly-cookbook.md).
+
 ## Start here
 
 **What the check does.** On every camunda-hub PR, a set of API tests is *generated* from your PR's own OpenAPI
