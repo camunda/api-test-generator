@@ -116,9 +116,21 @@ function walkSchema(
   const resolved = resolveSchema(schema, schemas);
   if (!resolved) return;
   const ref = typeof resolved.$ref === 'string' ? resolved.$ref : undefined;
-  const visitKey = `${ref ?? '<inline>'}:${path}`;
-  if (visited.has(visitKey)) return;
-  visited.add(visitKey);
+  // Only dedupe on an actual `$ref` + path pair — that's the only case that
+  // can recur (a schema reachable again via a true graph cycle). An inline
+  // schema has no identity beyond its position in the tree: the wrapper and
+  // EVERY one of its `allOf`/`oneOf`/`anyOf` branches are walked with the
+  // SAME `path` (see below), so keying an inline visit on `<inline>:path`
+  // collided the wrapper with its first inline branch — and every inline
+  // sibling branch under a `$ref`-resolved parent with every other inline
+  // sibling at that same path — silently dropping their discriminators.
+  // Skipping the cache entirely for inline schemas is safe: inline schemas
+  // form a bounded tree with no cycles of their own.
+  if (ref !== undefined) {
+    const visitKey = `${ref}:${path}`;
+    if (visited.has(visitKey)) return;
+    visited.add(visitKey);
+  }
 
   const discriminator = isRecord(resolved.discriminator) ? resolved.discriminator : undefined;
   const propertyName =
