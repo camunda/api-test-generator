@@ -39,34 +39,65 @@ function resolveSchema(schema: unknown, schemas: SchemaRecord): SchemaRecord | u
   return { ...resolved, $ref: schema.$ref };
 }
 
-function collectProperties(schema: unknown, schemas: SchemaRecord): Set<string> {
+// `collectProperties`/`collectRequired` recurse only through `allOf`, so the only cycle they
+// can hit is a `$ref` reappearing in its own `allOf` chain (direct, or via a mutually-recursive
+// chain of `$ref`s). `activeRefs` tracks the refs on the CURRENT descent (mirroring the
+// ancestry-tracking fix in `walkSchema`); each top-level call from `collectSubtypes` starts a
+// fresh set, since a subtype's own allOf chain is independent of its siblings'.
+function collectProperties(
+  schema: unknown,
+  schemas: SchemaRecord,
+  activeRefs: Set<string> = new Set(),
+): Set<string> {
   const properties = new Set<string>();
   const resolved = resolveSchema(schema, schemas);
   if (!resolved) return properties;
-  if (isRecord(resolved.properties)) {
-    for (const name of Object.keys(resolved.properties)) properties.add(name);
+  const ref = typeof resolved.$ref === 'string' ? resolved.$ref : undefined;
+  if (ref !== undefined) {
+    if (activeRefs.has(ref)) return properties;
+    activeRefs.add(ref);
   }
-  if (Array.isArray(resolved.allOf)) {
-    for (const part of resolved.allOf) {
-      for (const name of collectProperties(part, schemas)) properties.add(name);
+  try {
+    if (isRecord(resolved.properties)) {
+      for (const name of Object.keys(resolved.properties)) properties.add(name);
     }
+    if (Array.isArray(resolved.allOf)) {
+      for (const part of resolved.allOf) {
+        for (const name of collectProperties(part, schemas, activeRefs)) properties.add(name);
+      }
+    }
+  } finally {
+    if (ref !== undefined) activeRefs.delete(ref);
   }
   return properties;
 }
 
-function collectRequired(schema: unknown, schemas: SchemaRecord): Set<string> {
+function collectRequired(
+  schema: unknown,
+  schemas: SchemaRecord,
+  activeRefs: Set<string> = new Set(),
+): Set<string> {
   const required = new Set<string>();
   const resolved = resolveSchema(schema, schemas);
   if (!resolved) return required;
-  if (Array.isArray(resolved.required)) {
-    for (const name of resolved.required) {
-      if (typeof name === 'string') required.add(name);
-    }
+  const ref = typeof resolved.$ref === 'string' ? resolved.$ref : undefined;
+  if (ref !== undefined) {
+    if (activeRefs.has(ref)) return required;
+    activeRefs.add(ref);
   }
-  if (Array.isArray(resolved.allOf)) {
-    for (const part of resolved.allOf) {
-      for (const name of collectRequired(part, schemas)) required.add(name);
+  try {
+    if (Array.isArray(resolved.required)) {
+      for (const name of resolved.required) {
+        if (typeof name === 'string') required.add(name);
+      }
     }
+    if (Array.isArray(resolved.allOf)) {
+      for (const part of resolved.allOf) {
+        for (const name of collectRequired(part, schemas, activeRefs)) required.add(name);
+      }
+    }
+  } finally {
+    if (ref !== undefined) activeRefs.delete(ref);
   }
   return required;
 }

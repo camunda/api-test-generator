@@ -299,6 +299,55 @@ describe('buildCsharpDiscriminatorTable — inline schema visit-key collisions',
     expect(table.createNode).toBeUndefined();
     expect(table.createWidget).toBeDefined();
   });
+
+  /**
+   * Regression coverage for PR #668 adversarial finding (round 3): the same
+   * unbounded-`allOf`-recursion bug class just fixed in `walkSchema` (via
+   * `activeRefs`) was untouched in `collectProperties`/`collectRequired` —
+   * the helpers `collectSubtypes` calls for every discriminator's subtypes.
+   * Those two functions recursed through `resolved.allOf` with no
+   * visited/active-ref guard at all, so a discriminator SUBTYPE whose own
+   * `allOf` chain cycles back to itself (not just a growing-path cycle)
+   * stack-overflowed discovery instead of terminating.
+   */
+  test('terminates when a discriminator subtype has a self-cycling allOf chain', () => {
+    const bundle = {
+      paths: {
+        '/nodes': {
+          post: {
+            operationId: 'createNode',
+            requestBody: {
+              content: {
+                'application/json': { schema: { $ref: '#/components/schemas/NodeRequest' } },
+              },
+            },
+          },
+        },
+      },
+      components: {
+        schemas: {
+          NodeRequest: {
+            type: 'object',
+            discriminator: { propertyName: 'kind' },
+            oneOf: [{ $ref: '#/components/schemas/CyclicSubtype' }],
+          },
+          // The subtype's own `allOf` cycles back to itself — a cycle
+          // reachable only through `collectProperties`/`collectRequired`,
+          // not through `walkSchema`'s `properties`/`items`/`oneOf`/`anyOf`
+          // traversal.
+          CyclicSubtype: {
+            type: 'object',
+            allOf: [{ $ref: '#/components/schemas/CyclicSubtype' }],
+            properties: { kind: { type: 'string', enum: ['cyclic'] } },
+          },
+        },
+      },
+    };
+
+    expect(() => buildCsharpDiscriminatorTable(bundle)).not.toThrow();
+    const table = buildCsharpDiscriminatorTable(bundle);
+    expect(table.createNode).toBeDefined();
+  });
 });
 
 /**
