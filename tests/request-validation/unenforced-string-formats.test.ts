@@ -326,6 +326,22 @@ describe('request-validation: unenforcedStringFormats', () => {
       expect(() => loadRequestValidationConfig(tmpRoot, 'probe')).toThrow(/knownIssues/);
     });
 
+    it('rejects acknowledgedNotPlanned on an operation-scoped knownIssue, where it would do nothing', () => {
+      fs.writeFileSync(
+        path.join(cfgDir, 'request-validation.json'),
+        JSON.stringify({
+          excludeOperations: [
+            {
+              operationId: 'createWorkspace',
+              reason: 'x',
+              knownIssue: { summary: 's', url: 'https://x/1', acknowledgedNotPlanned: true },
+            },
+          ],
+        }),
+      );
+      expect(() => loadRequestValidationConfig(tmpRoot, 'probe')).toThrow(/excludeOperations/);
+    });
+
     it('parses a suite-wide knownIssues array and rejects a malformed one', () => {
       fs.writeFileSync(
         path.join(cfgDir, 'request-validation.json'),

@@ -434,7 +434,7 @@ jobs:
             {
               "channel": "${{ env.SLACK_CHANNEL }}",
               "thread_ts": "${{ steps.slack-positive.outputs.ts }}",
-              "text": "ℹ️ *Skipped on purpose because of open Hub bugs.* These tests are left out of the positive suite until the bug is fixed, so a green run does not cover them. Nothing to do here: when one of these issues closes, the daily re-enable check (04:00 UTC) posts in this channel with what to change.\n${{ steps.known-issues.outputs.positive_known_issues }}"
+              "text": "ℹ️ *Known issues limit what the positive suite covers.* The items below are skipped on purpose, or only partly checked, because of a Hub issue, so a green run does not fully cover them. Nothing to do here: the daily re-enable check (04:00 UTC) reports in this channel when one can be reconsidered. An item can stay listed if Hub closed its issue as not planned.\n${{ steps.known-issues.outputs.positive_known_issues }}"
             }
 
       - name: Notify Slack (negative suite)
@@ -464,7 +464,7 @@ jobs:
             {
               "channel": "${{ env.SLACK_CHANNEL }}",
               "thread_ts": "${{ steps.slack-negative.outputs.ts }}",
-              "text": "ℹ️ *Skipped on purpose because of open Hub bugs.* These tests are left out of the negative suite until the bug is fixed, so a green run does not cover them. Nothing to do here: when one of these issues closes, the daily re-enable check (04:00 UTC) posts in this channel with what to change.\n${{ steps.known-issues.outputs.negative_known_issues }}"
+              "text": "ℹ️ *Known issues limit what the negative suite covers.* The items below are skipped on purpose, or only partly checked, because of a Hub issue, so a green run does not fully cover them. Nothing to do here: the daily re-enable check (04:00 UTC) reports in this channel when one can be reconsidered. An item can stay listed if Hub closed its issue as not planned.\n${{ steps.known-issues.outputs.negative_known_issues }}"
             }
 
       - name: Fail the run if the Slack alert did not go out

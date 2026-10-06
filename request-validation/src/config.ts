@@ -315,7 +315,18 @@ function isKnownIssue(v: unknown): v is KnownIssue {
     typeof v.url === 'string' &&
     v.url.trim().length > 0 &&
     (v.tracker === undefined || (typeof v.tracker === 'string' && v.tracker.trim().length > 0)) &&
-    (v.acknowledgedNotPlanned === undefined || typeof v.acknowledgedNotPlanned === 'boolean')
+    // Only suite-wide knownIssues[] entries can be acknowledged; the re-enable check ignores the
+    // flag anywhere else, so accepting it there would be a silent no-op.
+    v.acknowledgedNotPlanned === undefined
+  );
+}
+
+function isSuiteKnownIssue(v: unknown): v is KnownIssue {
+  if (!isPlainObject(v)) return false;
+  const { acknowledgedNotPlanned, ...rest } = v;
+  return (
+    isKnownIssue(rest) &&
+    (acknowledgedNotPlanned === undefined || typeof acknowledgedNotPlanned === 'boolean')
   );
 }
 
@@ -502,7 +513,7 @@ export function loadRequestValidationConfig(
   }
   if ('knownIssues' in parsed) {
     const v = parsed.knownIssues;
-    if (!Array.isArray(v) || !v.every(isKnownIssue)) {
+    if (!Array.isArray(v) || !v.every(isSuiteKnownIssue)) {
       throw new Error(
         `Invalid ${configPath}: "knownIssues" must be an array of { summary, url, tracker? } objects with non-empty strings.`,
       );

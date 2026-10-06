@@ -44,8 +44,10 @@ and look at `nightly-camunda-hub`.
 
 - The **positive** suite sends good requests and expects success (including create, read, delete and restore flows).
   The **negative** suite sends bad requests and expects 400, 401, 403 or 404.
-- **A thread reply under the post** lists tests that are skipped on purpose because of an open Hub bug, each with its
-  issue link. A green run does **not** cover those tests.
+- **A thread reply under the post** lists the known issues that limit what the suite covers. Each item is either skipped
+  on purpose (the tests are left out) or only partly checked (the test still runs but one assertion, such as the error-body
+  shape, is not made), because of a Hub issue, with its link. A green run does **not** fully cover those. An item can stay
+  listed after its issue is closed, when Hub closed it as not planned.
 - **`⚠️ config drift: positive-suppress lists X not in the current spec`**: an operation the config skips no longer exists
   upstream (renamed or removed). The generator owner updates `configs/camunda-hub/positive-suppress.json`.
 
