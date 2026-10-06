@@ -759,6 +759,46 @@ async function main() {
     process.exit(2);
   }
 
+  // nonScalarKeyOperations drift: an id that is not in the bundled spec, or an
+  // operation that no longer has a resource-key body field, restores nothing
+  // and the suite stays green. Warn + annotate, like the stale excludeOperations
+  // check; the Hub invariant makes the zero-case situation fail CI.
+  if (rvConfig.nonScalarKeyOperations?.length) {
+    const keyFields = new Set(Object.keys(rvConfig.resourceFixtures ?? {}));
+    const missingFromSpec = rvConfig.nonScalarKeyOperations.filter((id) => !specOpIds.has(id));
+    const noCases =
+      opts.deep && !opts.onlyOperations
+        ? rvConfig.nonScalarKeyOperations.filter(
+            (id) =>
+              specOpIds.has(id) &&
+              !excludeOps.has(id) &&
+              !deduped.some(
+                (sc) =>
+                  sc.operationId === id &&
+                  sc.type === 'type-mismatch' &&
+                  keyFields.has((sc.target ?? '').split('.').pop() ?? ''),
+              ),
+          )
+        : [];
+    for (const [ids, why] of [
+      [
+        missingFromSpec,
+        'lists operationId(s) not present in the bundled spec (renamed/removed upstream, or a typo)',
+      ],
+      [
+        noCases,
+        'lists operationId(s) that produced no object/array resource-key test (no key field left in its body?)',
+      ],
+    ] as const) {
+      if (ids.length === 0) continue;
+      const list = ids.join(', ');
+      console.warn(
+        `⚠ configs/${configName}/request-validation.json "nonScalarKeyOperations" ${why}: ${list}.`,
+      );
+      console.log(`::warning title=Stale nonScalarKeyOperations entries::${configName}: ${list}`);
+    }
+  }
+
   // ---- Default Multipart Adaptation (pre-emit) ----
   // Behavior: If an operation ONLY declares multipart/form-data (no application/json),
   // convert any JSON-style body scenarios into multipart form submissions and
