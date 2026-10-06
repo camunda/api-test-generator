@@ -306,6 +306,34 @@ function walkSchema(
         for (const part of parts) walkSchema(part, path, stores, output, visited, activeRefs);
       }
     }
+    // A `discriminator.mapping` target does not have to also appear as a
+    // `oneOf`/`anyOf` branch — a mapping-only subtype using `allOf`
+    // inheritance (the subtype's own schema carries `allOf: [{ $ref: ... a
+    // base with this discriminator }]`, not the other way around) is
+    // perfectly spec-legal and is exactly what `collectSubtypes` above
+    // already resolves for subtype selection. But the loop above only
+    // walks `allOf`/`oneOf`/`anyOf` BRANCHES OF THIS SCHEMA, so a mapping
+    // target reached only through `mapping` was never walked at all —
+    // any discriminator nested inside ITS properties (e.g. a
+    // `Success.payload` discriminator one level down) silently never made
+    // it into the table. Walk every mapping target too, at the SAME path
+    // as `oneOf`/`anyOf` branches: `visited` (keyed on `ref:path`) already
+    // dedupes a target also reached via `oneOf`/`anyOf`, and `activeRefs`
+    // already guards the cycle case, so this reuses the same machinery.
+    const mapping = discriminator && isRecord(discriminator.mapping) ? discriminator.mapping : undefined;
+    if (mapping) {
+      for (const target of Object.values(mapping)) {
+        if (typeof target !== 'string') continue;
+        walkSchema(
+          { $ref: normalizeMappingRef(target) },
+          path,
+          stores,
+          output,
+          visited,
+          activeRefs,
+        );
+      }
+    }
   } finally {
     // Pop on exit (not just "never remove"): a sibling branch reached via a
     // DIFFERENT path after this ref's subtree has fully unwound must still
