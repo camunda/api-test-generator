@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { buildDigest, type Item, parseHubPr } from '../../scripts/triage/hub-gap-digest.ts';
+import {
+  buildDigest,
+  type Item,
+  parseHubPr,
+  postDigest,
+} from '../../scripts/triage/hub-gap-digest.ts';
 
 const now = new Date('2026-10-10T07:00:00Z');
 
@@ -72,5 +77,28 @@ describe('buildDigest', () => {
 
   it('escapes markup characters in the assignee', () => {
     expect(buildDigest([item({ assignee: 'a<b>' })], now).text).toContain('a&lt;b&gt;');
+  });
+});
+
+describe('postDigest', () => {
+  it('sends the digest to the channel', async () => {
+    const calls: { url: string; token: string; body: string }[] = [];
+    await postDigest('hello', 'tok', '#chan', async (url, token, init) => {
+      calls.push({ url, token, body: String(init.body) });
+      return { ok: true };
+    });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.url).toBe('https://slack.com/api/chat.postMessage');
+    expect(JSON.parse(calls[0]?.body ?? '{}')).toEqual({
+      channel: '#chan',
+      text: 'hello',
+      unfurl_links: false,
+    });
+  });
+
+  it('throws when Slack rejects the post, so the run fails instead of staying green', async () => {
+    await expect(
+      postDigest('hello', 'tok', '#chan', async () => ({ ok: false, error: 'not_in_channel' })),
+    ).rejects.toThrow('Slack post failed: not_in_channel');
   });
 });

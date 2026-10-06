@@ -144,6 +144,24 @@ function env(name: string): string {
   return process.env[name] ?? '';
 }
 
+type SlackReply = { ok: boolean; error?: string };
+
+/** Posts the digest. Slack answers HTTP 200 with `ok: false` for a rejected post (bot not in the channel, bad token), so
+ * that has to throw: a warning would leave the run green with the alert not posted. `send` is injectable for tests. */
+export async function postDigest(
+  text: string,
+  token: string,
+  channel: string,
+  send: (url: string, token: string, init: RequestInit) => Promise<SlackReply> = api<SlackReply>,
+): Promise<void> {
+  const resp = await send('https://slack.com/api/chat.postMessage', token, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json; charset=utf-8' },
+    body: JSON.stringify({ channel, text, unfurl_links: false }),
+  });
+  if (!resp.ok) throw new Error(`Slack post failed: ${resp.error}`);
+}
+
 async function main(): Promise<void> {
   const repo = env('GITHUB_REPOSITORY') || 'camunda/api-test-generator';
   const dryRun = env('DRY_RUN') === 'true';
@@ -191,20 +209,7 @@ async function main(): Promise<void> {
     console.log(dryRun ? 'Dry run: not posting.' : '::warning::SLACK_TOKEN is empty; not posting.');
     return;
   }
-  const resp = await api<{ ok: boolean; error?: string }>(
-    'https://slack.com/api/chat.postMessage',
-    slackToken,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json; charset=utf-8' },
-      body: JSON.stringify({
-        channel: env('SLACK_CHANNEL') || '#camunda-hub-pr-e2e-results',
-        text: digest.text,
-        unfurl_links: false,
-      }),
-    },
-  );
-  if (!resp.ok) console.error(`::warning::Slack post failed: ${resp.error}`);
+  await postDigest(digest.text, slackToken, env('SLACK_CHANNEL') || '#camunda-hub-pr-e2e-results');
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) await main();
