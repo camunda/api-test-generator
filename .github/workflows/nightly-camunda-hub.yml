@@ -466,3 +466,9 @@ jobs:
               "thread_ts": "${{ steps.slack-negative.outputs.ts }}",
               "text": "ℹ️ Some operations are skipped in the negative suite due to known issues:\n${{ steps.known-issues.outputs.negative_known_issues }}"
             }
+
+      - name: Fail the run if the Slack alert did not go out
+        if: always()
+        uses: ./.github/actions/fail-if-slack-failed
+        with:
+          outcomes: "${{ (steps.slack-secrets.outcome == 'success' && steps.slack-secrets.outputs.SLACK_BOT_TOKEN == '') && 'failure' || steps.slack-secrets.outcome }} ${{ steps.slack-positive.outcome }} ${{ steps.slack-negative.outcome }}"

@@ -917,6 +917,16 @@ self-contained page (`scripts/e2e/hub_coverage_page.py`, text derived from the n
 `hub-coverage-report` artifact as `page.html`, which can be published as a Claude page by hand (use `--fragment` for the wrapper-free form the Artifact tool expects).
 The Slack message links to the run (matrix), that issue, and the per-area issues.
 
+**A failed Slack step fails the scheduled run.** The Slack steps of the scheduled Hub workflows (nightly, triage,
+spec-bump check, re-enable check, weekly coverage report, generator-gap digest) use `continue-on-error`, so a Vault or
+Slack problem never stopped the run and the alert silently did not go out. Each of those jobs now ends with
+[`fail-if-slack-failed`](.github/actions/fail-if-slack-failed/action.yml) (`if: always()`), given the outcome of every
+Slack step; if any failed, or a token step succeeded but produced an empty token (so every post would be skipped), the run is
+marked failed with an error saying the alert did not go out. When you add a Slack
+step to one of these workflows, give it an `id` and add its outcome to that last step;
+`tests/request-validation/slack-failure-marks-run-failed.test.ts` fails if you forget. `hub-pr-check.yml` is deliberately
+excluded: a Slack outage must not make a camunda-hub PR look broken.
+
 The **on-demand hub test** ([hub-ondemand-test.yml](.github/workflows/hub-ondemand-test.yml))
 is the nightly's manual sibling: `workflow_dispatch` it against **any branch**
 (`gh workflow run hub-ondemand-test.yml --ref <branch>`, or the Actions UI branch

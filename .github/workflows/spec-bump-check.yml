@@ -566,6 +566,7 @@ jobs:
           '
 
       - name: Notify Slack (hub spec drift)
+        id: slack-drift
         # Non-blocking + only when the payload built cleanly (don't post a
         # half-built message if slack-payload errored under continue-on-error).
         if: >-
@@ -603,6 +604,7 @@ jobs:
           vault-jwt-audience: ${{ secrets.VAULT_JWT_AUDIENCE }}
 
       - name: Notify Slack (leg failure)
+        id: slack-leg
         if: failure() && steps.slack-failure-secrets.outputs.SLACK_BOT_TOKEN != ''
         continue-on-error: true
         uses: slackapi/slack-github-action@v2
@@ -648,3 +650,9 @@ jobs:
             /tmp/latest-ops.txt
           if-no-files-found: warn
           retention-days: 14
+
+      - name: Fail the run if the Slack alert did not go out
+        if: always()
+        uses: ./.github/actions/fail-if-slack-failed
+        with:
+          outcomes: "${{ (steps.slack-secrets.outcome == 'success' && steps.slack-secrets.outputs.SLACK_BOT_TOKEN == '') && 'failure' || steps.slack-secrets.outcome }} ${{ steps.slack-payload.outcome }} ${{ steps.slack-drift.outcome }} ${{ (steps.slack-failure-secrets.outcome == 'success' && steps.slack-failure-secrets.outputs.SLACK_BOT_TOKEN == '') && 'failure' || steps.slack-failure-secrets.outcome }} ${{ steps.slack-leg.outcome }}"

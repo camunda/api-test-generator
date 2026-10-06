@@ -783,9 +783,10 @@ jobs:
           channel=$(echo "$response" | jq -r '.channel // ""')
           echo "ts=${ts}"           >> "$GITHUB_OUTPUT"
           echo "channel=${channel}" >> "$GITHUB_OUTPUT"
-          [ "$(echo "$response" | jq -r '.ok')" = "true" ] || echo "::warning::Slack summary post failed"
+          [ "$(echo "$response" | jq -r '.ok')" = "true" ] || { echo "::error::Slack summary post failed"; exit 1; }
 
       - name: Post per-failure detail to Slack thread
+        id: slack-thread
         if: ${{ always() && steps.slack.outputs.SLACK_BOT_TOKEN != '' && steps.slack-summary.outputs.ts != '' }}
         continue-on-error: true
         env:
@@ -807,7 +808,7 @@ jobs:
             -H "Authorization: Bearer ${SLACK_BOT_TOKEN}" \
             -H 'Content-Type: application/json; charset=utf-8' \
             -d "$payload")
-          [ "$(echo "$response" | jq -r '.ok')" = "true" ] || echo "::warning::Slack thread reply failed"
+          [ "$(echo "$response" | jq -r '.ok')" = "true" ] || { echo "::error::Slack thread reply failed"; exit 1; }
 
       # --- Persist the triage result ------------------------------------------
       - name: Upload triage artifact
@@ -828,3 +829,9 @@ jobs:
             cat "${GITHUB_WORKSPACE}/hub-triage.json" 2>/dev/null || echo "{}"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Fail the run if the Slack alert did not go out
+        if: always()
+        uses: ./.github/actions/fail-if-slack-failed
+        with:
+          outcomes: "${{ (steps.slack.outcome == 'success' && steps.slack.outputs.SLACK_BOT_TOKEN == '') && 'failure' || steps.slack.outcome }} ${{ steps.slack-summary.outcome }} ${{ steps.slack-thread.outcome }}"
