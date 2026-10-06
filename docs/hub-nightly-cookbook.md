@@ -15,7 +15,7 @@ A set of automatic jobs then post what they found. Most nights the posts are gre
 | When | Message | Needs you? |
 |---|---|---|
 | 02:00 | Two posts: **positive suite** and **negative suite**, each with a ✅ passed / ❌ failed count | Only if ❌ is above 0 |
-| After the run | **Triage digest**, plus a thread with one line per failure | Only if it lists failures |
+| After the run | **Triage digest**, posted every night ("No failures tonight" when green) with links to the nightly run and the triage run, plus a thread with one line per failure | Only if it lists failures |
 | 03:00 | **Spec-bump alert**: the pinned spec is behind Hub's latest | Only the generator owner |
 | 04:00 | **Re-enable check**: a skipped test can come back because its Hub bug is closed | Only the generator owner |
 | Monday 05:00 | **Weekly coverage report** | Only the generator owner |
