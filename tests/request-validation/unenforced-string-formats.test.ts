@@ -323,7 +323,9 @@ describe('request-validation: unenforcedStringFormats', () => {
         loadRequestValidationConfig(tmpRoot, 'probe').knownIssues?.[0]?.acknowledgedNotPlanned,
       ).toBe(true);
       write('yes');
-      expect(() => loadRequestValidationConfig(tmpRoot, 'probe')).toThrow(/knownIssues/);
+      expect(() => loadRequestValidationConfig(tmpRoot, 'probe')).toThrow(
+        /acknowledgedNotPlanned\? \}/,
+      );
     });
 
     it('rejects acknowledgedNotPlanned on an operation-scoped knownIssue, where it would do nothing', () => {

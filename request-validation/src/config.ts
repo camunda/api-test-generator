@@ -518,7 +518,7 @@ export function loadRequestValidationConfig(
     const v = parsed.knownIssues;
     if (!Array.isArray(v) || !v.every(isSuiteKnownIssue)) {
       throw new Error(
-        `Invalid ${configPath}: "knownIssues" must be an array of { summary, url, tracker? } objects with non-empty strings.`,
+        `Invalid ${configPath}: "knownIssues" must be an array of { summary, url, tracker?, acknowledgedNotPlanned? } objects — summary/url/tracker non-empty strings, acknowledgedNotPlanned (when present) a boolean.`,
       );
     }
     merged.knownIssues = v;

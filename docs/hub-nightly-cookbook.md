@@ -41,8 +41,8 @@ and look at `nightly-camunda-hub`.
 
 | The message shows | Whose problem | Do this |
 |---|---|---|
-| ❌ failed above 0, triage says **product** | Probably Hub's | Read the linked issue. `hub-medic` is pinged only when a new Hub issue was filed |
-| Triage says **test-generation** | The generator's, not a Hub bug | Nothing, unless asked. `test-automation-medic` gets the fix PR |
+| ❌ failed above 0, triage says **product** | Probably Hub's | Open the issue linked in the thread. If there is none, filing failed or the finding is marked *report only*: read the finding in the triage run. `hub-medic` is pinged only when a new Hub issue was filed |
+| Triage says **test-generation** | The generator's, not a Hub bug | Nothing, unless asked. When a fix PR or suppress PR was opened it is linked in the thread and `test-automation-medic` is pinged. When none was (the fix was not safe, or opening it failed) the finding is *report only*: read it in the triage run |
 | Triage says **infrastructure** or **flakiness** | Neither | Nothing at first. If the same failure shows up several nights in a row, raise it in the channel |
 | Triage says **known issue** | Already tracked | Nothing. The linked Hub issue is the work item |
 | A spec-bump or re-enable post | The generator owner's | See the sections below |
@@ -157,7 +157,7 @@ with the change since last week in brackets. Gaps become issues. Read
 ## Words used
 
 - **Pin:** the camunda-hub commit the invariant tests are checked against.
-- **Skip:** a test left out on purpose because of an open Hub bug, with an issue link.
+- **Skip:** a test left out on purpose because of a tracked Hub limitation, with an issue link. It can stay after the issue closes, when Hub will not fix it.
 - **Suite-wide skip:** a skip that is not tied to one endpoint.
 - **Medic:** a Slack group on call for a test area.
 - **Unmapped operation / coverage gap:** an endpoint with no generated test at all.
