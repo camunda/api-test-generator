@@ -36,6 +36,7 @@ import { buildCoverageSummary, loadSpecOperationIds } from './coverageSummary.js
 import { buildCsharpDiscriminatorTable } from './csharp-sdk/discriminators.js';
 import { type CsharpOperationMap, createCsharpEmitter } from './csharp-sdk/emitter.js';
 import { materializeCsharpSupport } from './csharp-sdk/materialize-support.js';
+import { assertCsharpSpecPresent, csharpSpecBundlePath } from './csharp-sdk/specPrerequisite.js';
 import { createJsSdkEmitter } from './js-sdk/emitter.js';
 import { materializeSdkSupport } from './js-sdk/materialize-support.js';
 import { OperationMapJsonSource } from './js-sdk/sdk-mapping.js';
@@ -108,13 +109,8 @@ function loadCsharpMap(repoRoot: string): CsharpOperationMap {
 }
 
 function loadCsharpDiscriminators(repoRoot: string) {
-  const specPath = path.join(getSpecBundleDir(repoRoot), 'rest-api.bundle.json');
-  if (!fsSync.existsSync(specPath)) {
-    throw new Error(
-      `C# SDK discriminator spec is missing at ${specPath}; run npm run fetch-spec:ref first.`,
-    );
-  }
-  const bundle: unknown = JSON.parse(fsSync.readFileSync(specPath, 'utf-8'));
+  assertCsharpSpecPresent(repoRoot);
+  const bundle: unknown = JSON.parse(fsSync.readFileSync(csharpSpecBundlePath(repoRoot), 'utf-8'));
   return buildCsharpDiscriminatorTable(bundle);
 }
 
@@ -579,6 +575,17 @@ async function runForTarget(emitter: EmitterStrategy, env: TargetRunEnv): Promis
     emitter.id === 'playwright'
       ? getPlaywrightSuiteDir(repoRoot)
       : getSdkOutDir(repoRoot, emitter.id);
+
+  // Validate the C# emitter's spec prerequisite BEFORE wiping its output
+  // directory and OUTSIDE the per-file try/catch in the `--all` loops
+  // below. Those catches are scoped to "this one scenario file failed to
+  // parse/emit"; a missing spec is a whole-run precondition failure and
+  // must abort before `fs.rm` below ever runs, or a healthy prior output
+  // directory gets wiped and replaced with nothing while the process
+  // still exits 0.
+  if (emitter.id === 'csharp-sdk') {
+    assertCsharpSpecPresent(repoRoot);
+  }
 
   // Wipe before write so stale files from a previous spec version cannot
   // survive into the current run. Each emitter owns its own directory so
