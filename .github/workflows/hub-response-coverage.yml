@@ -34,6 +34,7 @@ permissions:
   contents: read
   actions: read # download the previous run's summary for the week-over-week delta
   issues: write # open / update / close the rolling coverage-gap issue
+  pull-requests: read # list the coverage-fix agent's open PRs for the Slack message
   id-token: write # OIDC → Vault (camunda-hub clone token, Slack token)
 
 concurrency:
@@ -204,6 +205,22 @@ jobs:
           vault-jwt-role: ${{ secrets.VAULT_JWT_ROLE }}
           vault-jwt-audience: ${{ secrets.VAULT_JWT_AUDIENCE }}
 
+      # The coverage-fix agent's open PRs, posted as a reply in the weekly message's thread so the channel
+      # message stays the same. Empty when there are none (no reply). Never fails the run: the weekly message
+      # matters more.
+      - name: List the coverage-fix agent's open PRs
+        id: agent-prs
+        if: always() && steps.slack.outputs.SLACK_BOT_TOKEN != ''
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          bash .github/scripts/hub-coverage-agent-prs.sh coverage-report/agent-prs.txt
+          if [ -s coverage-report/agent-prs.txt ]; then
+            echo "text=$(cat coverage-report/agent-prs.txt)" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Build Slack message
         id: message
         if: always() && steps.slack.outputs.SLACK_BOT_TOKEN != ''
@@ -241,8 +258,26 @@ jobs:
               "mrkdwn": true
             }
 
+      # Reply in the weekly message's thread (same pattern as the nightly known-issue replies). Only when the
+      # weekly message went out and the agent has PRs waiting for review.
+      - name: Notify Slack (coverage-fix agent PRs, thread reply)
+        id: slack-agent-prs
+        if: always() && steps.slack-notify.outputs.ts != '' && steps.agent-prs.outputs.text != ''
+        continue-on-error: true
+        uses: slackapi/slack-github-action@v2
+        with:
+          method: chat.postMessage
+          token: ${{ steps.slack.outputs.SLACK_BOT_TOKEN }}
+          payload: |
+            {
+              "channel": "#camunda-hub-nightly-test-results",
+              "thread_ts": ${{ toJSON(steps.slack-notify.outputs.ts) }},
+              "text": ${{ toJSON(steps.agent-prs.outputs.text) }},
+              "mrkdwn": true
+            }
+
       - name: Fail the run if the Slack alert did not go out
         if: always()
         uses: ./.github/actions/fail-if-slack-failed
         with:
-          outcomes: "${{ (steps.slack.outcome == 'success' && steps.slack.outputs.SLACK_BOT_TOKEN == '') && 'failure' || steps.slack.outcome }} ${{ steps.message.outcome }} ${{ steps.slack-notify.outcome }}"
+          outcomes: "${{ (steps.slack.outcome == 'success' && steps.slack.outputs.SLACK_BOT_TOKEN == '') && 'failure' || steps.slack.outcome }} ${{ steps.message.outcome }} ${{ steps.slack-notify.outcome }} ${{ steps.slack-agent-prs.outcome }}"

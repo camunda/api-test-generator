@@ -43,9 +43,18 @@ Negative tests (the request is wrong)
 Across positive and negative tests
 • Biggest gaps ...
 • N endpoints are missing a test for a success, 400, 401, 404 or 409 response
+
+Tracking issue · Area issues: ...
+```
+
+When the coverage-fix agent has pull requests waiting for review, a reply appears **in the thread** of this message:
+
+```
+🤖 Coverage-fix agent: 1 PR waiting for review. These were opened by the agent, not a person; please review before merging: #690 ...
 ```
 
 - "x of y" means: y endpoints document that response, x of them have a test that asserts it. Not every line counts endpoints: "Optional request fields" counts **fields** (63 of 68 fields), and the lifecycle lines count **resources** or **links**.
+- The thread reply, starting with the robot, appears only when the coverage-fix agent (see "The coverage-fix agent" below) has pull requests waiting for review. It says how many and links each one. A week without such PRs has no reply, and the main message never changes.
 - A number in brackets is the change since the previous scheduled report. Nothing is shown when it is unchanged or there is no previous report.
 - A "resource" is something the API lets you create, read by key and delete (files, folders, projects, and so on; one nested under a parent key counts too); it needs a
   restore flow too if a delete is soft: the key path has a `.../restoration` endpoint and the collection has a
@@ -136,6 +145,46 @@ After the fix:
 `coverage-floors.json` pins the numbers this report shows. The Hub invariant `response coverage does not regress`
 runs the same script and fails a PR if a number drops below its floor, or if an endpoint has no test at all
 and is not listed in `zeroTestOperations` with a reason. A floor only goes up. Never lower one to make CI pass; add the missing test.
+
+## The coverage-fix agent
+
+Some gaps are small and safe to fix, so an AI agent can fix them and open a pull request for a person to review.
+It is a helper: it never merges anything.
+
+**What it fixes.** Only one kind of gap: a resource that has no "create, read, delete" test (the "Lifecycle tests
+(create, read, delete)" line in the Slack message). The fix is to add the resource to
+`configs/camunda-hub/ontology/entity-kinds.json` so the generator writes that test, and to raise the matching number in
+`coverage-floors.json`.
+
+**What it never touches.**
+
+- Tests it would have to hide to make the numbers look better: suppressions, exclusions, known issues, or anything on the
+  list of endpoints with no test at all.
+- Missing 409 responses, "every kind of bad request" gaps and optional fields.
+- Missing 403 and 404 tests. The team decides about those after the pilot.
+- The Hub repository itself. It can only read it.
+
+**One exception to know about.** Sometimes an existing check says "this resource must have its own separate test file",
+and the new lifecycle test replaces those files. The agent may then adapt that one check, but only so that it asks for
+the same proof in the new place, never less. Its pull request has a section called **"Test change: needs careful
+review"** that shows the check before and after. Read that section first.
+
+**How you recognise its pull requests.** They are drafts, opened by the `qa-processes` bot, on a branch starting with
+`fix/coverage-`, with the labels `nightly-api-fix`, `auto-generated` and `hub`. The body ends with
+"Found by the camunda-hub coverage-fix agent". The thread under the weekly Slack message lists the ones still open.
+
+**Who reviews them.** A person, always, like any other pull request. A pull request that sits unreviewed is closed by the
+same stale-PR clean-up as the nightly fix pull requests.
+
+**How it runs today.** By hand only: start the workflow
+[`hub-coverage-fix.yml`](../.github/workflows/hub-coverage-fix.yml) from the Actions tab. It is a **dry run by default**:
+it does everything except push and open the pull request, so you can read what it would do. Untick "dry run" to let it
+open real draft pull requests. It reads the latest weekly report, so run the weekly report first if you changed
+something.
+
+**Limits, checked by code, not by the agent.** At most one pull request per API area, and none for a resource that
+another open fix pull request already covers. After every run a separate job checks, from GitHub, that the agent opened
+only what it was allowed to open, as drafts, with the right labels, and nothing else.
 
 ## Changing the report
 
