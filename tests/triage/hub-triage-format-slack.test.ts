@@ -73,18 +73,18 @@ describe('triage Slack thread: related_commit links', () => {
     expect(text).toContain(`<${HUB}/pull/22|#22>`);
   });
 
-  it('uses the skip icon only when the finding was skipped, and a link icon otherwise', () => {
+  it('uses the wait-and-see icon only when no Hub bug was filed, and a link icon otherwise', () => {
     const skipped = threadLine('8fa152b500 (#1)', 'skip');
-    expect(skipped).toContain(':fast_forward:');
+    expect(skipped).toContain(':hourglass_flowing_sand:');
     expect(skipped).not.toContain(':link:');
     const fixed = threadLine('8fa152b500 (#1)', 'fix-pr');
     expect(fixed).toContain(':link:');
-    expect(fixed).not.toContain(':fast_forward:');
+    expect(fixed).not.toContain(':hourglass_flowing_sand:');
   });
 
   it('prints no related-commit marker when the value is empty or not a string', () => {
-    expect(threadLine('')).not.toContain(':fast_forward:');
-    expect(threadLine(null)).not.toContain(':fast_forward:');
-    expect(threadLine(42)).not.toContain(':fast_forward:');
+    expect(threadLine('')).not.toContain(':hourglass_flowing_sand:');
+    expect(threadLine(null)).not.toContain(':hourglass_flowing_sand:');
+    expect(threadLine(42)).not.toContain(':hourglass_flowing_sand:');
   });
 });

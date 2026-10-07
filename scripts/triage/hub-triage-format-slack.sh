@@ -123,7 +123,7 @@ case "$MODE" in
       | (counters([
           {icon: ":ticket:", label: "known issue", count: n($c.known_issue)},
           {icon: ":memo:", label: "filed", count: n($c.filed)},
-          {icon: ":fast_forward:", label: "skipped (recent change)", count: n($c.skipped_recent_change)}
+          {icon: ":hourglass_flowing_sand:", label: "no Hub bug filed (recent change)", count: n($c.skipped_recent_change)}
         ])) as $meta_line
       # No-false-all-clear applies here too: zero failing TESTS is not the same
       # as zero gaps — a suite can be all-green while an operation has no test
@@ -254,11 +254,11 @@ case "$MODE" in
               "<https://github.com/camunda/camunda-hub/commit/\(.sha)|\(.sha[0:10])>")
         | gsub("#(?<n>[0-9]+)";
                "<https://github.com/camunda/camunda-hub/pull/\(.n)|#\(.n)>");
-      # The icon follows the decision of the agent, not the mere presence of a commit: :fast_forward:
-      # only when the finding was skipped for it, otherwise :link: (context only, e.g. a fix PR
-      # was opened for a new endpoint).
+      # The icon follows the decision of the agent, not the mere presence of a commit:
+      # :hourglass_flowing_sand: only when no Hub bug was filed because of it, otherwise :link:
+      # (context only, e.g. a fix PR was opened for a new endpoint).
       def relatedCommitNote(x; action):
-        (if action == "skip" then ":fast_forward:" else ":link:" end) as $icon
+        (if action == "skip" then ":hourglass_flowing_sand:" else ":link:" end) as $icon
         | if has_url(x) and (x | test("^https?://")) then compactLink(x; $icon)
           elif (x | type) == "string" and (x | length) > 0 then $icon + " " + commitRefLinks(x)
           else "" end;
