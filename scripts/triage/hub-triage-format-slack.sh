@@ -244,9 +244,19 @@ case "$MODE" in
       # URLs) — a bare commit sha would satisfy that and get wrongly
       # wrapped in the Slack <...> link syntax, so this needs its own,
       # stricter check for an actual http(s) URL.
+      # The agent often records related_commit as plain text ("8fa152b500 (#28600)").
+      # Link a leading sha to its camunda-hub commit and each #N to its camunda-hub PR
+      # (the related commit is always searched in camunda-hub main). Only hex digits and
+      # digits are captured, so nothing from the agent text lands inside the link syntax.
+      def commitRefLinks(x):
+        x
+        | sub("^(?<sha>[0-9a-f]{7,40})(?![0-9a-zA-Z])";
+              "<https://github.com/camunda/camunda-hub/commit/\(.sha)|\(.sha[0:10])>")
+        | gsub("#(?<n>[0-9]+)";
+               "<https://github.com/camunda/camunda-hub/pull/\(.n)|#\(.n)>");
       def relatedCommitNote(x):
         if has_url(x) and (x | test("^https?://")) then compactLink(x; ":fast_forward:")
-        elif (x | type) == "string" and (x | length) > 0 then ":fast_forward: " + x
+        elif (x | type) == "string" and (x | length) > 0 then ":fast_forward: " + commitRefLinks(x)
         else "" end;
       # Compact per-finding line: title (category, operationId, short
       # expected/actual) + one links line (icon+URL only, whichever are

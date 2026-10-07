@@ -76,6 +76,8 @@ If the failing operation matches a `knownIssue` (by `operationId` or the issue's
 
 ## Product-bug commit dedup (the core rule)
 
+This applies ONLY to failures you classify as **product** (`subcategory` null) that are **not** an already-known issue. It never applies to `subcategory: "test-generation"`: a recent camunda-hub commit does not excuse a broken generated test. A newly added operation always has a recent commit, and that is exactly when the generator needs a fix, so skipping it would leave the test red every night with no owner. A test-generation failure is handled only by "Fixing a test-generation / coverage bug" below: open the fix PR, or `report-only` with the reason. It is never `action: "skip"` because of a recent commit. Put the recent commit in `related_commit` only as context.
+
 For any failure you classify as **product** and that is **not** an already-known issue:
 
 1. Identify the endpoint/area (operationId, path, resource yaml).
@@ -91,7 +93,7 @@ For any failure you classify as **product** and that is **not** an already-known
    - **A related commit exists** (the response changed because of an intentional recent product change) → **SKIP filing.** Record the failure as `category: "product"`, `related_commit: <sha/url>`, `action: "skip"`, and note "explained by recent intentional change — the generated suite/spec-pin needs to catch up, not a product defect." This is the "if there is a related commit, skip; otherwise no" rule.
    - **No related commit** → this is a **genuine, un-owned product bug**. Set `action: "file"` and go to the filing section below (which dedups against existing issues by a stable fingerprint before creating anything).
 
-Only **product** failures whose response **contradicts** the spec get the commit-dedup + filing treatment. Infrastructure, flakiness, and test-generation (`subcategory: "test-generation"`) failures are reported in Slack but never filed as camunda-hub product issues.
+Only **product** failures whose response **contradicts** the spec get the commit-dedup + filing treatment. Infrastructure, flakiness, and test-generation (`subcategory: "test-generation"`) failures are reported in Slack but never filed as camunda-hub product issues. A test-generation failure is never `action: "skip"` for a recent commit (see the top of this section).
 
 ## Live curl-replay verification (#482 — check this before filing a NEW bug)
 
@@ -181,6 +183,7 @@ This matches by actual diff *content*, not by file path — unlike a one-test-pe
 **Check for a systemic pattern BEFORE fixing anything (do this once, across all this run's failures, before touching the first one).** The nightly runs against camunda-hub's unpinned `main` spec, so a single new OpenAPI construct (a new `discriminator`/`oneOf` shape, a new format, a schema pattern the emitter/materializer has never modeled) can make several *different* operations fail the same way in one night. Before opening any test-generation fix PR, scan this run's other `subcategory: "test-generation"` failures and `unmapped_operations[]` entries for the same underlying cause (same missing schema handling, same emitter gap — not just coincidentally the same HTTP status). If **two or more** failures in this run trace to the same root cause, that is a systemic generator gap, not N independent one-off bugs:
 - Do **not** open one narrow fix PR per affected operation — that patches symptoms across several operations while leaving the actual generator gap unaddressed, and reads to a reviewer as N unrelated PRs instead of one design problem.
 - Set `action: "report-only"` for **all** of them, and in each one's reasoning name the other affected operationIds and the shared root cause, so a human sees the pattern immediately from the Slack digest / triage JSON rather than piecing it together from separate reports.
+- Failures that are all the same operation (for example several scenarios of one new endpoint) are one defect, not a systemic pattern: fix it in one PR if the fix gate below passes. The systemic rule is for two or more different operations.
 
 A single isolated test-generation failure with no sibling in this run still follows the normal fix-vs-report gate below.
 
