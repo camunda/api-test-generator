@@ -34,6 +34,7 @@ permissions:
   contents: read
   actions: read # download the previous run's summary for the week-over-week delta
   issues: write # open / update / close the rolling coverage-gap issue
+  pull-requests: read # list the coverage-fix agent's open PRs for the Slack message
   id-token: write # OIDC → Vault (camunda-hub clone token, Slack token)
 
 concurrency:
@@ -204,6 +205,15 @@ jobs:
           vault-jwt-role: ${{ secrets.VAULT_JWT_ROLE }}
           vault-jwt-audience: ${{ secrets.VAULT_JWT_AUDIENCE }}
 
+      # One extra Slack line when the coverage-fix agent has open PRs, so nobody mistakes them for a person's PRs
+      # or leaves them unreviewed. Empty when there are none. Never fails the run: the weekly message matters more.
+      - name: List the coverage-fix agent's open PRs
+        if: always() && steps.slack.outputs.SLACK_BOT_TOKEN != ''
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash .github/scripts/hub-coverage-agent-prs.sh coverage-report/agent-prs.txt
+
       - name: Build Slack message
         id: message
         if: always() && steps.slack.outputs.SLACK_BOT_TOKEN != ''
@@ -216,6 +226,9 @@ jobs:
             fi
             if [ -s coverage-report/area-links.txt ]; then
               text="$text"$'\n'"Area issues: $(paste -sd'\t' coverage-report/area-links.txt | sed 's/\t/ · /g')"
+            fi
+            if [ -s coverage-report/agent-prs.txt ]; then
+              text="$text"$'\n'"$(cat coverage-report/agent-prs.txt)"
             fi
           else
             text=":warning: *camunda-hub response coverage* could not run this week — see ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"

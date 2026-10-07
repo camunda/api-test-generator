@@ -187,6 +187,8 @@ them. The generator owner fixes it by adding the resource to `configs/camunda-hu
 issue, so only the weekly report shows them.
 Fixing a gap is maintainer work that needs the generator: follow "Closing a gap" in
 [hub-response-coverage-report.md](hub-response-coverage-report.md).
+For a missing create-read-delete test, an AI agent can open a draft pull request for you to review; the weekly message lists
+the ones still open, and "The coverage-fix agent" in the same document explains what it does and never does.
 
 ## What the workflows depend on
 
