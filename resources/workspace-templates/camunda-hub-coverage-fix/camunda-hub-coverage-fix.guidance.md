@@ -56,20 +56,24 @@ one-line reason and do nothing else.
   - `AGENTS.md`: the repo rules. Read "Response-coverage floors" and the commit conventions first.
 - **`{{.WorkspacePath}}/camunda-hub/`**, the product, read only. The authoritative contract is the OpenAPI spec:
   `restapi/public-api/src/main/resources/openapi/v2/*.yaml`.
-- **The report**, in the directory the agent job passes in `$COVERAGE_REPORT_DIR` (`summary.json`, the
-  per-endpoint matrix, `history.csv`). The agent job defines the exact files (epic #678, issue #680).
+- **The report**, in the directory the agent job passes in `$COVERAGE_REPORT_DIR` (`summary.json`,
+  `rows.json` with one row per operation and its `area`, the per-endpoint matrix, `history.csv`).
+- **Your candidates**, in `$COVERAGE_CANDIDATES_FILE`: the gaps you may work on in this run, already limited by
+  the job: `{budget, recentCount, candidates: [{resource, createOp, area}], skipped: [{resource, reason}]}`.
+  Work only on `candidates`. A resource that is not in it is report-only.
 - **Open PRs**, in `$OPEN_FIX_PRS_FILE`: an array of `{number, url, diff}` for every open
   `nightly-api-fix` PR (`[]` if none).
-- **Recent PRs of this agent**, in `$RECENT_COVERAGE_FIX_PRS_FILE`: an array of `{number, url, created_at, diff}`
-  for every PR this agent opened in the last 7 days, open or closed (`[]` if none). The agent job
-  provides it (epic #678, issue #680).
+- **Recent PRs of this agent**, in `$RECENT_COVERAGE_FIX_PRS_FILE`: an array of
+  `{number, url, created_at, branch, state}` for every PR this agent opened in the last 7 days, open or
+  closed (`[]` if none). The agent job provides it.
 
 ## Fixing a lifecycle gap
 
 A lifecycle test builds a resource, reads it back by key, then deletes it. It exists when the resource has
 an entry in `entity-kinds.json` that names its create, get and delete operations.
 
-1. **Pick the target.** Take the resource names from the report's "Missing:" list. Work on at most one
+1. **Pick the target.** Take the resource names from `candidates` in `$COVERAGE_CANDIDATES_FILE` (the report's
+   "Missing:" list shows the gap; the candidates file shows what you may do about it). Work on at most one
    resource per PR.
 2. **Skip it if someone is already on it.** Search `$OPEN_FIX_PRS_FILE` for the resource name and its create
    operation. If it appears in any open PR's diff, record `action: "skip"` with that PR's url. Do not open a second PR.
@@ -147,13 +151,13 @@ Work in `{{.WorkspacePath}}/api-test-generator` (already on `main`).
 
 - **At most 2 PRs in any 7 days.** Count the entries in `$RECENT_COVERAGE_FIX_PRS_FILE`. You may open
   `2` minus that count in this run, and none if the count is already 2. A manual re-run does not reset this.
-- **At most one PR per API area.** The area is the first tag of the resource's create operation in the
-  camunda-hub spec, the same grouping the weekly report uses for its area issues. If two missing resources
+- **At most one PR per API area.** The area is the `area` of the resource's create operation in the report's
+  `rows.json` (the spec's first tag, the same grouping the weekly report uses for its area issues). If two missing resources
   share an area, pick one and report the other. Skip an area when `$OPEN_FIX_PRS_FILE` or
   `$RECENT_COVERAGE_FIX_PRS_FILE` already holds a PR for a resource in that area.
 
-The agent job also enforces both limits in code (issue #680). Do not rely on that: check them yourself, and
-report the gaps you leave for later.
+The job already enforces both limits in code before you start, so `candidates` respects them. Check them
+yourself anyway, and report the gaps you leave for later.
 
 If a push or `gh pr create` fails, do not fail the run. Record `action: "report-only"` with `file_error`.
 
