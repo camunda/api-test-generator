@@ -110,8 +110,12 @@ describe('triage Slack thread: related_commit links', () => {
   });
 
   it('prints no related-commit marker when the value is empty or not a string', () => {
-    expect(threadLine('')).not.toContain(':hourglass_flowing_sand:');
-    expect(threadLine(null)).not.toContain(':hourglass_flowing_sand:');
-    expect(threadLine(42)).not.toContain(':hourglass_flowing_sand:');
+    for (const value of ['', null, 42]) {
+      for (const action of ['report-only', 'skip']) {
+        const text = threadLine(value, { subcategory: null, action });
+        expect(text).not.toContain(':link:');
+        expect(text).not.toContain(':hourglass_flowing_sand:');
+      }
+    }
   });
 });
