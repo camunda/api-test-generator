@@ -98,13 +98,27 @@ or
 | 📦 product | Hub | Hub answers differently from its spec |
 | 🔧 infrastructure | Environment | The run itself had a problem (Hub start, network, registry) |
 | 🎲 flakiness | Unstable test | Passed on a retry, a timing race between calls, or a one-off that did not repeat |
-| 🧪 test-generation | api-test-generator | The generator wrote a wrong test, or none, for an endpoint |
+| 🧪 test-generation | api-test-generator | Our generated test is wrong, or missing, for an endpoint. It is not a Hub bug. The agent opens a fix PR when the fix is small and safe (label `nightly-api-fix`, linked in the thread, `test-automation-medic` is pinged to review it). Otherwise it only reports the failure |
 | 🎫 known issue | Already tracked | A Hub issue exists; nothing new to file |
 | 📝 filed | New | A new Hub issue was opened tonight |
-| ⏩ skipped (recent change) | Explained by a Hub change | An intentional recent Hub change explains the new answer, so no Hub issue is filed; the generated tests or the pin need to catch up |
+| ⏳ no Hub bug filed (recent change) | The agent's guess | The test failed and looks like Hub's fault, but a recent Hub commit changed this endpoint, so the agent decided it was probably on purpose and filed no Hub bug. That is a guess, not a check. Investigate manually |
+| 🔗 related commit | Context only | A recent Hub commit touched this endpoint. It is shown as a hint: it is **not** the reason for anything the agent did or did not do, and no Hub bug was held back because of it. If our test is wrong, the fix PR or the existing PR is linked on the same line |
 
-The **thread** under the digest has one line per failure: the category icon, the operation, and links to the Hub
-issue (🎫) or the fix or suppress PR it opened. Pings:
+The **thread** under the digest has one line per failure: the category icon, the operation, and the links below.
+Each link tells you whether something was done and what you do next:
+
+| Link on the line | What it means | You |
+|---|---|---|
+| 📝 | The agent filed a new Hub issue | Nothing; `hub-medic` handles it |
+| 🎫 | Already tracked by an existing Hub issue | Nothing |
+| 🛠️ | The agent opened a **fix PR** in the generator for a wrong test | Review the PR |
+| ♻️ | An open PR already covers this, so none was opened | Review that PR |
+| ⛔ | A **suppress PR**: it switches the test off until the Hub bug is fixed. This is the only PR that skips a test | Review the PR |
+| ⏳ | No Hub bug filed because a recent Hub commit probably explains the failure (the agent's guess) | Investigate manually |
+| 🔗 | A recent Hub commit touched this endpoint. A hint only: it does **not** mean a PR exists | Look for a 🛠️ or ♻️ on the same line. With neither, the generator owner needs to look |
+| ⚠️ | The agent tried to open an issue or PR and failed | The generator owner fixes it by hand |
+
+Pings:
 
 - **`hub-medic`** is pinged when a **new** Hub issue was filed that night. Never for a failure that is already known.
 - **`test-automation-medic`** is pinged when a generator fix PR or a suppress PR was opened (it needs review), or when the

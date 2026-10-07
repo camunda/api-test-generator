@@ -123,7 +123,7 @@ case "$MODE" in
       | (counters([
           {icon: ":ticket:", label: "known issue", count: n($c.known_issue)},
           {icon: ":memo:", label: "filed", count: n($c.filed)},
-          {icon: ":fast_forward:", label: "skipped (recent change)", count: n($c.skipped_recent_change)}
+          {icon: ":hourglass_flowing_sand:", label: "no Hub bug filed (recent change)", count: n($c.skipped_recent_change)}
         ])) as $meta_line
       # No-false-all-clear applies here too: zero failing TESTS is not the same
       # as zero gaps — a suite can be all-green while an operation has no test
@@ -244,10 +244,30 @@ case "$MODE" in
       # URLs) — a bare commit sha would satisfy that and get wrongly
       # wrapped in the Slack <...> link syntax, so this needs its own,
       # stricter check for an actual http(s) URL.
-      def relatedCommitNote(x):
-        if has_url(x) and (x | test("^https?://")) then compactLink(x; ":fast_forward:")
-        elif (x | type) == "string" and (x | length) > 0 then ":fast_forward: " + x
-        else "" end;
+      # The agent often records related_commit as plain text ("8fa152b500 (#28600)").
+      # Link a leading sha to its camunda-hub commit and each #N to its camunda-hub PR
+      # (the related commit is always searched in camunda-hub main). Only hex digits and
+      # digits are captured, so nothing from the agent text lands inside the link syntax.
+      def commitRefLinks(x):
+        x
+        | sub("^(?<sha>[0-9a-f]{7,40})(?![0-9a-zA-Z])";
+              "<https://github.com/camunda/camunda-hub/commit/\(.sha)|\(.sha[0:10])>")
+        | gsub("#(?<n>[0-9]+)(?![0-9a-zA-Z])";
+               "<https://github.com/camunda/camunda-hub/pull/\(.n)|#\(.n)>");
+      # The icon follows the reason, not the bare action: skip is also used when an open fix PR
+      # already covers a test-generation finding. :hourglass_flowing_sand: only when a product
+      # finding was held back because of the commit (skip, category product, no fix PR, not
+      # test-generation), otherwise :link: (context only).
+      def recentChangeSkip(f):
+        (f.action // "") == "skip"
+        and (f.category // "") == "product"
+        and (f.subcategory // "") != "test-generation"
+        and (has_url(f.fix_pr_url) | not);
+      def relatedCommitNote(x; f):
+        (if recentChangeSkip(f) then ":hourglass_flowing_sand:" else ":link:" end) as $icon
+        | if has_url(x) and (x | test("^https?://")) then compactLink(x; $icon)
+          elif (x | type) == "string" and (x | length) > 0 then $icon + " " + commitRefLinks(x)
+          else "" end;
       # Compact per-finding line: title (category, operationId, short
       # expected/actual) + one links line (icon+URL only, whichever are
       # present — nothing shown for whichever are absent) + medic ping(s) +
@@ -258,7 +278,7 @@ case "$MODE" in
         ((((f.action // "") == "fix-pr" and has_url(f.fix_pr_url)) or has_url(f.suppress_pr_url)) or undecided(f)) as $needs_ta_medic
         | ([
             (if (f.known_issue // false) then compactLink(f.known_issue_url; ":ticket:") else "" end),
-            relatedCommitNote(f.related_commit),
+            relatedCommitNote(f.related_commit; f),
             compactLink(f.issue_url; ":memo:"),
             compactLink(f.fix_pr_url; if (f.action // "") == "skip" then ":recycle:" else ":hammer_and_wrench:" end),
             compactLink(f.suppress_pr_url; ":no_entry:")
