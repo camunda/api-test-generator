@@ -1,0 +1,159 @@
+// Checks what a coverage-fix PR actually changed, from GitHub, so the playbook's boundaries do not rest on the
+// agent's own word. Pure functions: the verify job fetches the file list and the two JSON files (on the PR's
+// base commit and on its head) and passes them in.
+//
+//   - A lifecycle PR may touch entity-kinds.json, coverage-floors.json and the invariants test file. Its only
+//     floor change is lifecycleCreateCovered going up.
+//   - A status (403 or 404) PR may touch request-validation.json and coverage-floors.json, nothing else: no
+//     generator or setup code, no test. In request-validation.json it may only ADD entries to resourceFixtures or
+//     pathResourceFixtures, and it must not change excludeOperations or any other key. Its only floor change is
+//     assertedByStatus[code] going up.
+//   - Neither may lower a floor, or add a zeroTestOperations entry.
+//
+// Runs under plain `node` (type stripping): no enums, no parameter properties.
+
+import type { Candidate } from './hub-coverage-fix-select.ts';
+
+export const FLOORS_FILE = 'configs/camunda-hub/coverage-floors.json';
+export const RV_FILE = 'configs/camunda-hub/request-validation.json';
+export const ENTITY_KINDS_FILE = 'configs/camunda-hub/ontology/entity-kinds.json';
+export const INVARIANTS_FILE = 'configs/camunda-hub/regression-invariants.test.ts';
+
+export interface FileState {
+  rv: unknown;
+  floors: unknown;
+}
+
+// What the verify job gathers for one PR.
+export interface PrChange {
+  files: string[];
+  base: FileState;
+  head: FileState;
+}
+
+const FIXTURE_KEYS = ['resourceFixtures', 'pathResourceFixtures'];
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v);
+}
+
+function same(a: unknown, b: unknown): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
+// Floors: same shape as before, every number equal except the one the PR may raise, which must not go down.
+function checkFloors(base: unknown, head: unknown, candidate: Candidate): string[] {
+  if (!isRecord(base) || !isRecord(head)) return ['coverage-floors.json is not an object'];
+  const out: string[] = [];
+  const code = candidate.kind === 'status' ? candidate.code : undefined;
+  const allowed =
+    candidate.kind === 'status' ? `assertedByStatus.${code}` : 'lifecycleCreateCovered';
+
+  const flat = (o: Record<string, unknown>): Map<string, unknown> => {
+    const m = new Map<string, unknown>();
+    for (const [k, v] of Object.entries(o)) {
+      if (isRecord(v)) {
+        for (const [k2, v2] of Object.entries(v)) m.set(`${k}.${k2}`, v2);
+      } else {
+        m.set(k, v);
+      }
+    }
+    return m;
+  };
+  const b = flat(base);
+  const h = flat(head);
+  for (const key of new Set([...b.keys(), ...h.keys()])) {
+    if (key === 'zeroTestOperations') continue;
+    const was = b.get(key);
+    const now = h.get(key);
+    if (key === allowed) {
+      if (typeof was !== 'number' || typeof now !== 'number' || now < was) {
+        out.push(`the floor ${key} went from ${String(was)} to ${String(now)}`);
+      }
+    } else if (!same(was, now)) {
+      out.push(`the floor ${key} changed from ${String(was)} to ${String(now)}`);
+    }
+  }
+  // zeroTestOperations: nothing may be added.
+  const baseZero = Array.isArray(base.zeroTestOperations) ? base.zeroTestOperations : [];
+  const headZero = Array.isArray(head.zeroTestOperations) ? head.zeroTestOperations : [];
+  const baseIds = new Set(baseZero.map((e) => (isRecord(e) ? e.operationId : e)));
+  for (const e of headZero) {
+    const id = isRecord(e) ? e.operationId : e;
+    if (!baseIds.has(id)) out.push(`zeroTestOperations got a new entry (${String(id)})`);
+  }
+  return out;
+}
+
+// request-validation.json: only new fixture entries.
+function checkRv(base: unknown, head: unknown): string[] {
+  if (!isRecord(base) || !isRecord(head)) return ['request-validation.json is not an object'];
+  const out: string[] = [];
+  for (const key of new Set([...Object.keys(base), ...Object.keys(head)])) {
+    if (FIXTURE_KEYS.includes(key)) continue;
+    if (!same(base[key], head[key])) {
+      out.push(
+        `request-validation.json: "${key}" changed${key === 'excludeOperations' ? ' (an exclusion is a decision, never overturned)' : ''}`,
+      );
+    }
+  }
+  let added = 0;
+  for (const key of FIXTURE_KEYS) {
+    const b = isRecord(base[key]) ? base[key] : {};
+    const h = isRecord(head[key]) ? head[key] : {};
+    for (const [name, value] of Object.entries(b)) {
+      if (!same(h[name], value))
+        out.push(`request-validation.json: ${key}.${name} was changed or removed`);
+    }
+    for (const [name, value] of Object.entries(h)) {
+      if (name in b) continue;
+      added++;
+      if (typeof value !== 'string' || !/^RV_FIXTURE_[A-Z0-9_]+$/.test(value)) {
+        out.push(
+          `request-validation.json: ${key}.${name} is not an RV_FIXTURE_* environment variable name`,
+        );
+      }
+    }
+  }
+  if (added === 0) out.push('request-validation.json: no fixture entry was added');
+  return out;
+}
+
+export function checkChange(candidate: Candidate, change: PrChange): string[] {
+  const out: string[] = [];
+  const allowedFiles =
+    candidate.kind === 'status'
+      ? [RV_FILE, FLOORS_FILE]
+      : [ENTITY_KINDS_FILE, FLOORS_FILE, INVARIANTS_FILE];
+  for (const f of change.files) {
+    if (!allowedFiles.includes(f))
+      out.push(`touches ${f}, which a ${candidate.kind} PR may not change`);
+  }
+  if (!change.files.includes(FLOORS_FILE))
+    out.push('does not raise a floor in coverage-floors.json');
+  out.push(...checkFloors(change.base.floors, change.head.floors, candidate));
+  if (candidate.kind === 'status') out.push(...checkRv(change.base.rv, change.head.rv));
+  return out;
+}
+
+export function parseChanges(v: unknown): Map<number, PrChange> {
+  if (!isRecord(v)) throw new Error('the PR changes file is not an object');
+  const m = new Map<number, PrChange>();
+  for (const [n, c] of Object.entries(v)) {
+    const state = (s: unknown, where: string): FileState => {
+      if (!isRecord(s) || !('rv' in s) || !('floors' in s)) {
+        throw new Error(`PR #${n} changes: ${where} has no rv and floors`);
+      }
+      return { rv: s.rv, floors: s.floors };
+    };
+    if (
+      !isRecord(c) ||
+      !Array.isArray(c.files) ||
+      !c.files.every((f): f is string => typeof f === 'string')
+    ) {
+      throw new Error(`PR #${n} changes have no files list`);
+    }
+    m.set(Number(n), { files: c.files, base: state(c.base, 'base'), head: state(c.head, 'head') });
+  }
+  return m;
+}

@@ -16,6 +16,7 @@
 //   node hub-coverage-fix-verify.ts <prs.json> <selection.json> <result.json> <run-id> <true|false dry run> <bot logins, comma separated> <baseline PR number> <list limit> <pre-run PRs.json>
 
 import { readFileSync } from 'node:fs';
+import { checkChange, type PrChange, parseChanges } from './hub-coverage-fix-diff.ts';
 import {
   BRANCH_PREFIX,
   branchKey,
@@ -190,6 +191,7 @@ export function verify(
   botLogins: string[],
   baseline: number,
   preRun: PreRunPr[],
+  changes?: Map<number, PrChange>,
 ): string[] {
   const violations: string[] = [];
   const candidateByKebab = new Map(selection.candidates.map((c) => [branchKey(c), c]));
@@ -221,6 +223,15 @@ export function verify(
         violations.push(`${p.url} and ${other}: two PRs for the area ${candidate.area}`);
       }
       areas.set(candidate.area, p.url);
+    }
+    // What the PR changed, read from GitHub: the playbook's file and config boundaries are checked here too.
+    if (candidate && changes) {
+      const change = changes.get(p.number);
+      if (!change) {
+        violations.push(`${p.url}: its changed files could not be checked`);
+      } else {
+        for (const v of checkChange(candidate, change)) violations.push(`${p.url}: ${v}`);
+      }
     }
     if (p.state !== 'OPEN') {
       violations.push(`${p.url}: not open (${p.state}), so there is nothing to review`);
@@ -286,6 +297,7 @@ if (process.argv[1] && import.meta.filename === process.argv[1]) {
     baselineArg,
     limitArg,
     preRunPath,
+    changesPath,
   ] = process.argv.slice(2);
   const baseline = Number(baselineArg);
   const limit = Number(limitArg);
@@ -297,11 +309,12 @@ if (process.argv[1] && import.meta.filename === process.argv[1]) {
     !dryRun ||
     !logins ||
     !preRunPath ||
+    !changesPath ||
     !Number.isInteger(baseline) ||
     !Number.isInteger(limit)
   ) {
     console.error(
-      'usage: hub-coverage-fix-verify.ts <prs.json> <selection.json> <result.json> <run-id> <true|false> <bot logins> <baseline PR number> <list limit> <pre-run PRs.json>',
+      'usage: hub-coverage-fix-verify.ts <prs.json> <selection.json> <result.json> <run-id> <true|false> <bot logins> <baseline PR number> <list limit> <pre-run PRs.json> <pr-changes.json>',
     );
     process.exit(2);
   }
@@ -310,6 +323,7 @@ if (process.argv[1] && import.meta.filename === process.argv[1]) {
     const prs = parseRunPrs(JSON.parse(readFileSync(prsPath, 'utf8')));
     const reported = reportedPrUrls(JSON.parse(readFileSync(resultPath, 'utf8')));
     const preRun = parsePreRun(JSON.parse(readFileSync(preRunPath, 'utf8')));
+    const changes = parseChanges(JSON.parse(readFileSync(changesPath, 'utf8')));
     assertComplete(prs, limit);
     const violations = verify(
       prs,
@@ -320,6 +334,7 @@ if (process.argv[1] && import.meta.filename === process.argv[1]) {
       logins.split(','),
       baseline,
       preRun,
+      changes,
     );
     for (const v of violations) console.error(`::error::${v}`);
     process.stdout.write(`${JSON.stringify({ violations }, null, 2)}\n`);

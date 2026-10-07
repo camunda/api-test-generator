@@ -181,7 +181,10 @@ something.
 
 **Limits, checked by code, not by the agent.** At most one pull request per API area, and none for a resource that
 another open fix pull request already covers. After every run a separate job checks, from GitHub, that the agent opened
-only what it was allowed to open, as drafts, with the right labels, and nothing else.
+only what it was allowed to open, as drafts, with the right labels, and nothing else. The same job reads each pull
+request's changed files from GitHub: a lifecycle fix may only touch the entity list, the floors and the one adapted check; a
+403 or 404 fix may only add fixture entries to the request-validation config and raise one floor. Any other file, a
+changed exclusion, a lowered floor or a new "no test at all" entry fails the run.
 
 ## Changing the report
 

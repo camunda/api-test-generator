@@ -65,6 +65,24 @@ describe('verify', () => {
     expect(v.some((m) => m.includes('remove-member-404'))).toBe(true);
   });
 
+  it('checks what a PR changed: a missing change record, or a change outside the boundaries, fails', () => {
+    const ok = pr(1);
+    const noRecord = verify([ok], selection, [URL(1)], RUN, false, BOT, 0, [], new Map());
+    expect(noRecord.some((m) => m.includes('changed files could not be checked'))).toBe(true);
+    const bad = new Map([
+      [
+        1,
+        {
+          files: ['request-validation/src/analysis/authDeny.ts'],
+          base: { rv: {}, floors: {} },
+          head: { rv: {}, floors: {} },
+        },
+      ],
+    ]);
+    const v = verify([ok], selection, [URL(1)], RUN, false, BOT, 0, [], bad);
+    expect(v.some((m) => m.includes('authDeny.ts'))).toBe(true);
+  });
+
   it('accepts a run that opened nothing', () => {
     expect(verify([], selection, [], RUN, false, BOT, 0, [])).toEqual([]);
     expect(verify([], selection, [], RUN, true, BOT, 0, [])).toEqual([]);

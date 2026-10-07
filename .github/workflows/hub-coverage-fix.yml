@@ -593,7 +593,35 @@ jobs:
           limit=1000
           gh pr list --repo "$GITHUB_REPOSITORY" --state all --app qa-processes --limit "$limit" \
             --json number,url,headRefName,baseRefName,isDraft,author,labels,state,headRefOid > "${RUNNER_TEMP}/run-prs.json"
+          # What each of this run's PRs changed, read from GitHub: the changed files, and the two JSON files
+          # the playbook allows it to touch, on the PR's base commit and on its head. The verifier checks the
+          # file list and the config and floor changes against the playbook's boundaries.
+          echo '{}' > "${RUNNER_TEMP}/pr-changes.json"
+          for n in $(jq -r --arg run "$GITHUB_RUN_ID" \
+            '.[] | select(.number > '"$BASELINE"' and (.headRefName | test("^fix/coverage-.+-" + $run + "$"))) | .number' \
+            "${RUNNER_TEMP}/run-prs.json"); do
+            base_sha="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${n}" --jq '.base.sha')"
+            head_sha="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${n}" --jq '.head.sha')"
+            gh api --paginate "repos/${GITHUB_REPOSITORY}/pulls/${n}/files?per_page=100" --jq '.[].filename' > "${RUNNER_TEMP}/files-${n}.txt"
+            for side in base head; do
+              sha="$base_sha"; [ "$side" = head ] && sha="$head_sha"
+              for f in request-validation coverage-floors; do
+                gh api -H "Accept: application/vnd.github.raw" \
+                  "repos/${GITHUB_REPOSITORY}/contents/configs/camunda-hub/${f}.json?ref=${sha}" > "${RUNNER_TEMP}/${side}-${f}-${n}.json"
+              done
+            done
+            jq --arg n "$n" \
+              --rawfile files "${RUNNER_TEMP}/files-${n}.txt" \
+              --slurpfile brv "${RUNNER_TEMP}/base-request-validation-${n}.json" \
+              --slurpfile bfl "${RUNNER_TEMP}/base-coverage-floors-${n}.json" \
+              --slurpfile hrv "${RUNNER_TEMP}/head-request-validation-${n}.json" \
+              --slurpfile hfl "${RUNNER_TEMP}/head-coverage-floors-${n}.json" \
+              '. + {($n): {files: ($files | split("\n") | map(select(. != ""))),
+                           base: {rv: $brv[0], floors: $bfl[0]}, head: {rv: $hrv[0], floors: $hfl[0]}}}' \
+              "${RUNNER_TEMP}/pr-changes.json" > "${RUNNER_TEMP}/pr-changes.new" && mv "${RUNNER_TEMP}/pr-changes.new" "${RUNNER_TEMP}/pr-changes.json"
+          done
           node scripts/triage/hub-coverage-fix-verify.ts \
             "${RUNNER_TEMP}/run-prs.json" "${RUNNER_TEMP}/pre/selection.json" \
             "${RUNNER_TEMP}/post/hub-coverage-fix.json" "$GITHUB_RUN_ID" "$DRY_RUN" \
-            "app/qa-processes,qa-processes[bot]" "$BASELINE" "$limit" "${RUNNER_TEMP}/pre/pre-run-prs.json"
+            "app/qa-processes,qa-processes[bot]" "$BASELINE" "$limit" "${RUNNER_TEMP}/pre/pre-run-prs.json" \
+            "${RUNNER_TEMP}/pr-changes.json"
