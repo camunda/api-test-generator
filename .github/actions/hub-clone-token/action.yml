@@ -41,6 +41,9 @@ runs:
         path: ${{ inputs.vault-jwt-path }}
         role: ${{ inputs.vault-jwt-role }}
         jwtGithubAudience: ${{ inputs.vault-jwt-audience }}
+        # Keep the App id and private key out of the job environment: only the step outputs below
+        # are used, and an exported key would be readable by every later step (and any agent).
+        exportEnv: false
         secrets: |
           secret/data/products/web-modeler/ci/preview-envs GITHUB_PREVIEW_ENVIRONMENTS_APP_ID | APP_ID ;
           secret/data/products/web-modeler/ci/preview-envs GITHUB_PREVIEW_ENVIRONMENTS_APP_PRIVATE_KEY | APP_PRIVATE_KEY ;
