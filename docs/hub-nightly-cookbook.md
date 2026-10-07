@@ -101,7 +101,7 @@ or
 | 🧪 test-generation | api-test-generator | Our generated test is wrong, or missing, for an endpoint. It is not a Hub bug. The agent opens a fix PR when the fix is small and safe (label `nightly-api-fix`, linked in the thread, `test-automation-medic` is pinged to review it). Otherwise it only reports the failure |
 | 🎫 known issue | Already tracked | A Hub issue exists; nothing new to file |
 | 📝 filed | New | A new Hub issue was opened tonight |
-| ⏩ skipped (recent change) | Hub changed on purpose | Hub changed this endpoint a few days ago, so the failure is expected and no Hub bug is filed. The commit that changed it is linked. Usually nothing to do: the tests are rebuilt from the latest spec every night |
+| ⏩ skipped (recent change) | Maybe expected, check it | A recent Hub commit changed this endpoint, so the agent did not file a Hub bug. This is a guess, not a fix. Open the linked commit. If Hub meant the change, our tests may only need to catch up; if the same test fails again the next night, our generator needs a fix, so tell the generator owner |
 | 🔗 related commit | Context only | A recent Hub commit touched this endpoint. It is shown next to the finding as a hint, and the finding was not skipped: if our test is wrong, the fix PR is linked on the same line |
 
 The **thread** under the digest has one line per failure: the category icon, the operation, and links to the Hub
