@@ -158,20 +158,39 @@ response, is not held by an exclusion, and has no scoped exclusion. Work out **w
      `request-validation/src/analysis/authDeny.ts` (it needs a request that reaches the authority check, so every key
      and body field needs a valid, fixture-backed value); for **404**, `isNotFoundEligible` in
      `request-validation/src/analysis/notFoundFakeId.ts` (it needs an ID it can make up).
-2. **Decide which of two outcomes it is.**
-   - **Config only (you may fix it).** The only thing missing is an entry in `resourceFixtures` or
+2. **Decide which of three outcomes it is.** This applies to any operation, not to one endpoint: the question is
+   always "what is the one thing missing, and may I add it?".
+   - **A. Config only (you may fix it).** The only thing missing is an entry in `resourceFixtures` or
      `pathResourceFixtures` in `request-validation.json`, and the value you would map it to is an environment
      variable that setup **already provisions**: for camunda-hub, `scripts/e2e/run-hub.sh` creates the fixtures and
      exports each `RV_FIXTURE_*` variable, so the name must appear there as `export <NAME>`. Search that file for the
      exact name. (`request-validation/templates/support/global-setup.ts` is the generic setup for other configs; it
-     does not decide what exists on Hub.) Add exactly one entry, shaped like its neighbours, nothing else. The
-     verify job checks the same thing from `main`: one new entry, whose variable `run-hub.sh` exports.
-   - **Anything else (report only, with a proposal).** That is: a change to generator code or setup code
-     (`request-validation/src/**`, `request-validation/templates/**`, `scripts/e2e/run-hub.sh`), a fixture that setup does not provision yet,
-     a validation order that makes Hub answer 400 before 403 or 404, an exclusion or scoped exclusion (its
-     `reason` is a decision, never overturn it), or a contract that contradicts the test (for example a documented
-     idempotent delete that cannot return 404). Edit nothing. Write `action: "report-only"` and fill `proposal` (see
-     the output section): the file and the change you would make, and why it is not safe for you to make.
+     does not decide what exists on Hub.) Add exactly one entry, shaped like its neighbours, nothing else.
+   - **B. A fixture that setup does not create yet (you may try it, with care).** The one thing missing is a test
+     fixture (a member, a record the path or body needs) that setup could create through a Hub API call that the spec
+     describes and that `run-hub.sh` already uses in the same style for another fixture. You may then change exactly
+     three things, and nothing else:
+       1. In `scripts/e2e/run-hub.sh`, **add** a few lines next to the fixtures that exist: at most 8 lines, each
+          modelled on its neighbours, that create the fixture with `curl -s -X POST|PUT|PATCH "$POS_URL/..." "${h[@]}"`
+          and `export` one `RV_FIXTURE_*` variable. Never change or remove an existing line. No literal URLs, no
+          credentials, no redirects other than to `/dev/null`, no `export` of anything but `RV_FIXTURE_*`.
+       2. In `request-validation.json`, the one new fixture entry that names that variable (as in A).
+       3. In `coverage-floors.json`, the floor (step 4).
+     Read the spec for the exact request: names, required fields, and a format Hub accepts (Hub often checks the
+     format of a field, such as an email, before it checks permissions). If the spec does not tell you what a valid
+     request is, or the fixture depends on a product setting or a feature flag, it is not B: it is C.
+     In the PR body, give a **"Setup change: needs careful review"** section: the lines you added, the API call they
+     make and the spec section that describes it, and what you could not check without a live Hub. The PR's
+     live-Hub check is the first real proof; a person must not mark the PR ready before it has run and passed.
+   - **C. Anything else (report only, with a proposal).** That is: a change to generator code
+     (`request-validation/src/**`, `request-validation/templates/**`), a fixture that needs a product setting, a
+     cluster, a feature flag or a call the spec does not describe, a validation order that makes Hub answer 400
+     before 403 or 404 and that no fixture can fix, an exclusion or scoped exclusion (its `reason` is a decision,
+     never overturn it), or a contract that contradicts the test (for example a documented idempotent delete that
+     cannot return 404). Edit nothing. Write `action: "report-only"` and fill `proposal` (see the output section):
+     the file and the change you would make, and why it is not safe for you to make.
+   The verify job checks the same boundaries from GitHub after the run: files, one new fixture entry, additions only
+   in `run-hub.sh`, floors.
 3. **Regenerate and measure** exactly as for a lifecycle gap (step 6 there). For a config-only fix, the operation
    must disappear from `missing["<code>"]` in `/tmp/coverage-after/summary.json`, the `codes["<code>"]` numerator
    must go up by exactly one, and nothing else may go down. If it did not move, drop the change and write
@@ -181,7 +200,7 @@ response, is not held by an exclusion, and has no scoped exclusion. Work out **w
 5. **Run the checks last** (step 8 there), then open the PR as the "Opening the PR" section says, with the branch
    `fix/coverage-<operation-kebab>-<code>-<run-id>` and the title
    `test(coverage-fix): add <operationId> <code> test`. In the body, say which config entry you added and why the
-   environment variable it names is already provisioned (give the file and line).
+   environment variable it names is provisioned (give the file and line; for outcome B, the lines you added).
 
 You cannot run a live Hub here, and the order in which Hub checks things (400, then 403, then 404) decides whether
 a new test passes. So be stricter than for a lifecycle gap: if you have any doubt that the request will reach the

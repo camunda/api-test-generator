@@ -156,10 +156,14 @@ It is a helper: it never merges anything.
 1. **A resource with no "create, read, delete" test** (the "Lifecycle tests (create, read, delete)" line in the Slack
    message). The fix is to add the resource to `configs/camunda-hub/ontology/entity-kinds.json` so the generator writes
    that test, and to raise the matching number in `coverage-floors.json`.
-2. **An endpoint with no 403 (forbidden) or 404 (not found) test**, but only when the cause is a small config entry
-   that the test setup can already satisfy. Most of these gaps need a change in the generator's own code or its
-   setup, or are left out on purpose. For those the agent opens **no pull request**. It writes down the change it
-   would make and why a person should decide, and that text appears in the run summary of the workflow run.
+2. **An endpoint with no 403 (forbidden) or 404 (not found) test.** The agent reads the cause first. If the only thing
+   missing is a small config entry that the test setup already supports, it adds it. If the only thing missing is a test
+   record that the setup could create through a Hub call the API spec describes (for example a member), it may add a few
+   lines to `scripts/e2e/run-hub.sh` that create it, as additions only. Its pull request then has a section called
+   **"Setup change: needs careful review"**, and a person must not mark it ready before the live Hub check has run and
+   passed. Everything else (generator code, a product setting, an exclusion that was decided on purpose) gets **no pull
+   request**: the agent writes down the change it would make and why a person should decide, and that text appears in
+   the run summary of the workflow run.
 
 **One exception to know about.** Sometimes an existing check says "this resource must have its own separate test file",
 and the new lifecycle test replaces those files. The agent may then adapt that one check, but only so that it asks for
@@ -183,7 +187,8 @@ something.
 another open fix pull request already covers. After every run a separate job checks, from GitHub, that the agent opened
 only what it was allowed to open, as drafts, with the right labels, and nothing else. The same job reads each pull
 request's changed files from GitHub: a lifecycle fix may only touch the entity list, the floors and the one adapted check; a
-403 or 404 fix may only add fixture entries to the request-validation config and raise one floor. Any other file, a
+403 or 404 fix may only add one fixture entry to the request-validation config, raise one floor and, when a test record is
+missing, add a few lines to `scripts/e2e/run-hub.sh` (additions only, calls to the Hub API only). Any other file, a
 changed exclusion, a lowered floor or a new "no test at all" entry fails the run.
 
 ## Changing the report
