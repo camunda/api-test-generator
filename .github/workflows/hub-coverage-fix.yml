@@ -155,12 +155,21 @@ jobs:
             > "${GITHUB_WORKSPACE}/agent-prs.json"
           echo "PRs in the history: $(jq 'length' "${GITHUB_WORKSPACE}/agent-prs.json")"
 
+      # The open nightly-api-fix PRs with their diffs, read BEFORE the selection: an operation that an open PR
+      # already covers must never become a candidate, so the duplicate check is enforced here in code and does
+      # not depend on the agent looking at the file. (The agent still gets it, as one more input.)
+      - name: Discover open fix PRs (for dedup by diff content)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash .github/scripts/hub-open-fix-prs.sh "${GITHUB_WORKSPACE}/open-fix-prs.json"
+
       - name: Select the gaps the agent may work on
         id: select
         run: |
           set -euo pipefail
           node scripts/triage/hub-coverage-fix-select.ts \
             "${REPORT_DIR}/summary.json" "${REPORT_DIR}/rows.json" "${GITHUB_WORKSPACE}/agent-prs.json" \
+            "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${GITHUB_WORKSPACE}/open-fix-prs.json" \
             > "${GITHUB_WORKSPACE}/selection.json"
           cat "${GITHUB_WORKSPACE}/selection.json"
           echo "count=$(jq '.candidates | length' "${GITHUB_WORKSPACE}/selection.json")" >> "$GITHUB_OUTPUT"
@@ -186,12 +195,6 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
           printf '{"run_url":"%s","gaps":[],"counts":{"considered":0,"pr_opened":0,"report_only":0,"skipped":0},"agent_started":false}\n' \
             "${{ steps.report-run.outputs.run_url }}" > "${GITHUB_WORKSPACE}/hub-coverage-fix.json"
-
-      - name: Discover open fix PRs (for dedup by diff content)
-        if: ${{ steps.select.outputs.count != '0' }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: bash .github/scripts/hub-open-fix-prs.sh "${GITHUB_WORKSPACE}/open-fix-prs.json"
 
       # --- Credentials ---------------------------------------------------------
       - name: Fetch Anthropic key + GitHub PAT from Vault

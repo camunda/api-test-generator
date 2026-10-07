@@ -30,6 +30,13 @@ export interface Row {
   area: string;
 }
 
+// An open nightly-api-fix PR with its diff, as hub-open-fix-prs.sh writes it.
+export interface OpenFixPr {
+  number: number;
+  url: string;
+  diff: string;
+}
+
 export interface Candidate {
   resource: string;
   createOp: string;
@@ -72,6 +79,7 @@ export function select(
   prs: AgentPr[],
   now: Date,
   known: string[] = [],
+  openFixPrs: OpenFixPr[] = [],
 ): Selection {
   const agentPrs = prs.filter((p) => p.headRefName.startsWith(BRANCH_PREFIX));
   const recent = agentPrs.filter((p) => isRecent(p.createdAt, now));
@@ -112,6 +120,14 @@ export function select(
       skipped.push({
         resource,
         reason: 'known and tracked: its create operation is suppressed or excluded in the config',
+      });
+    } else if (openFixPrs.some((p) => p.diff.includes(createOp))) {
+      // Another open fix PR already touches this create operation (an entity-kinds entry, a suppression, ...).
+      // Enforced here, before the agent starts, so it does not depend on the agent reading the PR list.
+      const covering = openFixPrs.find((p) => p.diff.includes(createOp));
+      skipped.push({
+        resource,
+        reason: `${createOp} is already covered by the open PR #${covering?.number ?? '?'}`,
       });
     } else if (!area) {
       skipped.push({ resource, reason: `no operation ${createOp} in the report` });
@@ -163,6 +179,21 @@ export function parseKnown(summary: unknown): string[] {
   return list;
 }
 
+export function parseOpenFixPrs(prs: unknown): OpenFixPr[] {
+  if (!Array.isArray(prs)) throw new Error('the open fix PR list is not a list');
+  return prs.map((p, i) => {
+    if (
+      !isRecord(p) ||
+      typeof p.number !== 'number' ||
+      typeof p.url !== 'string' ||
+      typeof p.diff !== 'string'
+    ) {
+      throw new Error(`open fix PR record ${i} does not have number, url and diff`);
+    }
+    return { number: p.number, url: p.url, diff: p.diff };
+  });
+}
+
 export function parseRows(rows: unknown): Row[] {
   if (!Array.isArray(rows)) throw new Error('rows.json is not a list');
   return rows.map((r, i) => {
@@ -201,10 +232,10 @@ export function parsePrs(prs: unknown): AgentPr[] {
 }
 
 if (process.argv[1] && import.meta.filename === process.argv[1]) {
-  const [summaryPath, rowsPath, prsPath, nowIso] = process.argv.slice(2);
+  const [summaryPath, rowsPath, prsPath, nowIso, openFixPath] = process.argv.slice(2);
   if (!summaryPath || !rowsPath || !prsPath) {
     console.error(
-      'usage: hub-coverage-fix-select.ts <summary.json> <rows.json> <agent-prs.json> [now-iso]',
+      'usage: hub-coverage-fix-select.ts <summary.json> <rows.json> <agent-prs.json> [now-iso] [open-fix-prs.json]',
     );
     process.exit(2);
   }
@@ -217,6 +248,7 @@ if (process.argv[1] && import.meta.filename === process.argv[1]) {
       parsePrs(readJson(prsPath)),
       now,
       parseKnown(summary),
+      openFixPath ? parseOpenFixPrs(readJson(openFixPath)) : [],
     );
     process.stdout.write(`${JSON.stringify(selection, null, 2)}\n`);
   } catch (e) {

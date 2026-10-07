@@ -9,6 +9,7 @@ import {
   kebab,
   parseCreateMissing,
   parseKnown,
+  parseOpenFixPrs,
   parsePrs,
   parseRows,
   resourceFromBranch,
@@ -170,6 +171,25 @@ describe('select', () => {
     expect(s.candidates.map((c) => c.resource)).toEqual(['Widget']);
   });
 
+  it('never selects a create operation that an open fix PR already touches', () => {
+    const open = [
+      { number: 41, url: 'u41', diff: '+      "establishedBy": "createVersion",' },
+      { number: 42, url: 'u42', diff: '+ unrelated change' },
+    ];
+    const s = select(['ProjectSnapshot', 'Version'], rows, [], now, [], open);
+    expect(s.candidates.map((c) => c.resource)).toEqual(['ProjectSnapshot']);
+    expect(s.skipped).toEqual([
+      { resource: 'Version', reason: 'createVersion is already covered by the open PR #41' },
+    ]);
+  });
+
+  it('matches the whole operation id, not just the resource name', () => {
+    // "Version" appears in countless diffs; only createVersion means the operation is being handled.
+    const open = [{ number: 41, url: 'u41', diff: '+ updateVersion and the Version folder' }];
+    const s = select(['Version'], rows, [], now, [], open);
+    expect(s.candidates.map((c) => c.resource)).toEqual(['Version']);
+  });
+
   it('selects nothing when there is no gap', () => {
     const s = select([], rows, [], now);
     expect(s.candidates).toEqual([]);
@@ -201,6 +221,13 @@ describe('parsers are strict', () => {
     expect(() => parseCreateMissing({ lifecycle: { createMissing: ['A', 3] } })).toThrow(
       'lifecycle.createMissing',
     );
+  });
+
+  it('read the open fix PR list strictly', () => {
+    expect(parseOpenFixPrs([{ number: 1, url: 'u', diff: 'd' }])).toHaveLength(1);
+    expect(parseOpenFixPrs([])).toEqual([]);
+    expect(() => parseOpenFixPrs({})).toThrow('not a list');
+    expect(() => parseOpenFixPrs([{ number: 1, url: 'u' }])).toThrow('open fix PR record 0');
   });
 
   it('reject rows that are not a list of operations with an area', () => {
