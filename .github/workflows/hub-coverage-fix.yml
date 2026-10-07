@@ -72,12 +72,27 @@ jobs:
           run_id="$INPUT_RUN_ID"
           if [ -z "$run_id" ]; then
             run_id="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow hub-response-coverage.yml \
-              --status success --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
+              --branch main --status success --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
           fi
           if [ -z "$run_id" ]; then
-            echo "::error::No successful Hub response coverage run found, and none was given."
+            echo "::error::No successful Hub response coverage run on main found, and none was given."
             exit 1
           fi
+          # The report is fed to an agent that can open PRs, so trust it only from the real weekly
+          # workflow, on main of this repository, and only from a successful run. This also covers a run
+          # id given by hand: any run that uploaded an artifact with the same name would otherwise do.
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}" > "${RUNNER_TEMP}/report-run.json"
+          jq -e --arg repo "$GITHUB_REPOSITORY" '
+              .path == ".github/workflows/hub-response-coverage.yml"
+              and .head_branch == "main"
+              and .conclusion == "success"
+              and .repository.full_name == $repo
+              and .head_repository.full_name == $repo
+            ' "${RUNNER_TEMP}/report-run.json" > /dev/null || {
+            echo "::error::Run ${run_id} is not a successful Hub response coverage run on main of ${GITHUB_REPOSITORY}; refusing to use its report."
+            jq -c '{path, head_branch, conclusion, repo: .repository.full_name, head_repo: .head_repository.full_name}' "${RUNNER_TEMP}/report-run.json" || true
+            exit 1
+          }
           echo "run_id=${run_id}" >> "$GITHUB_OUTPUT"
           echo "run_url=${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${run_id}" >> "$GITHUB_OUTPUT"
           echo "Using coverage report run ${run_id}"
@@ -357,6 +372,12 @@ jobs:
           fi
           cp /tmp/hub-coverage-fix.json "${GITHUB_WORKSPACE}/hub-coverage-fix.json"
 
+          # A non-zero exit is a failed agent run even if it left a result file behind.
+          if [ "$agent_rc" -ne 0 ]; then
+            echo "::error::The agent exited with code ${agent_rc}."
+            exit 1
+          fi
+
       # --- Deterministic check of what the agent reports ------------------------
       # The agent's own claim is not trusted: PRs opened must stay within the budget the job
       # computed, point at this repo, and in a dry run there must be none.
@@ -374,7 +395,9 @@ jobs:
           fi
           jq -e '(.gaps | type) == "array" and (.counts | type) == "object"' "$f" >/dev/null \
             || { echo "::error::The agent result has no gaps array or counts object."; exit 1; }
-          opened="$(jq '[.gaps[]? | select(.pr_url != null and .pr_url != "")] | length' "$f")"
+          # Only a fix-pr entry is a PR the agent opened. A skip entry also carries a pr_url: the
+          # existing PR that already covers the operation, which must not count against the budget.
+          opened="$(jq '[.gaps[]? | select(.action == "fix-pr" and .pr_url != null and .pr_url != "")] | length' "$f")"
           bad="$(jq --arg re '^https://github.com/camunda/api-test-generator/pull/[0-9]+$' \
             '[.gaps[]? | select(.pr_url != null and .pr_url != "" and (.pr_url | test($re) | not))] | length' "$f")"
           echo "PRs reported opened: ${opened} (budget ${BUDGET})"
