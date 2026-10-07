@@ -131,3 +131,42 @@ describe('triage Slack thread: related_commit links', () => {
     }
   });
 });
+
+describe('triage Slack summary: recent-change counter', () => {
+  function summary(counts: Record<string, unknown>): string {
+    const dir = mkdtempSync(join(tmpdir(), 'triage-summary-'));
+    const file = join(dir, 'hub-triage.json');
+    writeFileSync(
+      file,
+      JSON.stringify({
+        suites: {
+          positive: { passed: 5, failed: 0, report: 'present' },
+          negative: { passed: 3, failed: 2, report: 'present' },
+        },
+        failures: [
+          { suite: 'negative', operationId: 'a', category: 'product', action: 'skip' },
+          { suite: 'negative', operationId: 'b', category: 'product', action: 'skip' },
+        ],
+        unmapped_operations: [],
+        counts,
+      }),
+    );
+    return execFileSync('bash', [script, file, 'summary'], { encoding: 'utf8' });
+  }
+
+  it('shows the wait-and-see icon, the label and the count', () => {
+    const text = summary({ product: 2, skipped_recent_change: 2 });
+    expect(text).toContain(':hourglass_flowing_sand: no Hub bug filed (recent change): 2');
+  });
+
+  it('does not use the word skipped for it, so it is not mistaken for a suppress PR', () => {
+    const text = summary({ product: 2, skipped_recent_change: 2 });
+    expect(text).not.toContain('skipped (recent change)');
+    expect(text).not.toContain(':fast_forward:');
+  });
+
+  it('omits the counter when nothing was held back for a recent change', () => {
+    const text = summary({ product: 2, skipped_recent_change: 0 });
+    expect(text).not.toContain('no Hub bug filed');
+  });
+});
