@@ -18,9 +18,21 @@ const selection: Selection = {
   budget: 2,
   recentCount: 0,
   candidates: [
-    { resource: 'ProjectSnapshot', createOp: 'createProjectSnapshot', area: 'Project Snapshot' },
-    { resource: 'Version', createOp: 'createVersion', area: 'Version' },
-    { resource: 'Gadget', createOp: 'createGadget', area: 'Version' },
+    {
+      resource: 'ProjectSnapshot',
+      createOp: 'createProjectSnapshot',
+      area: 'Project Snapshot',
+      kind: 'lifecycle',
+    },
+    { resource: 'Version', createOp: 'createVersion', area: 'Version', kind: 'lifecycle' },
+    { resource: 'Gadget', createOp: 'createGadget', area: 'Version', kind: 'lifecycle' },
+    {
+      resource: 'removeMember',
+      createOp: 'removeMember',
+      area: 'Member',
+      kind: 'status',
+      code: '403',
+    },
   ],
   skipped: [],
 };
@@ -43,6 +55,32 @@ function pr(n: number, over: Partial<RunPr> = {}): RunPr {
 describe('verify', () => {
   it('accepts a PR that matches a candidate, is a draft with both labels, and was reported', () => {
     expect(verify([pr(1)], selection, [URL(1)], RUN, false, BOT, 0, [])).toEqual([]);
+  });
+
+  it('accepts a PR for a status gap on its branch key, and rejects the same operation with another code', () => {
+    const ok = pr(1, { headRefName: `fix/coverage-remove-member-403-${RUN}` });
+    expect(verify([ok], selection, [URL(1)], RUN, false, BOT, 0, [])).toEqual([]);
+    const wrong = pr(2, { headRefName: `fix/coverage-remove-member-404-${RUN}` });
+    const v = verify([wrong], selection, [URL(2)], RUN, false, BOT, 0, []);
+    expect(v.some((m) => m.includes('remove-member-404'))).toBe(true);
+  });
+
+  it('checks what a PR changed: a missing change record, or a change outside the boundaries, fails', () => {
+    const ok = pr(1);
+    const noRecord = verify([ok], selection, [URL(1)], RUN, false, BOT, 0, [], new Map());
+    expect(noRecord.some((m) => m.includes('changed files could not be checked'))).toBe(true);
+    const bad = new Map([
+      [
+        1,
+        {
+          files: ['request-validation/src/analysis/authDeny.ts'],
+          base: { rv: {}, floors: {} },
+          head: { rv: {}, floors: {} },
+        },
+      ],
+    ]);
+    const v = verify([ok], selection, [URL(1)], RUN, false, BOT, 0, [], bad);
+    expect(v.some((m) => m.includes('authDeny.ts'))).toBe(true);
   });
 
   it('accepts a run that opened nothing', () => {
@@ -315,6 +353,20 @@ describe('parsers', () => {
       'candidate 0',
     );
     expect(parseSelection({ budget: 1, candidates: [] }).budget).toBe(1);
+    const status = {
+      resource: 'removeMember',
+      createOp: 'removeMember',
+      area: 'Member',
+      kind: 'status',
+      code: '403',
+    };
+    expect(parseSelection({ budget: 1, candidates: [status] }).candidates[0]).toEqual(status);
+    expect(() => parseSelection({ budget: 1, candidates: [{ ...status, code: '500' }] })).toThrow(
+      'without a 403 or 404 code',
+    );
+    expect(() => parseSelection({ budget: 1, candidates: [{ ...status, kind: 'other' }] })).toThrow(
+      'unknown kind',
+    );
   });
 
   it('reads a gh pr list record with the author login and label names', () => {

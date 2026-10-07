@@ -21,16 +21,16 @@ fine and hides a gap.
 
 | Gap in the report | You |
 |---|---|
-| A resource with no create, read, delete test (`lifecycle.create`, listed under "Missing:" in the report) | **Fix.** The only gap in the pilot. See "Fixing a lifecycle gap". |
+| A resource with no create, read, delete test (`lifecycle.create`, listed under "Missing:" in the report) | **Fix.** See "Fixing a lifecycle gap". |
+| An operation with no 403 or 404 test, that is not excluded or held on purpose | **Fix only when the cause is config alone** (see "Fixing a 403 or 404 gap"). Anything that needs generator code, setup code or touching an exclusion: **report only, with a proposal.** |
 | A resource with no delete, restore test, or a link with no add, remove test | Report only for now. |
-| Untested 403 or 404 responses | **Report only.** Not in the pilot: the team decides after the pilot review (epic #678). |
 | Untested 409 responses | **Never.** Nobody has been able to trigger them on Hub (#638). A guess gives a wrong test. |
 | "Every kind of bad request tested" | **Never.** The report says this over-counts gaps for some kinds. |
 | Optional fields listed under `untested` | **Never.** Each has a tracking issue. |
 | `zeroTestOperations`, known issues, suppressed or excluded operations | **Never.** They are tracked on purpose. |
 | An operation with no generated test at all (`unmappedOperations`) | Not yours. The nightly triage agent handles it. |
 
-If the report shows a gap that is not in the first row, write it in the output file as `report-only` with a
+If the report shows a gap that is not in the first two rows, write it in the output file as `report-only` with a
 one-line reason and do nothing else.
 
 ## The rules that matter most
@@ -61,8 +61,9 @@ one-line reason and do nothing else.
 - **The report**, in the directory the agent job passes in `$COVERAGE_REPORT_DIR` (`summary.json`,
   `rows.json` with one row per operation and its `area`, the per-endpoint matrix, `history.csv`).
 - **Your candidates**, in `$COVERAGE_CANDIDATES_FILE`: the gaps you may work on in this run, already limited by
-  the job: `{budget, recentCount, candidates: [{resource, createOp, area}], skipped: [{resource, reason}]}`.
-  Work only on `candidates`. A resource that is not in it is report-only.
+  the job: `{budget, recentCount, candidates: [{resource, createOp, area, kind, code?}], skipped: [{resource, reason}]}`.
+  `kind` is `lifecycle` (resource is a resource name) or `status` (resource is an operationId and `code` is `403`
+  or `404`). Work only on `candidates`. A gap that is not in it is report-only.
 - **Open PRs**, in `$OPEN_FIX_PRS_FILE`: an array of `{number, url, diff}` for every open
   `nightly-api-fix` PR (`[]` if none).
 - **Recent PRs of this agent**, in `$RECENT_COVERAGE_FIX_PRS_FILE`: an array of
@@ -143,11 +144,57 @@ an entry in `entity-kinds.json` that names its create, get and delete operations
 You cannot run a live Hub here. The PR's own live-Hub check (`hub-pr-live-check.yml`) runs on it automatically.
 Leave the PR in draft: a person decides, after that check, whether it is good.
 
+## Fixing a 403 or 404 gap
+
+A candidate with `kind: "status"` is an operation that has no generated test for its documented 403 or 404
+response, is not held by an exclusion, and has no scoped exclusion. Work out **why** before you touch anything.
+
+1. **Read the cause, do not guess.**
+   - Read the operation in the spec (`versions.yaml`, `members.yaml`, and so on) and its row in
+     `$COVERAGE_REPORT_DIR/rows.json`.
+   - Read `configs/camunda-hub/request-validation.json`: `authDenyMode`, `notFoundMode`, `resourceFixtures`,
+     `pathResourceFixtures`, `excludeOperations`. Read, never edit, the exclusions.
+   - Read why the generator skips it: for **403**, `isAuthDenyEligible` in
+     `request-validation/src/analysis/authDeny.ts` (it needs a request that reaches the authority check, so every key
+     and body field needs a valid, fixture-backed value); for **404**, `isNotFoundEligible` in
+     `request-validation/src/analysis/notFoundFakeId.ts` (it needs an ID it can make up).
+2. **Decide which of two outcomes it is.**
+   - **Config only (you may fix it).** The only thing missing is an entry in `resourceFixtures` or
+     `pathResourceFixtures` in `request-validation.json`, and the value you would map it to is an environment
+     variable that setup **already provisions**: for camunda-hub, `scripts/e2e/run-hub.sh` creates the fixtures and
+     exports each `RV_FIXTURE_*` variable, so the name must appear there as `export <NAME>`. Search that file for the
+     exact name. (`request-validation/templates/support/global-setup.ts` is the generic setup for other configs; it
+     does not decide what exists on Hub.) Add exactly one entry, shaped like its neighbours, nothing else. The
+     verify job checks the same thing from `main`: one new entry, whose variable `run-hub.sh` exports.
+   - **Anything else (report only, with a proposal).** That is: a change to generator code or setup code
+     (`request-validation/src/**`, `request-validation/templates/**`, `scripts/e2e/run-hub.sh`), a fixture that setup does not provision yet,
+     a validation order that makes Hub answer 400 before 403 or 404, an exclusion or scoped exclusion (its
+     `reason` is a decision, never overturn it), or a contract that contradicts the test (for example a documented
+     idempotent delete that cannot return 404). Edit nothing. Write `action: "report-only"` and fill `proposal` (see
+     the output section): the file and the change you would make, and why it is not safe for you to make.
+3. **Regenerate and measure** exactly as for a lifecycle gap (step 6 there). For a config-only fix, the operation
+   must disappear from `missing["<code>"]` in `/tmp/coverage-after/summary.json`, the `codes["<code>"]` numerator
+   must go up by exactly one, and nothing else may go down. If it did not move, drop the change and write
+   `report-only`.
+4. **Raise the floor.** In `coverage-floors.json`, raise `assertedByStatus["<code>"]` to the number you measured.
+   Never lower any floor.
+5. **Run the checks last** (step 8 there), then open the PR as the "Opening the PR" section says, with the branch
+   `fix/coverage-<operation-kebab>-<code>-<run-id>` and the title
+   `test(coverage-fix): add <operationId> <code> test`. In the body, say which config entry you added and why the
+   environment variable it names is already provisioned (give the file and line).
+
+You cannot run a live Hub here, and the order in which Hub checks things (400, then 403, then 404) decides whether
+a new test passes. So be stricter than for a lifecycle gap: if you have any doubt that the request will reach the
+check the test targets, write `report-only` with a proposal and open no PR. The PR's live-Hub check will run on any
+PR you do open, and a person reads it before it merges.
+
 ## Opening the PR
 
 Work in `{{.WorkspacePath}}/api-test-generator` (already on `main`).
 
-1. Branch: `fix/coverage-<resource-kebab>-<run-id>`, where `<run-id>` is `$GITHUB_RUN_ID`. The run id keeps the name unique: the
+1. Branch: `fix/coverage-<resource-kebab>-<run-id>` for a lifecycle gap, or
+   `fix/coverage-<operation-kebab>-<code>-<run-id>` for a 403 or 404 gap (for example `fix/coverage-remove-member-403-123`),
+   where `<run-id>` is `$GITHUB_RUN_ID`. The run id keeps the name unique: the
    stale-PR janitor closes old `nightly-api-fix` PRs without deleting their branches, so a fixed name would make a later
    retry fail on push. Start every resource from a clean `main`: run `git switch main`
    first (and `git status` must show nothing), so a second resource never inherits the first one's commit or floor change.
@@ -167,7 +214,8 @@ Work in `{{.WorkspacePath}}/api-test-generator` (already on `main`).
 
 **Limits.** There is no weekly cap: every candidate may get a PR. This one limit applies, and it is checked before you open a PR:
 
-- **At most one PR per API area.** The area is the `area` of the resource's create operation in the report's
+- **At most one PR per API area.** The area is the `area` of the resource's create operation (or of the operation itself
+  for a 403 or 404 gap) in the report's
   `rows.json` (the spec's first tag, the same grouping the weekly report uses for its area issues). If two missing resources
   share an area, pick one and report the other. Skip an area when `$OPEN_FIX_PRS_FILE` or
   `$RECENT_COVERAGE_FIX_PRS_FILE` already holds a PR for a resource in that area.
@@ -187,13 +235,14 @@ when there is nothing to do.
   "run_url": "<report run URL>",
   "gaps": [
     {
-      "kind": "lifecycle-create",
-      "resource": "Version",
+      "kind": "lifecycle-create|status-403|status-404",
+      "resource": "Version, or the operationId for a status gap",
       "action": "fix-pr|report-only|skip",
       "pr_url": null,
       "before": 4,
       "after": 5,
       "reason": "one line: why this action",
+      "proposal": null,
       "file_error": null
     }
   ],
@@ -202,7 +251,10 @@ when there is nothing to do.
 ```
 
 `before` and `after` are the report number for that gap kind (`null` when you did not measure). `reason`
-is one plain line a person can read without opening the PR.
+is one plain line a person can read without opening the PR. `proposal` is `null`, except for a `report-only`
+status gap that needs a change you may not make: then it is a short text, at most six lines, with the file, the change
+you would make, and why a person should decide. The job shows it in the run summary. It is data for a person, not
+something the job runs.
 
 ## Hard rules
 

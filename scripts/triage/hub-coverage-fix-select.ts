@@ -27,6 +27,18 @@ export interface AgentPr {
 export interface Row {
   operationId: string;
   area: string;
+  // Scoped exclusions on the operation (a kind of test left out on purpose). Empty when there are none.
+  notes: string[];
+}
+
+// The status-code gaps the agent may work on besides lifecycle gaps.
+export const STATUS_CODES = ['403', '404'] as const;
+export type StatusCode = (typeof STATUS_CODES)[number];
+
+// An operation that lacks a test for one documented status code, and is not held or excluded on purpose.
+export interface StatusGap {
+  operationId: string;
+  code: StatusCode;
 }
 
 // An open nightly-api-fix PR with its diff, as hub-open-fix-prs.sh writes it.
@@ -37,9 +49,12 @@ export interface OpenFixPr {
 }
 
 export interface Candidate {
+  // A lifecycle gap names a resource (ProjectSnapshot); a status gap names an operation (removeMember).
   resource: string;
   createOp: string;
   area: string;
+  kind: 'lifecycle' | 'status';
+  code?: StatusCode;
 }
 
 export interface Skipped {
@@ -57,6 +72,12 @@ export interface Selection {
 // ProjectSnapshot -> project-snapshot, the form the agent uses in its branch name.
 export function kebab(resource: string): string {
   return resource.replace(/([a-z0-9])([A-Z])/g, '$1-$2').toLowerCase();
+}
+
+// The part of the agent's branch name that identifies a candidate: project-snapshot for a lifecycle gap,
+// remove-member-403 for a status gap.
+export function branchKey(c: Candidate): string {
+  return c.kind === 'status' && c.code ? `${kebab(c.resource)}-${c.code}` : kebab(c.resource);
 }
 
 // fix/coverage-project-snapshot-123456 -> project-snapshot. Null for any other branch.
@@ -79,11 +100,12 @@ export function select(
   now: Date,
   known: string[] = [],
   openFixPrs: OpenFixPr[] = [],
+  statusGaps: StatusGap[] = [],
 ): Selection {
   const agentPrs = prs.filter((p) => p.headRefName.startsWith(BRANCH_PREFIX));
   const recent = agentPrs.filter((p) => isRecent(p.createdAt, now));
   // No weekly cap: every gap can get a PR, one per area. The budget the verifier checks is the number of gaps.
-  const budget = createMissing.length;
+  const budget = createMissing.length + statusGaps.length;
 
   const areaOf = new Map<string, string>();
   for (const r of rows) areaOf.set(r.operationId, r.area);
@@ -96,6 +118,11 @@ export function select(
     if (r.operationId.startsWith('create') && r.operationId.length > 'create'.length) {
       areaByKebab.set(kebab(r.operationId.slice('create'.length)), r.area);
     }
+  }
+
+  // A status-gap branch is remove-member-403: map each operation and code to its area too.
+  for (const r of rows) {
+    for (const code of STATUS_CODES) areaByKebab.set(`${kebab(r.operationId)}-${code}`, r.area);
   }
 
   // An area is busy when an agent PR for one of its resources is recent or still open.
@@ -136,7 +163,40 @@ export function select(
     } else if (takenAreas.has(area)) {
       skipped.push({ resource, reason: `area ${area} already has a candidate in this run` });
     } else {
-      candidates.push({ resource, createOp, area });
+      candidates.push({ resource, createOp, area, kind: 'lifecycle' });
+      takenAreas.add(area);
+    }
+  }
+
+  // Status gaps (403 and 404) come after lifecycle gaps, under the same area and duplicate rules.
+  for (const gap of [...statusGaps].sort(
+    (a, b) => a.operationId.localeCompare(b.operationId) || a.code.localeCompare(b.code),
+  )) {
+    const label = `${gap.operationId} ${gap.code}`;
+    const area = areaOf.get(gap.operationId);
+    const covering = openFixPrs.find((p) => p.diff.includes(gap.operationId));
+    if (covering) {
+      skipped.push({
+        resource: label,
+        reason: `${gap.operationId} is already covered by the open PR #${covering.number}`,
+      });
+    } else if (!area) {
+      skipped.push({ resource: label, reason: `no operation ${gap.operationId} in the report` });
+    } else if (busyAreas.has(area)) {
+      skipped.push({
+        resource: label,
+        reason: `area ${area} already has an agent PR (recent or open)`,
+      });
+    } else if (takenAreas.has(area)) {
+      skipped.push({ resource: label, reason: `area ${area} already has a candidate in this run` });
+    } else {
+      candidates.push({
+        resource: gap.operationId,
+        createOp: gap.operationId,
+        area,
+        kind: 'status',
+        code: gap.code,
+      });
       takenAreas.add(area);
     }
   }
@@ -198,8 +258,44 @@ export function parseRows(rows: unknown): Row[] {
     if (!isRecord(r) || typeof r.operationId !== 'string' || typeof r.area !== 'string') {
       throw new Error(`rows.json row ${i} has no operationId and area`);
     }
-    return { operationId: r.operationId, area: r.area };
+    const notes = r.notes === undefined ? [] : r.notes;
+    if (!Array.isArray(notes) || !notes.every((n): n is string => typeof n === 'string')) {
+      throw new Error(`rows.json row ${i} has notes that are not a list of strings`);
+    }
+    return { operationId: r.operationId, area: r.area, notes };
   });
+}
+
+// Operations that lack a 403 or 404 test and are not held on purpose. summary.json lists every operation
+// missing a status in `missing`, and the ones held by a whole-operation exclusion in `heldCells`. An operation
+// with a scoped exclusion (a row note) is left out too: someone decided on purpose not to test that kind.
+export function parseStatusGaps(summary: unknown, rows: Row[]): StatusGap[] {
+  const missing = isRecord(summary) && isRecord(summary.missing) ? summary.missing : undefined;
+  const held = isRecord(summary) && isRecord(summary.heldCells) ? summary.heldCells : undefined;
+  if (!missing || !held) {
+    throw new Error(
+      'summary.json has no missing and heldCells lists: the report format may have changed',
+    );
+  }
+  const notesOf = new Map(rows.map((r) => [r.operationId, r.notes]));
+  const gaps: StatusGap[] = [];
+  for (const code of STATUS_CODES) {
+    const m = missing[code];
+    const h = held[code];
+    if (
+      !Array.isArray(m) ||
+      !m.every((x): x is string => typeof x === 'string') ||
+      !Array.isArray(h) ||
+      !h.every((x): x is string => typeof x === 'string')
+    ) {
+      throw new Error(`summary.json has no missing and heldCells list for ${code}`);
+    }
+    for (const op of m) {
+      if (h.includes(op) || (notesOf.get(op) ?? []).length > 0) continue;
+      gaps.push({ operationId: op, code });
+    }
+  }
+  return gaps;
 }
 
 export function parsePrs(prs: unknown): AgentPr[] {
@@ -240,13 +336,15 @@ if (process.argv[1] && import.meta.filename === process.argv[1]) {
   const now = nowIso ? new Date(nowIso) : new Date();
   try {
     const summary = readJson(summaryPath);
+    const rows = parseRows(readJson(rowsPath));
     const selection = select(
       parseCreateMissing(summary),
-      parseRows(readJson(rowsPath)),
+      rows,
       parsePrs(readJson(prsPath)),
       now,
       parseKnown(summary),
       openFixPath ? parseOpenFixPrs(readJson(openFixPath)) : [],
+      parseStatusGaps(summary, rows),
     );
     process.stdout.write(`${JSON.stringify(selection, null, 2)}\n`);
   } catch (e) {
