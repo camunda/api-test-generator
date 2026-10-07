@@ -123,48 +123,52 @@ function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
 }
 
-function strings(v: unknown): string[] {
-  return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [];
-}
+// The parsers below are strict on purpose. This script enforces safety limits, so a report or a PR list
+// that does not look as expected must stop the run, never be read as "nothing there" (which would turn a
+// format change into a silently disabled agent, or an undercounted weekly cap into extra budget).
 
 export function parseCreateMissing(summary: unknown): string[] {
-  if (!isRecord(summary) || !isRecord(summary.lifecycle)) return [];
-  return strings(summary.lifecycle.createMissing);
+  const list =
+    isRecord(summary) && isRecord(summary.lifecycle) ? summary.lifecycle.createMissing : undefined;
+  if (!Array.isArray(list) || !list.every((x): x is string => typeof x === 'string')) {
+    throw new Error(
+      'summary.json has no lifecycle.createMissing list of resource names: the report format may have changed',
+    );
+  }
+  return list;
 }
 
 export function parseRows(rows: unknown): Row[] {
-  if (!Array.isArray(rows)) return [];
-  const out: Row[] = [];
-  for (const r of rows) {
-    if (isRecord(r) && typeof r.operationId === 'string' && typeof r.area === 'string') {
-      out.push({ operationId: r.operationId, area: r.area });
+  if (!Array.isArray(rows)) throw new Error('rows.json is not a list');
+  return rows.map((r, i) => {
+    if (!isRecord(r) || typeof r.operationId !== 'string' || typeof r.area !== 'string') {
+      throw new Error(`rows.json row ${i} has no operationId and area`);
     }
-  }
-  return out;
+    return { operationId: r.operationId, area: r.area };
+  });
 }
 
 export function parsePrs(prs: unknown): AgentPr[] {
-  if (!Array.isArray(prs)) return [];
-  const out: AgentPr[] = [];
-  for (const p of prs) {
+  if (!Array.isArray(prs)) throw new Error('the PR list is not a list');
+  return prs.map((p, i) => {
     if (
-      isRecord(p) &&
-      typeof p.number === 'number' &&
-      typeof p.url === 'string' &&
-      typeof p.createdAt === 'string' &&
-      typeof p.headRefName === 'string' &&
-      typeof p.state === 'string'
+      !isRecord(p) ||
+      typeof p.number !== 'number' ||
+      typeof p.url !== 'string' ||
+      typeof p.createdAt !== 'string' ||
+      typeof p.headRefName !== 'string' ||
+      typeof p.state !== 'string'
     ) {
-      out.push({
-        number: p.number,
-        url: p.url,
-        createdAt: p.createdAt,
-        headRefName: p.headRefName,
-        state: p.state,
-      });
+      throw new Error(`PR record ${i} does not have number, url, createdAt, headRefName and state`);
     }
-  }
-  return out;
+    return {
+      number: p.number,
+      url: p.url,
+      createdAt: p.createdAt,
+      headRefName: p.headRefName,
+      state: p.state,
+    };
+  });
 }
 
 if (process.argv[1] && import.meta.filename === process.argv[1]) {
@@ -176,11 +180,16 @@ if (process.argv[1] && import.meta.filename === process.argv[1]) {
     process.exit(2);
   }
   const now = nowIso ? new Date(nowIso) : new Date();
-  const selection = select(
-    parseCreateMissing(readJson(summaryPath)),
-    parseRows(readJson(rowsPath)),
-    parsePrs(readJson(prsPath)),
-    now,
-  );
-  process.stdout.write(`${JSON.stringify(selection, null, 2)}\n`);
+  try {
+    const selection = select(
+      parseCreateMissing(readJson(summaryPath)),
+      parseRows(readJson(rowsPath)),
+      parsePrs(readJson(prsPath)),
+      now,
+    );
+    process.stdout.write(`${JSON.stringify(selection, null, 2)}\n`);
+  } catch (e) {
+    console.error(`::error::${e instanceof Error ? e.message : String(e)}`);
+    process.exit(1);
+  }
 }

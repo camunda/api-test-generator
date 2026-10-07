@@ -61,6 +61,11 @@ jobs:
         with:
           node-version: '22'
 
+      # Any PR the agent account opens after this moment is checked against the limits at the end.
+      - name: Record the start time
+        id: start
+        run: echo "at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+
       # --- Find and download the weekly report ---------------------------------
       - name: Resolve the coverage report run
         id: report-run
@@ -378,9 +383,28 @@ jobs:
             exit 1
           fi
 
-      # --- Deterministic check of what the agent reports ------------------------
-      # The agent's own claim is not trusted: PRs opened must stay within the budget the job
-      # computed, point at this repo, and in a dry run there must be none.
+      # --- Deterministic checks of what the agent did -----------------------------
+      # First from GitHub, not from the agent: the agent holds a write token, so a file it wrote about
+      # itself proves nothing. This lists the PRs created since the job started and checks the ones on this
+      # run's branch pattern (budget, candidates, one per area, draft, base, labels, nothing in a dry run),
+      # that every PR the agent reported exists and none is unreported, and that its account opened no PR
+      # on any other branch. A branch pushed without a PR is not covered.
+      - name: Verify the PRs from GitHub, not from the agent's own report
+        if: ${{ steps.select.outputs.count != '0' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          START: ${{ steps.start.outputs.at }}
+        run: |
+          set -euo pipefail
+          gh pr list --repo "$GITHUB_REPOSITORY" --state all --limit 200 --search "created:>=${START}" \
+            --json number,url,headRefName,baseRefName,isDraft,author,labels > "${GITHUB_WORKSPACE}/run-prs.json"
+          node scripts/triage/hub-coverage-fix-verify.ts \
+            "${GITHUB_WORKSPACE}/run-prs.json" "${GITHUB_WORKSPACE}/selection.json" \
+            "${GITHUB_WORKSPACE}/hub-coverage-fix.json" "$GITHUB_RUN_ID" "$DRY_RUN" \
+            "app/qa-processes,qa-processes[bot]"
+
+      # Then the agent's own report: cheap checks on top. PRs it claims to have opened must stay within
+      # the budget the job computed and point at this repo, and in a dry run there must be none.
       - name: Check the agent result against the limits
         if: ${{ steps.select.outputs.count != '0' }}
         env:
@@ -421,6 +445,7 @@ jobs:
             hub-coverage-fix.json
             selection.json
             recent-coverage-fix-prs.json
+            run-prs.json
           if-no-files-found: ignore
           retention-days: 30
 

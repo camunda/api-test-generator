@@ -163,16 +163,42 @@ describe('select', () => {
   });
 });
 
-describe('parsers', () => {
-  it('read a report summary and fall back to empty on bad input', () => {
-    expect(parseCreateMissing({ lifecycle: { createMissing: ['A', 3, 'B'] } })).toEqual(['A', 'B']);
-    expect(parseCreateMissing(null)).toEqual([]);
-    expect(parseCreateMissing({ lifecycle: 'x' })).toEqual([]);
-    expect(parseRows([{ operationId: 'a', area: 'X' }, { operationId: 1 }, 'z'])).toEqual([
-      { operationId: 'a', area: 'X' },
-    ]);
-    expect(parseRows({})).toEqual([]);
-    expect(parsePrs([{ number: 1 }, 'x'])).toEqual([]);
+describe('parsers are strict', () => {
+  it('read a well-formed summary, rows and PR list', () => {
+    expect(parseCreateMissing({ lifecycle: { createMissing: ['A', 'B'] } })).toEqual(['A', 'B']);
+    expect(parseCreateMissing({ lifecycle: { createMissing: [] } })).toEqual([]);
+    expect(parseRows([{ operationId: 'a', area: 'X' }])).toEqual([{ operationId: 'a', area: 'X' }]);
+    expect(parsePrs([])).toEqual([]);
+  });
+
+  it('reject a report without the lifecycle list, so a format change cannot disable the agent', () => {
+    expect(() => parseCreateMissing(null)).toThrow('lifecycle.createMissing');
+    expect(() => parseCreateMissing({})).toThrow('lifecycle.createMissing');
+    expect(() => parseCreateMissing({ lifecycle: 'x' })).toThrow('lifecycle.createMissing');
+    expect(() => parseCreateMissing({ lifecycle: {} })).toThrow('lifecycle.createMissing');
+    expect(() => parseCreateMissing({ lifecycle: { createMissing: ['A', 3] } })).toThrow(
+      'lifecycle.createMissing',
+    );
+  });
+
+  it('reject rows that are not a list of operations with an area', () => {
+    expect(() => parseRows({})).toThrow('not a list');
+    expect(() => parseRows([{ operationId: 'a', area: 'X' }, { operationId: 1 }])).toThrow('row 1');
+    expect(() => parseRows(['z'])).toThrow('row 0');
+  });
+
+  it('reject any malformed PR record instead of dropping it, so the weekly count cannot shrink', () => {
+    const good = {
+      number: 1,
+      url: 'u',
+      createdAt: '2026-10-01T00:00:00Z',
+      headRefName: 'fix/coverage-a-1',
+      state: 'OPEN',
+    };
+    expect(parsePrs([good])).toHaveLength(1);
+    expect(() => parsePrs([good, { number: 2 }])).toThrow('PR record 1');
+    expect(() => parsePrs([good, 'x'])).toThrow('PR record 1');
+    expect(() => parsePrs({})).toThrow('not a list');
   });
 });
 
@@ -202,5 +228,32 @@ describe('command line', () => {
     );
     const parsed: unknown = JSON.parse(out);
     expect(parsed).toMatchObject({ budget: 2, candidates: [{ resource: 'ProjectSnapshot' }] });
+  });
+
+  it('exits non-zero with an error when the report has no lifecycle section', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cov-fix-'));
+    writeFileSync(join(dir, 'summary.json'), JSON.stringify({ negative: {} }));
+    writeFileSync(join(dir, 'rows.json'), JSON.stringify(rows));
+    writeFileSync(join(dir, 'prs.json'), '[]');
+    const script = join(
+      dirname(fileURLToPath(import.meta.url)),
+      '../../scripts/triage/hub-coverage-fix-select.ts',
+    );
+    let status = 0;
+    let stderr = '';
+    try {
+      execFileSync(
+        'node',
+        [script, join(dir, 'summary.json'), join(dir, 'rows.json'), join(dir, 'prs.json')],
+        { encoding: 'utf8', stdio: 'pipe' },
+      );
+    } catch (e) {
+      if (typeof e === 'object' && e !== null && 'status' in e && 'stderr' in e) {
+        status = Number(e.status);
+        stderr = String(e.stderr);
+      }
+    }
+    expect(status).toBe(1);
+    expect(stderr).toContain('lifecycle.createMissing');
   });
 });

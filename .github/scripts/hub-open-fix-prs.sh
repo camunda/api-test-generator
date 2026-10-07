@@ -3,12 +3,15 @@
 # {number, url, diff} to the file given as $1 ([] when there are none). An agent searches the
 # diffs to avoid opening a second PR for work that is already in flight.
 #
-# Needs GH_TOKEN with pull-requests: read. Fails closed: if the listing or any diff cannot be read,
-# the duplicate check cannot be trusted, so the script exits non-zero and writes nothing.
+# Needs GH_TOKEN with pull-requests: read. Fails closed: if the listing or any diff cannot be read, or a
+# diff is larger than MAX_DIFF_BYTES, the duplicate check cannot be trusted (a truncated diff could hide the
+# very operation being searched for), so the script exits non-zero and writes nothing. Agent PRs are meant
+# to be small: an oversized one is itself a reason to stop and have a person look.
 set -euo pipefail
 
 out="${1:?usage: hub-open-fix-prs.sh <out.json>}"
 repo="${GITHUB_REPOSITORY:-camunda/api-test-generator}"
+max_bytes="${MAX_DIFF_BYTES:-200000}"
 acc="$(mktemp)"
 diff_file="$(mktemp)"
 full_diff="$(mktemp)"
@@ -24,14 +27,15 @@ fi
 
 while IFS= read -r n; do
   [ -z "$n" ] && continue
-  # Read the whole diff first, then cap it: piping straight into `head` would kill `gh` with a broken
-  # pipe on a large diff, which under pipefail looks like a failure. Agent PRs are meant to be small,
-  # so a big one is a signal in itself; the cap only bounds the file size.
   if ! gh pr diff "$n" --repo "$repo" > "$full_diff" 2>"$list_err"; then
     echo "::error::Could not read the diff of open PR #${n} ($(cat "$list_err")); the duplicate check cannot be trusted."
     exit 1
   fi
-  head -c 20000 "$full_diff" > "$diff_file"
+  if [ "$(wc -c < "$full_diff")" -gt "$max_bytes" ]; then
+    echo "::error::The diff of open PR #${n} is larger than ${max_bytes} bytes; a partial diff cannot be trusted for the duplicate check. Have a person look at that PR."
+    exit 1
+  fi
+  cp "$full_diff" "$diff_file"
   jq -n --slurpfile acc "$acc" --arg n "$n" \
     --arg url "https://github.com/${repo}/pull/${n}" --rawfile diff "$diff_file" \
     '$acc[0] + [{number: ($n|tonumber), url: $url, diff: $diff}]' > "$acc.new"
