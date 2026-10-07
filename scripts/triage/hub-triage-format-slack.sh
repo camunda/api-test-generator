@@ -262,7 +262,7 @@ case "$MODE" in
         (f.action // "") == "skip"
         and (f.category // "") == "product"
         and (f.subcategory // "") != "test-generation"
-        and ((f.fix_pr_url // "") | tostring | length) == 0;
+        and (has_url(f.fix_pr_url) | not);
       def relatedCommitNote(x; f):
         (if recentChangeSkip(f) then ":hourglass_flowing_sand:" else ":link:" end) as $icon
         | if has_url(x) and (x | test("^https?://")) then compactLink(x; $icon)

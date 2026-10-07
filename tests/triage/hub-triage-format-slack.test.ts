@@ -103,6 +103,18 @@ describe('triage Slack thread: related_commit links', () => {
     }
   });
 
+  it('ignores a malformed fix_pr_url when deciding why a product finding was skipped', () => {
+    for (const fix_pr_url of [42, {}, true, '']) {
+      const text = threadLine('8fa152b500 (#1)', {
+        subcategory: null,
+        action: 'skip',
+        fix_pr_url,
+      });
+      expect(text).toContain(':hourglass_flowing_sand:');
+      expect(text).not.toContain(':link:');
+    }
+  });
+
   it('does not link a number followed by letters as a PR', () => {
     const text = threadLine('8fa152b500 (#123abc)');
     expect(text).not.toContain('/pull/');
