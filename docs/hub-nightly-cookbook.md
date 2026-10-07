@@ -101,10 +101,15 @@ or
 | 🧪 test-generation | api-test-generator | Our generated test is wrong, or missing, for an endpoint. It is not a Hub bug. The agent opens a fix PR when the fix is small and safe (label `nightly-api-fix`, linked in the thread, `test-automation-medic` is pinged to review it). Otherwise it only reports the failure |
 | 🎫 known issue | Already tracked | A Hub issue exists; nothing new to file |
 | 📝 filed | New | A new Hub issue was opened tonight |
-| ⏳ no Hub bug filed (recent change) | Maybe expected, check it | A recent Hub commit changed this endpoint, so the agent did not file a Hub bug. This is a guess, not a fix, and no test is switched off. Open the linked commit. If Hub meant the change, our tests may only need to catch up; if the same test fails again the next night, our generator needs a fix, so tell the generator owner |
+| ⏳ no Hub bug filed (recent change) | Undecided, a person must check | The test failed and it looks like Hub's fault, but Hub changed this endpoint a few days ago. The agent could not tell whether that change broke it or was meant, so it filed nothing. Nobody has decided yet: see the steps under the table |
 | 🔗 related commit | Context only | A recent Hub commit touched this endpoint. It is shown next to the finding as a hint, and the finding was not skipped: if our test is wrong, the fix PR is linked on the same line |
 
 The **thread** under the digest has one line per failure: the category icon, the operation, and the links below.
+**What to do with ⏳.** Example: a test expects 200 and gets 404, and a Hub commit from three days ago changed that endpoint.
+1. Open the linked commit and read what it changed.
+2. If the commit broke the endpoint (Hub should still answer as before): file a Hub issue yourself.
+3. If Hub meant the change: do nothing tonight. If the same test fails again tomorrow, the generator needs a fix, so tell the generator owner.
+
 Each link tells you whether something was done and what you do next:
 
 | Link on the line | What it means | You |
@@ -114,7 +119,7 @@ Each link tells you whether something was done and what you do next:
 | 🛠️ | The agent opened a **fix PR** in the generator for a wrong test | Review the PR |
 | ♻️ | An open PR already covers this, so none was opened | Review that PR |
 | ⛔ | A **suppress PR**: it switches the test off until the Hub bug is fixed. This is the only PR that skips a test | Review the PR |
-| ⏳ | No Hub bug filed because of a recent Hub change (the commit is linked) | Open the commit, see the row above |
+| ⏳ | Undecided: the agent did not file a Hub bug because Hub changed this endpoint recently | Follow the steps below |
 | 🔗 | A recent Hub commit touched this endpoint. A hint only: it does **not** mean a PR exists | Look for a 🛠️ on the same line. With no 🛠️ the generator owner needs to look |
 | ⚠️ | The agent tried to open an issue or PR and failed | The generator owner fixes it by hand |
 
