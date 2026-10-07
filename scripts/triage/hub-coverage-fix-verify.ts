@@ -22,7 +22,6 @@ import {
   type Candidate,
   type Selection,
   STATUS_CODES,
-  type StatusCode,
 } from './hub-coverage-fix-select.ts';
 
 export interface RunPr {
