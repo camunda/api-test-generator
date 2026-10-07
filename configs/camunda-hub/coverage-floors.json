@@ -11,7 +11,7 @@
   "optionalFieldsSent": 63,
   "requestChecksCovered": 32,
   "fullyAssertedOperations": 56,
-  "lifecycleCreateCovered": 5,
+  "lifecycleCreateCovered": 6,
   "lifecycleRestoreCovered": 4,
   "lifecycleEdgeCovered": 1,
   "zeroTestOperations": [

@@ -268,15 +268,25 @@ describeForThisConfig('camunda-hub bundled-spec invariants (#128)', () => {
   // from the bundle) while the suppression check above stays green. The
   // emitter writes `<op>.feature.spec.ts` even for an empty scenario
   // collection, so file existence alone isn't proof either — assert the
-  // file actually contains an emitted `test(` block.
-  it('each unblocked version op has a non-empty generated positive-suite feature spec', () => {
-    for (const op of [
-      'createVersion',
-      'getVersion',
-      'updateVersion',
-      'deleteVersion',
-      'restoreVersion',
-    ]) {
+  // generated test actually exercises each op.
+  //
+  // The Version EntityKind replaces the standalone createVersion/getVersion/
+  // deleteVersion feature specs with the single EntityLifecycle/Version
+  // lifecycle (as for Project/File/Folder/Workspace/ProjectSnapshot), so those
+  // three are checked in the lifecycle file instead. The check stays as strict
+  // per operation: it requires the emitted `operationId: '<op>'` step marker
+  // for each replaced op — not the shared `test(` declaration, which depends
+  // only on the resource name and would pass even if a step invoked the wrong
+  // operation. updateVersion and restoreVersion are not part of the lifecycle;
+  // their standalone feature specs keep the original non-empty check unchanged.
+  it('each unblocked version op has generated positive-suite coverage (create/get/delete via the Version lifecycle, update/restore via their feature specs)', () => {
+    const lifecycle = readGeneratedSpec(`${ENTITY_LIFECYCLE}/Version.lifecycle.spec.ts`);
+    for (const op of ['createVersion', 'getVersion', 'deleteVersion']) {
+      expect(lifecycle, `Version.lifecycle.spec.ts has no step invoking ${op}`).toContain(
+        `operationId: '${op}'`,
+      );
+    }
+    for (const op of ['updateVersion', 'restoreVersion']) {
       const spec = readGeneratedSpec(`${op}.feature.spec.ts`);
       expect(spec, `${op}.feature.spec.ts has no emitted test`).toContain('test(');
     }

@@ -1,6 +1,6 @@
 {
   "$schema": "https://camunda.github.io/api-test-generator/ns/v1/entity-kinds.schema.json",
-  "$comment": "A Version entity-kind (createVersion/getVersion/deleteVersion) is intentionally omitted — but no longer because it's unsatisfiable. camunda-hub#25801 (createVersion rejecting every v2-creatable file as 'located inside a process application') was closed as a duplicate of #27382, fixed by PR #27610; createVersion now succeeds via the public API (see configs/camunda-hub/positive-suppress.json's git history for the removed suppress entries) and has ordinary feature/variant coverage. What's still missing is a dedicated Version EntityLifecycle template (establish/observe/revoke) — a real follow-up, not a blocker.",
+  "$comment": "The Version entity-kind (createVersion/getVersion/deleteVersion) is defined below. It was previously omitted while blocked by camunda-hub#25801 (createVersion rejecting every v2-creatable file as 'located inside a process application'), closed as a duplicate of #27382 and fixed by PR #27610; createVersion now succeeds via the public API (see configs/camunda-hub/positive-suppress.json's git history for the removed suppress entries). The remaining gap — a dedicated Version EntityLifecycle (establish/observe/revoke) — is now closed by the Version kind below.",
   "@context": "https://camunda.github.io/api-test-generator/ns/v1/context.jsonld",
   "version": 1,
   "kinds": [
@@ -64,6 +64,16 @@
       "observableVia": "getProjectSnapshot",
       "revokedBy": "deleteProjectSnapshot",
       "description": "A project snapshot entity, identified by its server-minted projectSnapshotKey. Established via createProjectSnapshot (POST /project-snapshots), observed via getProjectSnapshot, revoked via deleteProjectSnapshot — the EntityLifecycle template drives create → observe → revoke. No RestoreLifecycle: the collection has no /project-snapshots/recently-deleted/search, and restoreProjectSnapshot (POST /project-snapshots/{projectSnapshotKey}/restoration) restores project state from a snapshot rather than restoring a soft-deleted snapshot, so it is not a restore of this entity."
+    },
+    {
+      "@type": "EntityKind",
+      "name": "Version",
+      "shape": "entity",
+      "identifiers": ["VersionKey"],
+      "establishedBy": "createVersion",
+      "observableVia": "getVersion",
+      "revokedBy": "deleteVersion",
+      "description": "A version entity, identified by its server-minted versionKey. Established via createVersion (POST /versions, which snapshots the current content of a file), observed via getVersion, revoked via deleteVersion — the EntityLifecycle template drives create → observe → revoke. No RestoreLifecycle: deleteVersion is a hard delete, the collection has no /versions/recently-deleted/search, and restoreVersion (POST /versions/{versionKey}/restoration) restores the file content to the state captured in a version rather than restoring a soft-deleted version, so it is not a restore of this entity."
     }
   ]
 }
