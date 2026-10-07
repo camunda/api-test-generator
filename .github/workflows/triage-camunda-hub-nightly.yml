@@ -339,6 +339,7 @@ jobs:
           GH_TOKEN: ${{ steps.qa-token-generator.outputs.token }}
         run: |
           gh label create nightly-api-fix --repo camunda/api-test-generator --color FF4444 --description "Bot-opened fix PR for a nightly triage finding (test-generation bug or coverage gap)" 2>/dev/null || true
+          gh label create auto-generated --repo camunda/api-test-generator --color ededed --description "Opened by automation, not a human" 2>/dev/null || true
 
       - name: Fetch Slack bot token from Vault
         id: slack
@@ -714,7 +715,7 @@ jobs:
              for the operationId FIRST. If it appears in any listed PR's diff: do NOT attempt a fix —
              set action "skip" and fix_pr_url to that PR's url. Otherwise, per the guidance's
              guardrails, either apply a minimal fix and open an api-test-generator PR using
-             GH_TOKEN_GENERATOR (label nightly-api-fix, already pre-created), or — if you're not fully
+             GH_TOKEN_GENERATOR (labels nightly-api-fix and auto-generated, already pre-created), or — if you're not fully
              confident — action "report-only". Never push directly to main.
           9. Write the full triage result to /tmp/hub-triage.json in the exact schema from the guidance.
           EOF
