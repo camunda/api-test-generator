@@ -101,7 +101,7 @@ or
 | 🧪 test-generation | api-test-generator | Our generated test is wrong, or missing, for an endpoint. It is not a Hub bug. The agent opens a fix PR when the fix is small and safe (label `nightly-api-fix`, linked in the thread, `test-automation-medic` is pinged to review it). Otherwise it only reports the failure |
 | 🎫 known issue | Already tracked | A Hub issue exists; nothing new to file |
 | 📝 filed | New | A new Hub issue was opened tonight |
-| ⏳ no Hub bug filed (recent change) | Undecided, a person must check | The test failed and it looks like Hub's fault, but Hub changed this endpoint a few days ago. The agent could not tell whether that change broke it or was meant, so it filed nothing. Nobody has decided yet: see the steps under the table |
+| ⏳ no Hub bug filed (recent change) | Undecided, a person must check | The test failed and it looks like Hub's fault, but Hub changed this endpoint a few days ago. The agent could not tell whether Hub is wrong or our test is, so it filed nothing. Nobody has decided yet: check Hub's answer against the spec, steps under the table |
 | 🔗 related commit | Context only | A recent Hub commit touched this endpoint. It is shown next to the finding as a hint, and the finding was not skipped: if our test is wrong, the fix PR is linked on the same line |
 
 The **thread** under the digest has one line per failure: the category icon, the operation, and the links below.
@@ -118,10 +118,10 @@ Each link tells you whether something was done and what you do next:
 | 🔗 | A recent Hub commit touched this endpoint. A hint only: it does **not** mean a PR exists | Look for a 🛠️ on the same line. With no 🛠️ the generator owner needs to look |
 | ⚠️ | The agent tried to open an issue or PR and failed | The generator owner fixes it by hand |
 
-**What to do with ⏳.** Example: a test expects 200 and gets 404, and a Hub commit from three days ago changed that endpoint.
-1. Open the linked commit and read what it changed.
-2. If the commit broke the endpoint (Hub should still answer as before): file a Hub issue yourself.
-3. If Hub meant the change: do nothing tonight. If the same test fails again tomorrow, the generator needs a fix, so tell the generator owner.
+**What to do with ⏳.** Waiting a night changes nothing: the tests are already rebuilt from the latest spec every night, so tomorrow's result is the same as tonight's. Decide today. Example: a test expects 200 and gets 404, and a Hub commit from three days ago changed that endpoint.
+1. Open the linked commit and the endpoint's entry in Hub's OpenAPI spec.
+2. If Hub's answer (404) **disagrees with the spec**: Hub is wrong, or the spec was not updated. File a Hub issue.
+3. If Hub's answer **agrees with the spec** (the spec says 404 here): our test is wrong. This is a generator problem, like the new endpoint on 11 September. Tell the generator owner today.
 
 Pings:
 
