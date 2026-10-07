@@ -14,20 +14,21 @@ import {
   parsePrs,
   parseRows,
   parseStatusGaps,
+  type Row,
   resourceFromBranch,
   select,
 } from '../../scripts/triage/hub-coverage-fix-select.ts';
 
 const now = new Date('2026-10-12T07:00:00Z');
 
-const rows = [
-  { operationId: 'createProjectSnapshot', area: 'Project Snapshot', notes: [] as string[] },
-  { operationId: 'createVersion', area: 'Version', notes: [] as string[] },
-  { operationId: 'createWidget', area: 'Widget', notes: [] as string[] },
-  { operationId: 'createGadget', area: 'Widget', notes: [] as string[] },
-  { operationId: 'removeMember', area: 'Member', notes: [] as string[] },
+const rows: Row[] = [
+  { operationId: 'createProjectSnapshot', area: 'Project Snapshot', notes: [] },
+  { operationId: 'createVersion', area: 'Version', notes: [] },
+  { operationId: 'createWidget', area: 'Widget', notes: [] },
+  { operationId: 'createGadget', area: 'Widget', notes: [] },
+  { operationId: 'removeMember', area: 'Member', notes: [] },
   { operationId: 'addMember', area: 'Member', notes: ['auth-deny'] },
-  { operationId: 'removeClusterRegistration', area: 'Cluster', notes: [] as string[] },
+  { operationId: 'removeClusterRegistration', area: 'Cluster', notes: [] },
 ];
 
 function pr(over: Partial<AgentPr>): AgentPr {

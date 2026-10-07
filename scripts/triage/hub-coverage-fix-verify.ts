@@ -144,7 +144,7 @@ export function parseSelection(v: unknown): Selection {
       throw new Error(`selection.json candidate ${i} is a status gap without a 403 or 404 code`);
     }
     const candidate: Candidate = { resource: c.resource, createOp: c.createOp, area: c.area, kind };
-    if (kind === 'status' && code) candidate.code = code as StatusCode;
+    if (kind === 'status' && code) candidate.code = code;
     return candidate;
   });
   return { budget: v.budget, recentCount: 0, candidates, skipped: [] };
