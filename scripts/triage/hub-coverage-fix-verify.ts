@@ -13,7 +13,7 @@
 //
 // Runs under plain `node` (type stripping): no enums, no parameter properties.
 //
-//   node hub-coverage-fix-verify.ts <prs.json> <selection.json> <result.json> <run-id> <true|false dry run> <bot logins, comma separated> <baseline PR number> <list limit>
+//   node hub-coverage-fix-verify.ts <prs.json> <selection.json> <result.json> <run-id> <true|false dry run> <bot logins, comma separated> <baseline PR number> <list limit> <pre-run PRs.json>
 
 import { readFileSync } from 'node:fs';
 import { BRANCH_PREFIX, type Candidate, kebab, type Selection } from './hub-coverage-fix-select.ts';
@@ -26,6 +26,15 @@ export interface RunPr {
   isDraft: boolean;
   author: string;
   labels: string[];
+  state: string;
+  headRefOid: string;
+}
+
+// What a PR looked like just before the agent started: enough to see that it changed during the run.
+export interface PreRunPr {
+  number: number;
+  state: string;
+  headRefOid: string;
 }
 
 export const REQUIRED_LABELS = ['nightly-api-fix', 'auto-generated'];
@@ -46,6 +55,8 @@ export function parseRunPrs(prs: unknown): RunPr[] {
       typeof p.isDraft !== 'boolean' ||
       !isRecord(p.author) ||
       typeof p.author.login !== 'string' ||
+      typeof p.state !== 'string' ||
+      typeof p.headRefOid !== 'string' ||
       !Array.isArray(p.labels)
     ) {
       throw new Error(`PR record ${i} does not have the expected fields`);
@@ -59,7 +70,24 @@ export function parseRunPrs(prs: unknown): RunPr[] {
       isDraft: p.isDraft,
       author: p.author.login,
       labels,
+      state: p.state,
+      headRefOid: p.headRefOid,
     };
+  });
+}
+
+export function parsePreRun(prs: unknown): PreRunPr[] {
+  if (!Array.isArray(prs)) throw new Error('the pre-run PR snapshot is not a list');
+  return prs.map((p, i) => {
+    if (
+      !isRecord(p) ||
+      typeof p.number !== 'number' ||
+      typeof p.state !== 'string' ||
+      typeof p.headRefOid !== 'string'
+    ) {
+      throw new Error(`pre-run PR record ${i} does not have number, state and headRefOid`);
+    }
+    return { number: p.number, state: p.state, headRefOid: p.headRefOid };
   });
 }
 
@@ -119,6 +147,7 @@ export function verify(
   dryRun: boolean,
   botLogins: string[],
   baseline: number,
+  preRun: PreRunPr[],
 ): string[] {
   const violations: string[] = [];
   const candidateByKebab = new Map(selection.candidates.map((c) => [kebab(c.resource), c]));
@@ -164,6 +193,19 @@ export function verify(
     );
   }
 
+  // A PR the agent's account already had before the run can still become agent work: reopened, or given a
+  // new commit. The number baseline cannot see that, so compare each such PR with its snapshot.
+  const before = new Map(preRun.map((p) => [p.number, p]));
+  for (const p of allPrs) {
+    if (p.number > baseline || !bots.has(p.author)) continue;
+    const was = before.get(p.number);
+    if (was && (was.state !== p.state || was.headRefOid !== p.headRefOid)) {
+      violations.push(
+        `${p.url}: changed during the run (state ${was.state} to ${p.state}, commit ${was.headRefOid.slice(0, 7)} to ${p.headRefOid.slice(0, 7)})`,
+      );
+    }
+  }
+
   const actual = new Set(ours.map((p) => p.url));
   const claimed = new Set(reported);
   for (const url of actual) {
@@ -176,8 +218,17 @@ export function verify(
 }
 
 if (process.argv[1] && import.meta.filename === process.argv[1]) {
-  const [prsPath, selectionPath, resultPath, runId, dryRun, logins, baselineArg, limitArg] =
-    process.argv.slice(2);
+  const [
+    prsPath,
+    selectionPath,
+    resultPath,
+    runId,
+    dryRun,
+    logins,
+    baselineArg,
+    limitArg,
+    preRunPath,
+  ] = process.argv.slice(2);
   const baseline = Number(baselineArg);
   const limit = Number(limitArg);
   if (
@@ -187,11 +238,12 @@ if (process.argv[1] && import.meta.filename === process.argv[1]) {
     !runId ||
     !dryRun ||
     !logins ||
+    !preRunPath ||
     !Number.isInteger(baseline) ||
     !Number.isInteger(limit)
   ) {
     console.error(
-      'usage: hub-coverage-fix-verify.ts <prs.json> <selection.json> <result.json> <run-id> <true|false> <bot logins> <baseline PR number> <list limit>',
+      'usage: hub-coverage-fix-verify.ts <prs.json> <selection.json> <result.json> <run-id> <true|false> <bot logins> <baseline PR number> <list limit> <pre-run PRs.json>',
     );
     process.exit(2);
   }
@@ -199,6 +251,7 @@ if (process.argv[1] && import.meta.filename === process.argv[1]) {
     const selection = parseSelection(JSON.parse(readFileSync(selectionPath, 'utf8')));
     const prs = parseRunPrs(JSON.parse(readFileSync(prsPath, 'utf8')));
     const reported = reportedPrUrls(JSON.parse(readFileSync(resultPath, 'utf8')));
+    const preRun = parsePreRun(JSON.parse(readFileSync(preRunPath, 'utf8')));
     assertComplete(prs, baseline, limit);
     const violations = verify(
       prs,
@@ -208,6 +261,7 @@ if (process.argv[1] && import.meta.filename === process.argv[1]) {
       dryRun === 'true',
       logins.split(','),
       baseline,
+      preRun,
     );
     for (const v of violations) console.error(`::error::${v}`);
     process.stdout.write(`${JSON.stringify({ violations }, null, 2)}\n`);

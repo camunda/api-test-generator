@@ -161,6 +161,10 @@ export function parsePrs(prs: unknown): AgentPr[] {
     ) {
       throw new Error(`PR record ${i} does not have number, url, createdAt, headRefName and state`);
     }
+    // An unparseable date would read as "not recent" and widen the weekly budget: stop instead.
+    if (Number.isNaN(Date.parse(p.createdAt))) {
+      throw new Error(`PR record ${i} has a createdAt that is not a date: ${p.createdAt}`);
+    }
     return {
       number: p.number,
       url: p.url,

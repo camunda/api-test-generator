@@ -200,6 +200,17 @@ describe('parsers are strict', () => {
     expect(() => parsePrs([good, 'x'])).toThrow('PR record 1');
     expect(() => parsePrs({})).toThrow('not a list');
   });
+
+  it('reject a PR record whose createdAt is not a date, so it cannot widen the weekly budget', () => {
+    const bad = {
+      number: 1,
+      url: 'u',
+      createdAt: 'not a date',
+      headRefName: 'fix/coverage-a-1',
+      state: 'OPEN',
+    };
+    expect(() => parsePrs([bad])).toThrow('createdAt that is not a date');
+  });
 });
 
 describe('command line', () => {

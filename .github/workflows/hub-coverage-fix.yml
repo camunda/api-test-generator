@@ -49,6 +49,10 @@ jobs:
     name: Report → limits → workspace → Claude coverage-fix → result
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    # What the verify job needs, taken from steps that finished before the agent started.
+    outputs:
+      count: ${{ steps.select.outputs.count }}
+      baseline: ${{ steps.baseline.outputs.number }}
     steps:
       - name: Checkout api-test-generator
         uses: actions/checkout@v6
@@ -319,7 +323,13 @@ jobs:
               *x-access-token*) git config --global --unset-all "$key" ;;
             esac
           done || true
-          grep -qi 'x-access-token' "$HOME/.gitconfig" 2>/dev/null && echo "::warning::token-bearing gitconfig entry survived scrub" || true
+          # Fail closed: the agent runs with --dangerously-skip-permissions, so a token that survived the
+          # scrub must stop the run, not just produce a warning.
+          if git config --global --list 2>/dev/null | grep -qi 'x-access-token' \
+            || grep -qi 'x-access-token' "$HOME/.gitconfig" 2>/dev/null; then
+            echo "::error::A token-bearing git config entry survived the scrub; not starting the agent."
+            exit 1
+          fi
 
       # --- The agent -----------------------------------------------------------
       # The newest PR number right before the agent starts. Any PR the agent account opens afterwards has a
@@ -335,6 +345,29 @@ jobs:
           newest="$(gh api "repos/${GITHUB_REPOSITORY}/pulls?state=all&sort=created&direction=desc&per_page=1" --jq '.[0].number // 0')"
           echo "number=${newest}" >> "$GITHUB_OUTPUT"
           echo "Newest PR before the agent starts: #${newest}"
+
+      # What the account's PRs looked like before the agent started. The number baseline cannot see an old PR
+      # being reopened or given a commit, so the verify job compares each PR with this snapshot.
+      - name: Snapshot the state of the newest PRs
+        if: ${{ steps.select.outputs.count != '0' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh pr list --repo "$GITHUB_REPOSITORY" --state all --limit 200 \
+            --json number,state,headRefOid > "${GITHUB_WORKSPACE}/pre-run-prs.json"
+
+      # Uploaded BEFORE the agent starts, so the copy the verify job reads cannot be changed by the agent: the
+      # agent can rewrite the files in its own workspace, but not an artifact that is already stored.
+      - name: Save the pre-agent snapshot for the verify job
+        if: ${{ steps.select.outputs.count != '0' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: hub-coverage-fix-pre-${{ github.run_id }}
+          path: |
+            selection.json
+            pre-run-prs.json
+          retention-days: 30
 
       - name: Run Claude coverage-fix agent in workspace
         id: agent
@@ -416,31 +449,11 @@ jobs:
             exit 1
           fi
 
-      # --- Deterministic checks of what the agent did -----------------------------
-      # First from GitHub, not from the agent: the agent holds a write token, so a file it wrote about
-      # itself proves nothing. This lists the newest PRs and looks at those above the baseline: the ones
-      # on this run's branch pattern must fit the budget, the candidates, one per area, draft, base,
-      # labels, and nothing in a dry run; every PR the agent reported must exist and none may be
-      # unreported; and any other PR its account opened since the baseline fails the run, whatever its
-      # branch is called. Other automation opening a PR in the same minutes also fails the run, which is
-      # the safe direction. A branch pushed without a PR is not covered.
-      - name: Verify the PRs from GitHub, not from the agent's own report
-        if: ${{ steps.select.outputs.count != '0' }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-          BASELINE: ${{ steps.baseline.outputs.number }}
-        run: |
-          set -euo pipefail
-          limit=200
-          gh pr list --repo "$GITHUB_REPOSITORY" --state all --limit "$limit" \
-            --json number,url,headRefName,baseRefName,isDraft,author,labels > "${GITHUB_WORKSPACE}/run-prs.json"
-          node scripts/triage/hub-coverage-fix-verify.ts \
-            "${GITHUB_WORKSPACE}/run-prs.json" "${GITHUB_WORKSPACE}/selection.json" \
-            "${GITHUB_WORKSPACE}/hub-coverage-fix.json" "$GITHUB_RUN_ID" "$DRY_RUN" \
-            "app/qa-processes,qa-processes[bot]" "$BASELINE" "$limit"
-
-      # Then the agent's own report: cheap checks on top. PRs it claims to have opened must stay within
-      # the budget the job computed and point at this repo, and in a dry run there must be none.
+      # --- Checks of what the agent did ------------------------------------------
+      # The check that matters runs in the separate `verify` job below, from GitHub's own PR list, on a fresh
+      # runner with freshly checked-out code. This job only runs the cheap checks on the agent's own report.
+      # PRs the agent claims to have opened must stay within the budget the job computed and point at this
+      # repo, and in a dry run there must be none.
       - name: Check the agent result against the limits
         if: ${{ steps.select.outputs.count != '0' }}
         env:
@@ -479,9 +492,7 @@ jobs:
           name: hub-coverage-fix-${{ github.run_id }}
           path: |
             hub-coverage-fix.json
-            selection.json
             recent-coverage-fix-prs.json
-            run-prs.json
           if-no-files-found: ignore
           retention-days: 30
 
@@ -500,3 +511,73 @@ jobs:
             cat "${GITHUB_WORKSPACE}/hub-coverage-fix.json" 2>/dev/null || echo "{}"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+
+  # A second job on purpose. The agent runs unrestricted on the runner of the `fix` job, as the same user as the
+  # workflow steps, so anything on that runner (the verifier code, the selection, a result file) could be
+  # rewritten by it. This job runs on a fresh runner, checks out the code again, and takes the selection and the
+  # PR snapshot from an artifact that was stored before the agent started.
+  verify:
+    name: Verify what the agent did, from GitHub, on a clean runner
+    needs: fix
+    # Also after a failed agent step: a failed run can still have left PRs behind. Skipped when the run never
+    # reached the agent (no baseline) or had nothing to do.
+    if: ${{ always() && needs.fix.outputs.baseline != '' && needs.fix.outputs.count != '0' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+    steps:
+      - name: Checkout api-test-generator
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Download the pre-agent snapshot
+        uses: actions/download-artifact@v4
+        with:
+          name: hub-coverage-fix-pre-${{ github.run_id }}
+          path: ${{ runner.temp }}/pre
+
+      - name: Download the agent result
+        id: result
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: hub-coverage-fix-${{ github.run_id }}
+          path: ${{ runner.temp }}/post
+
+      # No result file means the agent left none. Verification still runs: any PR it opened is then an
+      # unreported PR and fails the check.
+      - name: Use an empty result when the agent left none
+        if: ${{ steps.result.outcome != 'success' }}
+        run: |
+          mkdir -p "${RUNNER_TEMP}/post"
+          printf '{"gaps":[],"counts":{},"agent_error":true}\n' > "${RUNNER_TEMP}/post/hub-coverage-fix.json"
+
+      # From GitHub, not from the agent: the agent holds a write token, so a file it wrote about itself proves
+      # nothing. The PRs above the baseline on this run's branch pattern must fit the budget, the candidates, one
+      # per area, draft, base, labels, and nothing in a dry run; every PR the agent reported must exist and none
+      # may be unreported; any other PR its account opened since the baseline fails the run, whatever its branch
+      # is called; and any older PR of its account that was reopened or got a commit fails it too. Other
+      # automation touching its own PRs in the same minutes also fails the run, which is the safe direction. A
+      # branch pushed without a PR is not covered.
+      - name: Verify the PRs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASELINE: ${{ needs.fix.outputs.baseline }}
+        run: |
+          set -euo pipefail
+          limit=200
+          gh pr list --repo "$GITHUB_REPOSITORY" --state all --limit "$limit" \
+            --json number,url,headRefName,baseRefName,isDraft,author,labels,state,headRefOid > "${RUNNER_TEMP}/run-prs.json"
+          node scripts/triage/hub-coverage-fix-verify.ts \
+            "${RUNNER_TEMP}/run-prs.json" "${RUNNER_TEMP}/pre/selection.json" \
+            "${RUNNER_TEMP}/post/hub-coverage-fix.json" "$GITHUB_RUN_ID" "$DRY_RUN" \
+            "app/qa-processes,qa-processes[bot]" "$BASELINE" "$limit" "${RUNNER_TEMP}/pre/pre-run-prs.json"
