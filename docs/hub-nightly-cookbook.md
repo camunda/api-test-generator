@@ -98,7 +98,7 @@ or
 | 📦 product | Hub | Hub answers differently from its spec |
 | 🔧 infrastructure | Environment | The run itself had a problem (Hub start, network, registry) |
 | 🎲 flakiness | Unstable test | Passed on a retry, a timing race between calls, or a one-off that did not repeat |
-| 🧪 test-generation | api-test-generator | The generator wrote a wrong test, or none, for an endpoint |
+| 🧪 test-generation | api-test-generator | Our generated test is wrong, or missing, for an endpoint. It is not a Hub bug. The agent opens a fix PR when the fix is small and safe (label `nightly-api-fix`, linked in the thread, `test-automation-medic` is pinged to review it). Otherwise it only reports the failure |
 | 🎫 known issue | Already tracked | A Hub issue exists; nothing new to file |
 | 📝 filed | New | A new Hub issue was opened tonight |
 | ⏩ skipped (recent change) | Hub changed on purpose | Hub changed this endpoint a few days ago, so the failure is expected and no Hub bug is filed. The commit that changed it is linked. Usually nothing to do: the tests are rebuilt from the latest spec every night |
