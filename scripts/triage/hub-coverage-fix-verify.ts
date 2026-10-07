@@ -6,12 +6,14 @@
 //   - no more PRs than the budget the job computed, only for candidate resources, one per API area,
 //   - every PR is a draft against main with the labels the playbook requires,
 //   - the PRs the agent reported are exactly the PRs that exist,
-//   - the agent's account created no other PR during the run (a PR on any other branch would escape the
-//     naming check), except the PR kinds other automation opens under the same account.
+//   - the agent's account opened no other PR during the run. "During the run" is decided by the PR number: the
+//     caller records the newest PR number just before the agent starts, and every later PR by the account must
+//     be one of this run's PRs. Nothing here depends on a branch name the agent chose, so there are no
+//     exemptions; if other automation opens a PR in the same window the run fails closed.
 //
 // Runs under plain `node` (type stripping): no enums, no parameter properties.
 //
-//   node hub-coverage-fix-verify.ts <prs.json> <selection.json> <result.json> <run-id> <true|false dry run> <bot logins, comma separated>
+//   node hub-coverage-fix-verify.ts <prs.json> <selection.json> <result.json> <run-id> <true|false dry run> <bot logins, comma separated> <baseline PR number> <list limit>
 
 import { readFileSync } from 'node:fs';
 import { BRANCH_PREFIX, type Candidate, kebab, type Selection } from './hub-coverage-fix-select.ts';
@@ -27,13 +29,6 @@ export interface RunPr {
 }
 
 export const REQUIRED_LABELS = ['nightly-api-fix', 'auto-generated'];
-
-// Branches other workflows open with the same App account. They are not the agent's work.
-export const OTHER_AUTOMATION_PREFIXES = [
-  'fix/nightly-triage-',
-  'chore/spec-bump-',
-  'chore/hub-unskip-',
-];
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -106,24 +101,34 @@ function runResource(branch: string, runId: string): string | null {
   return middle === '' ? null : middle;
 }
 
+// The PR list is the newest `limit` PRs. If it is full and its oldest entry is still newer than the baseline,
+// PRs from the run may have fallen off the end: stop instead of verifying an incomplete list.
+export function assertComplete(prs: RunPr[], baseline: number, limit: number): void {
+  if (prs.length >= limit && Math.min(...prs.map((p) => p.number)) > baseline) {
+    throw new Error(
+      `the PR list holds ${prs.length} PRs, all newer than #${baseline}: it may be cut off, so the run cannot be verified`,
+    );
+  }
+}
+
 export function verify(
-  prs: RunPr[],
+  allPrs: RunPr[],
   selection: Selection,
   reported: string[],
   runId: string,
   dryRun: boolean,
   botLogins: string[],
+  baseline: number,
 ): string[] {
   const violations: string[] = [];
   const candidateByKebab = new Map(selection.candidates.map((c) => [kebab(c.resource), c]));
 
+  // Only PRs created after the baseline can be this run's work.
+  const prs = allPrs.filter((p) => p.number > baseline);
   const ours = prs.filter((p) => runResource(p.headRefName, runId) !== null);
   const bots = new Set(botLogins);
   const strays = prs.filter(
-    (p) =>
-      bots.has(p.author) &&
-      runResource(p.headRefName, runId) === null &&
-      !OTHER_AUTOMATION_PREFIXES.some((prefix) => p.headRefName.startsWith(prefix)),
+    (p) => bots.has(p.author) && runResource(p.headRefName, runId) === null,
   );
 
   if (dryRun && ours.length > 0) {
@@ -155,7 +160,7 @@ export function verify(
 
   for (const p of strays) {
     violations.push(
-      `${p.url}: opened by the agent account on branch ${p.headRefName}, which is not this run's branch pattern`,
+      `${p.url}: opened by the agent account during the run on branch ${p.headRefName}, which is not one of this run's coverage PRs`,
     );
   }
 
@@ -171,10 +176,22 @@ export function verify(
 }
 
 if (process.argv[1] && import.meta.filename === process.argv[1]) {
-  const [prsPath, selectionPath, resultPath, runId, dryRun, logins] = process.argv.slice(2);
-  if (!prsPath || !selectionPath || !resultPath || !runId || !dryRun || !logins) {
+  const [prsPath, selectionPath, resultPath, runId, dryRun, logins, baselineArg, limitArg] =
+    process.argv.slice(2);
+  const baseline = Number(baselineArg);
+  const limit = Number(limitArg);
+  if (
+    !prsPath ||
+    !selectionPath ||
+    !resultPath ||
+    !runId ||
+    !dryRun ||
+    !logins ||
+    !Number.isInteger(baseline) ||
+    !Number.isInteger(limit)
+  ) {
     console.error(
-      'usage: hub-coverage-fix-verify.ts <prs.json> <selection.json> <result.json> <run-id> <true|false> <bot logins>',
+      'usage: hub-coverage-fix-verify.ts <prs.json> <selection.json> <result.json> <run-id> <true|false> <bot logins> <baseline PR number> <list limit>',
     );
     process.exit(2);
   }
@@ -182,6 +199,7 @@ if (process.argv[1] && import.meta.filename === process.argv[1]) {
     const selection = parseSelection(JSON.parse(readFileSync(selectionPath, 'utf8')));
     const prs = parseRunPrs(JSON.parse(readFileSync(prsPath, 'utf8')));
     const reported = reportedPrUrls(JSON.parse(readFileSync(resultPath, 'utf8')));
+    assertComplete(prs, baseline, limit);
     const violations = verify(
       prs,
       selection,
@@ -189,6 +207,7 @@ if (process.argv[1] && import.meta.filename === process.argv[1]) {
       runId,
       dryRun === 'true',
       logins.split(','),
+      baseline,
     );
     for (const v of violations) console.error(`::error::${v}`);
     process.stdout.write(`${JSON.stringify({ violations }, null, 2)}\n`);

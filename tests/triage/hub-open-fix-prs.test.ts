@@ -87,4 +87,16 @@ describe('hub-open-fix-prs.sh', () => {
     expect(r.stderr).toContain('larger than 1000 bytes');
     expect(existsSync(r.out)).toBe(false);
   });
+
+  it('fails and writes nothing when the list is full, because it may be cut off', () => {
+    const r = run({ FAKE_PRS: '1 2 3', FAKE_DIFF_BYTES: '10', LIST_LIMIT: '3' });
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('may be cut off');
+    expect(existsSync(r.out)).toBe(false);
+  });
+
+  it('accepts a list that is one short of the limit', () => {
+    const r = run({ FAKE_PRS: '1 2', FAKE_DIFF_BYTES: '10', LIST_LIMIT: '3' });
+    expect(r.status).toBe(0);
+  });
 });

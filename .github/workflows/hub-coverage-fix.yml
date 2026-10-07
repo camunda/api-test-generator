@@ -61,11 +61,6 @@ jobs:
         with:
           node-version: '22'
 
-      # Any PR the agent account opens after this moment is checked against the limits at the end.
-      - name: Record the start time
-        id: start
-        run: echo "at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
-
       # --- Find and download the weekly report ---------------------------------
       - name: Resolve the coverage report run
         id: report-run
@@ -121,16 +116,32 @@ jobs:
           done
 
       # --- Limits, enforced in code, before any agent runs ---------------------
-      # Fails closed: if the PR history cannot be read, the weekly cap cannot be counted, so
-      # the run stops rather than guessing.
+      # Fails closed: if the PR history cannot be read, or a query comes back full (so it may be cut
+      # off), the weekly cap and the busy areas cannot be counted, so the run stops rather than guessing.
+      # Two queries, merged: every OPEN nightly-api-fix PR (an old open PR still holds its area), and every
+      # one created in the last 8 days, open or closed (the weekly cap counts 7). A single "newest 100"
+      # query would eventually push an old open PR out of the list.
       - name: List the agent's PR history
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          gh pr list --repo "$GITHUB_REPOSITORY" --state all --label nightly-api-fix --limit 100 \
-            --json number,url,createdAt,headRefName,state > "${GITHUB_WORKSPACE}/agent-prs.json"
-          echo "PRs with the nightly-api-fix label: $(jq 'length' "${GITHUB_WORKSPACE}/agent-prs.json")"
+          limit=200
+          fields=number,url,createdAt,headRefName,state
+          week_ago="$(date -u -d '8 days ago' +%Y-%m-%dT%H:%M:%SZ)"
+          gh pr list --repo "$GITHUB_REPOSITORY" --state open --label nightly-api-fix --limit "$limit" \
+            --json "$fields" > "${RUNNER_TEMP}/prs-open.json"
+          gh pr list --repo "$GITHUB_REPOSITORY" --state all --label nightly-api-fix --limit "$limit" \
+            --search "created:>=${week_ago}" --json "$fields" > "${RUNNER_TEMP}/prs-recent.json"
+          for f in prs-open prs-recent; do
+            if [ "$(jq 'length' "${RUNNER_TEMP}/${f}.json")" -ge "$limit" ]; then
+              echo "::error::${limit} or more PRs in the ${f} list: it may be cut off, so the history cannot be trusted."
+              exit 1
+            fi
+          done
+          jq -s 'add | unique_by(.number)' "${RUNNER_TEMP}/prs-open.json" "${RUNNER_TEMP}/prs-recent.json" \
+            > "${GITHUB_WORKSPACE}/agent-prs.json"
+          echo "PRs in the history: $(jq 'length' "${GITHUB_WORKSPACE}/agent-prs.json")"
 
       - name: Select the gaps the agent may work on
         id: select
@@ -303,6 +314,20 @@ jobs:
           grep -qi 'x-access-token' "$HOME/.gitconfig" 2>/dev/null && echo "::warning::token-bearing gitconfig entry survived scrub" || true
 
       # --- The agent -----------------------------------------------------------
+      # The newest PR number right before the agent starts. Any PR the agent account opens afterwards has a
+      # higher number, which is how the verification below tells this run's PRs from older ones without
+      # relying on a branch name the agent chose.
+      - name: Snapshot the newest PR number
+        id: baseline
+        if: ${{ steps.select.outputs.count != '0' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          newest="$(gh api "repos/${GITHUB_REPOSITORY}/pulls?state=all&sort=created&direction=desc&per_page=1" --jq '.[0].number // 0')"
+          echo "number=${newest}" >> "$GITHUB_OUTPUT"
+          echo "Newest PR before the agent starts: #${newest}"
+
       - name: Run Claude coverage-fix agent in workspace
         id: agent
         if: ${{ steps.select.outputs.count != '0' }}
@@ -385,23 +410,26 @@ jobs:
 
       # --- Deterministic checks of what the agent did -----------------------------
       # First from GitHub, not from the agent: the agent holds a write token, so a file it wrote about
-      # itself proves nothing. This lists the PRs created since the job started and checks the ones on this
-      # run's branch pattern (budget, candidates, one per area, draft, base, labels, nothing in a dry run),
-      # that every PR the agent reported exists and none is unreported, and that its account opened no PR
-      # on any other branch. A branch pushed without a PR is not covered.
+      # itself proves nothing. This lists the newest PRs and looks at those above the baseline: the ones
+      # on this run's branch pattern must fit the budget, the candidates, one per area, draft, base,
+      # labels, and nothing in a dry run; every PR the agent reported must exist and none may be
+      # unreported; and any other PR its account opened since the baseline fails the run, whatever its
+      # branch is called. Other automation opening a PR in the same minutes also fails the run, which is
+      # the safe direction. A branch pushed without a PR is not covered.
       - name: Verify the PRs from GitHub, not from the agent's own report
         if: ${{ steps.select.outputs.count != '0' }}
         env:
           GH_TOKEN: ${{ github.token }}
-          START: ${{ steps.start.outputs.at }}
+          BASELINE: ${{ steps.baseline.outputs.number }}
         run: |
           set -euo pipefail
-          gh pr list --repo "$GITHUB_REPOSITORY" --state all --limit 200 --search "created:>=${START}" \
+          limit=200
+          gh pr list --repo "$GITHUB_REPOSITORY" --state all --limit "$limit" \
             --json number,url,headRefName,baseRefName,isDraft,author,labels > "${GITHUB_WORKSPACE}/run-prs.json"
           node scripts/triage/hub-coverage-fix-verify.ts \
             "${GITHUB_WORKSPACE}/run-prs.json" "${GITHUB_WORKSPACE}/selection.json" \
             "${GITHUB_WORKSPACE}/hub-coverage-fix.json" "$GITHUB_RUN_ID" "$DRY_RUN" \
-            "app/qa-processes,qa-processes[bot]"
+            "app/qa-processes,qa-processes[bot]" "$BASELINE" "$limit"
 
       # Then the agent's own report: cheap checks on top. PRs it claims to have opened must stay within
       # the budget the job computed and point at this repo, and in a dry run there must be none.

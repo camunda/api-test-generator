@@ -12,6 +12,7 @@ set -euo pipefail
 out="${1:?usage: hub-open-fix-prs.sh <out.json>}"
 repo="${GITHUB_REPOSITORY:-camunda/api-test-generator}"
 max_bytes="${MAX_DIFF_BYTES:-200000}"
+list_limit="${LIST_LIMIT:-200}"
 acc="$(mktemp)"
 diff_file="$(mktemp)"
 full_diff="$(mktemp)"
@@ -20,8 +21,14 @@ trap 'rm -f "$acc" "$acc.new" "$diff_file" "$full_diff" "$list_err"' EXIT
 echo '[]' > "$acc"
 
 if ! nums=$(gh pr list --repo "$repo" --search "label:nightly-api-fix is:open" \
-  --limit 50 --json number --jq '.[].number' 2>"$list_err"); then
+  --limit "$list_limit" --json number --jq '.[].number' 2>"$list_err"); then
   echo "::error::Could not list open nightly-api-fix PRs ($(cat "$list_err")); the duplicate check cannot be trusted."
+  exit 1
+fi
+
+# A full page means there may be more than the page held. Stop rather than treat a cut-off list as complete.
+if [ -n "$nums" ] && [ "$(printf '%s\n' "$nums" | grep -c .)" -ge "$list_limit" ]; then
+  echo "::error::${list_limit} or more open nightly-api-fix PRs: the list may be cut off, so the duplicate check cannot be trusted. Have a person look."
   exit 1
 fi
 

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Selection } from '../../scripts/triage/hub-coverage-fix-select.ts';
 import {
+  assertComplete,
   parseRunPrs,
   parseSelection,
   type RunPr,
@@ -38,16 +39,16 @@ function pr(n: number, over: Partial<RunPr> = {}): RunPr {
 
 describe('verify', () => {
   it('accepts a PR that matches a candidate, is a draft with both labels, and was reported', () => {
-    expect(verify([pr(1)], selection, [URL(1)], RUN, false, BOT)).toEqual([]);
+    expect(verify([pr(1)], selection, [URL(1)], RUN, false, BOT, 0)).toEqual([]);
   });
 
   it('accepts a run that opened nothing', () => {
-    expect(verify([], selection, [], RUN, false, BOT)).toEqual([]);
-    expect(verify([], selection, [], RUN, true, BOT)).toEqual([]);
+    expect(verify([], selection, [], RUN, false, BOT, 0)).toEqual([]);
+    expect(verify([], selection, [], RUN, true, BOT, 0)).toEqual([]);
   });
 
   it('rejects any PR in a dry run', () => {
-    const v = verify([pr(1)], selection, [URL(1)], RUN, true, BOT);
+    const v = verify([pr(1)], selection, [URL(1)], RUN, true, BOT, 0);
     expect(v.some((m) => m.includes('a dry run opened'))).toBe(true);
   });
 
@@ -57,7 +58,7 @@ describe('verify', () => {
       pr(2, { headRefName: `fix/coverage-version-${RUN}` }),
       pr(3, { headRefName: `fix/coverage-gadget-${RUN}` }),
     ];
-    const v = verify(prs, selection, [URL(1)], RUN, false, BOT);
+    const v = verify(prs, selection, [URL(1)], RUN, false, BOT, 0);
     expect(v.some((m) => m.includes('over the budget of 2'))).toBe(true);
     expect(v.some((m) => m.includes(`${URL(2)}: exists but the agent did not report it`))).toBe(
       true,
@@ -72,6 +73,7 @@ describe('verify', () => {
       RUN,
       false,
       BOT,
+      0,
     );
     expect(v.some((m) => m.includes('not one of this run'))).toBe(true);
   });
@@ -81,7 +83,7 @@ describe('verify', () => {
       pr(1, { headRefName: `fix/coverage-version-${RUN}` }),
       pr(2, { headRefName: `fix/coverage-gadget-${RUN}` }),
     ];
-    const v = verify(prs, selection, [URL(1), URL(2)], RUN, false, BOT);
+    const v = verify(prs, selection, [URL(1), URL(2)], RUN, false, BOT, 0);
     expect(v.some((m) => m.includes('two PRs for the area Version'))).toBe(true);
   });
 
@@ -93,6 +95,7 @@ describe('verify', () => {
       RUN,
       false,
       BOT,
+      0,
     );
     expect(v.some((m) => m.includes('not a draft'))).toBe(true);
     expect(v.some((m) => m.includes('not main'))).toBe(true);
@@ -100,7 +103,7 @@ describe('verify', () => {
   });
 
   it('rejects a PR the agent reported but that does not exist', () => {
-    const v = verify([], selection, [URL(9)], RUN, false, BOT);
+    const v = verify([], selection, [URL(9)], RUN, false, BOT, 0);
     expect(v.some((m) => m.includes('reported by the agent but not found'))).toBe(true);
   });
 
@@ -112,18 +115,39 @@ describe('verify', () => {
       RUN,
       false,
       BOT,
+      0,
     );
-    expect(v.some((m) => m.includes('not this run'))).toBe(true);
+    expect(v.some((m) => m.includes("not one of this run's coverage PRs"))).toBe(true);
   });
 
-  it('ignores PRs of other automation and of other people', () => {
+  it("rejects an unreported PR on a branch that looks like other automation: the name is the agent's choice", () => {
+    for (const branch of [
+      'fix/nightly-triage-x-1',
+      'chore/spec-bump-camunda-hub',
+      'chore/hub-unskip-123',
+    ]) {
+      const v = verify([pr(5, { headRefName: branch })], selection, [], RUN, false, BOT, 0);
+      expect(v.some((m) => m.includes('not one of this run'))).toBe(true);
+    }
+  });
+
+  it('ignores PRs by other people, and every PR at or below the baseline', () => {
     const prs = [
-      pr(5, { headRefName: 'fix/nightly-triage-x-1' }),
-      pr(6, { headRefName: 'chore/spec-bump-camunda-hub' }),
-      pr(7, { headRefName: 'chore/hub-unskip-123' }),
       pr(8, { headRefName: 'feature/by-a-person', author: 'alice' }),
+      pr(50, { headRefName: 'fix/nightly-triage-x-1' }),
+      pr(100, { headRefName: 'sneaky/old' }),
     ];
-    expect(verify(prs, selection, [], RUN, false, BOT)).toEqual([]);
+    expect(verify(prs, selection, [], RUN, false, BOT, 100)).toEqual([]);
+  });
+
+  it('counts a PR above the baseline, and not one at the baseline', () => {
+    const prs = [
+      pr(100, { headRefName: 'sneaky/at-baseline' }),
+      pr(101, { headRefName: 'sneaky/new' }),
+    ];
+    const v = verify(prs, selection, [], RUN, false, BOT, 100);
+    expect(v).toHaveLength(1);
+    expect(v[0]).toContain(URL(101));
   });
 
   it('does not take a PR from another run for this run', () => {
@@ -134,8 +158,25 @@ describe('verify', () => {
       RUN,
       false,
       BOT,
+      0,
     );
-    expect(v.some((m) => m.includes('not this run'))).toBe(true);
+    expect(v.some((m) => m.includes("not one of this run's coverage PRs"))).toBe(true);
+  });
+});
+
+describe('assertComplete', () => {
+  const list = (numbers: number[]): RunPr[] => numbers.map((n) => pr(n));
+
+  it('accepts a list that is not full', () => {
+    expect(() => assertComplete(list([101, 102]), 100, 200)).not.toThrow();
+  });
+
+  it('accepts a full list that reaches back to the baseline', () => {
+    expect(() => assertComplete(list([100, 101, 102]), 100, 3)).not.toThrow();
+  });
+
+  it('rejects a full list that is entirely newer than the baseline: PRs may have fallen off', () => {
+    expect(() => assertComplete(list([101, 102, 103]), 100, 3)).toThrow('may be cut off');
   });
 });
 
