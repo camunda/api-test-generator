@@ -151,18 +151,15 @@ and is not listed in `zeroTestOperations` with a reason. A floor only goes up. N
 Some gaps are small and safe to fix, so an AI agent can fix them and open a pull request for a person to review.
 It is a helper: it never merges anything.
 
-**What it fixes.** Only one kind of gap: a resource that has no "create, read, delete" test (the "Lifecycle tests
-(create, read, delete)" line in the Slack message). The fix is to add the resource to
-`configs/camunda-hub/ontology/entity-kinds.json` so the generator writes that test, and to raise the matching number in
-`coverage-floors.json`.
+**What it fixes.** Two kinds of gap:
 
-**What it never touches.**
-
-- Tests it would have to hide to make the numbers look better: suppressions, exclusions, known issues, or anything on the
-  list of endpoints with no test at all.
-- Missing 409 responses, "every kind of bad request" gaps and optional fields.
-- Missing 403 and 404 tests. The team decides about those after the pilot.
-- The Hub repository itself. It can only read it.
+1. **A resource with no "create, read, delete" test** (the "Lifecycle tests (create, read, delete)" line in the Slack
+   message). The fix is to add the resource to `configs/camunda-hub/ontology/entity-kinds.json` so the generator writes
+   that test, and to raise the matching number in `coverage-floors.json`.
+2. **An endpoint with no 403 (forbidden) or 404 (not found) test**, but only when the cause is a small config entry
+   that the test setup can already satisfy. Most of these gaps need a change in the generator's own code or its
+   setup, or are left out on purpose. For those the agent opens **no pull request**. It writes down the change it
+   would make and why a person should decide, and that text appears in the run summary of the workflow run.
 
 **One exception to know about.** Sometimes an existing check says "this resource must have its own separate test file",
 and the new lifecycle test replaces those files. The agent may then adapt that one check, but only so that it asks for
@@ -184,7 +181,10 @@ something.
 
 **Limits, checked by code, not by the agent.** At most one pull request per API area, and none for a resource that
 another open fix pull request already covers. After every run a separate job checks, from GitHub, that the agent opened
-only what it was allowed to open, as drafts, with the right labels, and nothing else.
+only what it was allowed to open, as drafts, with the right labels, and nothing else. The same job reads each pull
+request's changed files from GitHub: a lifecycle fix may only touch the entity list, the floors and the one adapted check; a
+403 or 404 fix may only add fixture entries to the request-validation config and raise one floor. Any other file, a
+changed exclusion, a lowered floor or a new "no test at all" entry fails the run.
 
 ## Changing the report
 
