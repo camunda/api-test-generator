@@ -126,7 +126,9 @@ Leave the PR in draft: a person decides, after that check, whether it is good.
 
 Work in `{{.WorkspacePath}}/api-test-generator` (already on `main`).
 
-1. Branch: `fix/coverage-<resource-kebab>`. Start every resource from a clean `main`: run `git switch main`
+1. Branch: `fix/coverage-<resource-kebab>-<run-id>`, where `<run-id>` is `$GITHUB_RUN_ID`. The run id keeps the name unique: the
+   stale-PR janitor closes old `nightly-api-fix` PRs without deleting their branches, so a fixed name would make a later
+   retry fail on push. Start every resource from a clean `main`: run `git switch main`
    first (and `git status` must show nothing), so a second resource never inherits the first one's commit or floor change.
 2. Commit with a message that names the resource and the number before and after. Follow the repo's commit
    rules (Conventional Commits, lowercase subject).
