@@ -107,6 +107,18 @@ describe('verify', () => {
     expect(v.some((m) => m.includes('missing the label nightly-api-fix'))).toBe(true);
   });
 
+  it('rejects a PR that lacks any one required label, and names it', () => {
+    const all = ['nightly-api-fix', 'auto-generated', 'hub'];
+    for (const missing of all) {
+      const labels = all.filter((l) => l !== missing);
+      const v = verify([pr(1, { labels })], selection, [URL(1)], RUN, false, BOT, 0, []);
+      expect(v.some((m) => m.includes(`missing the label ${missing}`))).toBe(true);
+    }
+    expect(verify([pr(1, { labels: all })], selection, [URL(1)], RUN, false, BOT, 0, [])).toEqual(
+      [],
+    );
+  });
+
   it('rejects a new PR that was closed again, since nothing is left to review', () => {
     const v = verify([pr(1, { state: 'CLOSED' })], selection, [URL(1)], RUN, false, BOT, 0, []);
     expect(v.some((m) => m.includes('not open (CLOSED)'))).toBe(true);
