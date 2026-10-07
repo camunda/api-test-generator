@@ -54,6 +54,16 @@
       "revokedBy": "deleteFolder",
       "restorableVia": "restoreFolder",
       "description": "A folder entity, identified by its server-minted folderKey. Established via createFolder (POST /folders), observed via getFolder, revoked via deleteFolder (a soft-delete). restoreFolder (POST /folders/{folderKey}/restoration) restores a soft-deleted folder — the RestoreLifecycle template (#426) drives create → soft-delete → restore so restore is exercised against a recently-deleted folder rather than a live one (which 404s)."
+    },
+    {
+      "@type": "EntityKind",
+      "name": "ProjectSnapshot",
+      "shape": "entity",
+      "identifiers": ["ProjectSnapshotKey"],
+      "establishedBy": "createProjectSnapshot",
+      "observableVia": "getProjectSnapshot",
+      "revokedBy": "deleteProjectSnapshot",
+      "description": "A project snapshot entity, identified by its server-minted projectSnapshotKey. Established via createProjectSnapshot (POST /project-snapshots), observed via getProjectSnapshot, revoked via deleteProjectSnapshot — the EntityLifecycle template drives create → observe → revoke. No RestoreLifecycle: the collection has no /project-snapshots/recently-deleted/search, and restoreProjectSnapshot (POST /project-snapshots/{projectSnapshotKey}/restoration) restores project state from a snapshot rather than restoring a soft-deleted snapshot, so it is not a restore of this entity."
     }
   ]
 }
