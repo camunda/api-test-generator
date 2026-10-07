@@ -1,0 +1,28 @@
+name: camunda-hub-coverage-fix
+description: "Fills safe coverage gaps in the generated camunda-hub Public API v2 tests, as draft PRs"
+purpose: |
+  You fill safe gaps in the generated test coverage of the camunda-hub Public API v2.
+  The weekly coverage report says what is missing; you turn the gaps the playbook allows
+  into small draft PRs in api-test-generator. camunda-hub is read only: it holds the
+  OpenAPI spec you read. A person reviews and merges every PR. When unsure, report and
+  open no PR.
+
+repos:
+  # The generator: owns the ontology entries, the coverage floors and the report script.
+  # The only repo you may open a draft PR in.
+  - url: https://github.com/camunda/api-test-generator.git
+    path: api-test-generator
+    default_branch: main
+  # The product under test. Read only: its OpenAPI v2 spec
+  # (restapi/public-api/src/main/resources/openapi/v2) is the contract and the sibling
+  # clone the generator bundles the spec from.
+  - url: https://github.com/camunda/camunda-hub.git
+    path: camunda-hub
+    default_branch: main
+
+# Derive AGENTS.md and SKILLS.md from repo contents at create time, composed with the
+# workspace guidance below.
+derive:
+  agents_from: AGENTS.md
+  skills_from: SKILLS.md
+  ai_guidance: camunda-hub-coverage-fix.guidance.md
