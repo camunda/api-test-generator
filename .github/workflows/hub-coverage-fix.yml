@@ -620,8 +620,12 @@ jobs:
                            base: {rv: $brv[0], floors: $bfl[0]}, head: {rv: $hrv[0], floors: $hfl[0]}}}' \
               "${RUNNER_TEMP}/pr-changes.json" > "${RUNNER_TEMP}/pr-changes.new" && mv "${RUNNER_TEMP}/pr-changes.new" "${RUNNER_TEMP}/pr-changes.json"
           done
+          # Which fixture variables setup provisions, read at `main` through the API, never from this checkout: a
+          # manual run can check out any branch, and a modified branch must not be able to change the answer.
+          gh api -H "Accept: application/vnd.github.raw" \
+            "repos/${GITHUB_REPOSITORY}/contents/scripts/e2e/run-hub.sh?ref=main" > "${RUNNER_TEMP}/run-hub.sh"
           node scripts/triage/hub-coverage-fix-verify.ts \
             "${RUNNER_TEMP}/run-prs.json" "${RUNNER_TEMP}/pre/selection.json" \
             "${RUNNER_TEMP}/post/hub-coverage-fix.json" "$GITHUB_RUN_ID" "$DRY_RUN" \
             "app/qa-processes,qa-processes[bot]" "$BASELINE" "$limit" "${RUNNER_TEMP}/pre/pre-run-prs.json" \
-            "${RUNNER_TEMP}/pr-changes.json" scripts/e2e/run-hub.sh
+            "${RUNNER_TEMP}/pr-changes.json" "${RUNNER_TEMP}/run-hub.sh"

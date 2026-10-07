@@ -161,10 +161,13 @@ response, is not held by an exclusion, and has no scoped exclusion. Work out **w
 2. **Decide which of two outcomes it is.**
    - **Config only (you may fix it).** The only thing missing is an entry in `resourceFixtures` or
      `pathResourceFixtures` in `request-validation.json`, and the value you would map it to is an environment
-     variable that setup **already provisions**: search `request-validation/templates/support/global-setup.ts` and
-     the support files for that exact name. Add the one entry, shaped like its neighbours, nothing else.
+     variable that setup **already provisions**: for camunda-hub, `scripts/e2e/run-hub.sh` creates the fixtures and
+     exports each `RV_FIXTURE_*` variable, so the name must appear there as `export <NAME>`. Search that file for the
+     exact name. (`request-validation/templates/support/global-setup.ts` is the generic setup for other configs; it
+     does not decide what exists on Hub.) Add exactly one entry, shaped like its neighbours, nothing else. The
+     verify job checks the same thing from `main`: one new entry, whose variable `run-hub.sh` exports.
    - **Anything else (report only, with a proposal).** That is: a change to generator code or setup code
-     (`request-validation/src/**`, `request-validation/templates/**`), a fixture that setup does not provision yet,
+     (`request-validation/src/**`, `request-validation/templates/**`, `scripts/e2e/run-hub.sh`), a fixture that setup does not provision yet,
      a validation order that makes Hub answer 400 before 403 or 404, an exclusion or scoped exclusion (its
      `reason` is a decision, never overturn it), or a contract that contradicts the test (for example a documented
      idempotent delete that cannot return 404). Edit nothing. Write `action: "report-only"` and fill `proposal` (see
