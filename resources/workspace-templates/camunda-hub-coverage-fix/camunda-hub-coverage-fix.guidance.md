@@ -141,8 +141,10 @@ an entry in `entity-kinds.json` that names its create, get and delete operations
    fails and the cause is not obvious and local to your change, drop the change and record `report-only`.
    A floor above the measured number also fails here: that is the check working.
 
-You cannot run a live Hub here. The PR's own live-Hub check (`hub-pr-live-check.yml`) runs on it automatically.
-Leave the PR in draft: a person decides, after that check, whether it is good.
+You cannot run a live Hub here. The automatic live-Hub check (`hub-pr-live-check.yml`) does **not** run on your PRs: it
+is skipped for agent PRs, because it would run the PR's own code with Hub access before anyone has read it. Say in the PR
+body that a person must read the diff and then run `hub-ondemand-test.yml` on the branch. Leave the PR in draft: a
+person decides, after that run, whether it is good.
 
 ## Fixing a 403 or 404 gap
 
@@ -185,8 +187,8 @@ response, is not held by an exclusion, and has no scoped exclusion. Work out **w
 
 You cannot run a live Hub here, and the order in which Hub checks things (400, then 403, then 404) decides whether
 a new test passes. So be stricter than for a lifecycle gap: if you have any doubt that the request will reach the
-check the test targets, write `report-only` with a proposal and open no PR. The PR's live-Hub check will run on any
-PR you do open, and a person reads it before it merges.
+check the test targets, write `report-only` with a proposal and open no PR. A person reads any PR you do open and
+runs the live-Hub test on its branch (`hub-ondemand-test.yml`) before it merges.
 
 ## Opening the PR
 

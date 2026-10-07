@@ -54,14 +54,29 @@ jobs:
           REPO: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
         run: |
           set -euo pipefail
-          # SECURITY: a PR opened by one of our AI agents (fix/coverage-*, fix/nightly-triage-*) is not run
-          # automatically either. The live check below runs the PR's own code with Hub access the moment the PR opens,
-          # and the verification of what the agent changed only runs later, so a person reads the diff first and then
-          # runs hub-ondemand-test.yml on the branch. The branch name is only ever passed through the environment.
-          if bash .github/scripts/hub-live-check-is-agent-branch.sh "$HEAD_REF"; then
-            echo "::warning::PR branch '$HEAD_REF' belongs to an AI agent — skipping the automatic live-Hub check; read the diff, then run hub-ondemand-test.yml on the branch before merging."
+          # SECURITY: a PR opened by one of our AI agents is not run automatically either. The live check below runs
+          # the PR's own code with Hub access the moment the PR opens, and the verification of what an agent changed
+          # only runs later, so a person reads the diff first and then runs hub-ondemand-test.yml on the branch.
+          # An agent chooses its own branch name, so the name alone is not trusted: a PR from the automation account
+          # (qa-processes) is skipped unless its branch is one of the two that deterministic scripts use. An empty
+          # branch name or author fails closed. Both values are only ever read from the environment.
+          agent=false
+          case "$HEAD_REF" in
+            '' | fix/coverage-* | fix/nightly-triage-*) agent=true ;;
+          esac
+          case "$PR_AUTHOR" in
+            '' | 'qa-processes[bot]' | 'app/qa-processes')
+              case "$HEAD_REF" in
+                chore/spec-bump-camunda-hub | chore/hub-unskip-*) ;;
+                *) agent=true ;;
+              esac
+              ;;
+          esac
+          if [ "$agent" = true ]; then
+            echo "::warning::PR branch '$HEAD_REF' (author '$PR_AUTHOR') belongs to an AI agent — skipping the automatic live-Hub check; read the diff, then run hub-ondemand-test.yml on the branch before merging."
             echo "proceed=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
