@@ -918,6 +918,20 @@ self-contained page (`scripts/e2e/hub_coverage_page.py`, text derived from the n
 `hub-coverage-report` artifact as `page.html`, which can be published as a Claude page by hand (use `--fragment` for the wrapper-free form the Artifact tool expects).
 The Slack message links to the run (matrix), that issue, and the per-area issues.
 
+**Coverage-fix agent** ([`hub-coverage-fix.yml`](.github/workflows/hub-coverage-fix.yml), playbook
+[`camunda-hub-coverage-fix.guidance.md`](resources/workspace-templates/camunda-hub-coverage-fix/camunda-hub-coverage-fix.guidance.md)):
+a manual-trigger workflow, dry run by default, that reads the weekly report and runs a Claude Code agent for the gaps the
+playbook allows: a resource with no create-read-delete test (an `entity-kinds.json` entry plus a floor), and a missing 403 or 404
+test whose cause is config alone (a fixture entry whose environment variable setup already provisions). Anything that needs
+generator or setup code, or touches an exclusion, is report-only with a `proposal` in the result. The agent opens **draft
+PRs** only (labels `nightly-api-fix`, `auto-generated`, `hub`; branch `fix/coverage-<resource or operation>[-<code>]-<run id>`), one per
+API area, with no weekly cap. camunda-hub is read-only for it, and it runs with a scrubbed environment. The limits are enforced in
+code, not by the prompt: the selector (`scripts/triage/hub-coverage-fix-select.ts`) decides what it may work on, and a separate
+`verify` job on a fresh runner (`hub-coverage-fix-verify.ts`, `hub-coverage-fix-diff.ts`) checks from GitHub that it opened only
+allowed PRs, as drafts, and that each PR changed only the allowed files and config entries. A test that names the
+standalone feature specs a lifecycle test replaces may be adapted under four conditions, in a PR section "Test change: needs careful
+review". The weekly Slack message gets a thread reply listing the agent's PRs still open (`.github/scripts/hub-coverage-agent-prs.sh`).
+
 **A failed Slack step fails the scheduled run.** The Slack steps of the scheduled Hub workflows (nightly, triage,
 spec-bump check, re-enable check, weekly coverage report, generator-gap digest) use `continue-on-error`, so a Vault or
 Slack problem never stopped the run and the alert silently did not go out. Each of those jobs now ends with
