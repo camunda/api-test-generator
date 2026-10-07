@@ -36,6 +36,7 @@ import sys
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 CONFIG = 'camunda-hub'
+GUIDE_URL = 'https://github.com/camunda/api-test-generator/blob/main/docs/hub-response-coverage-report.md'
 HTTP_METHODS = {'get', 'put', 'post', 'delete', 'patch'}
 BUCKETS = ('2xx', '400', '401', '403', '404', '409')
 # 500 is documented everywhere and cannot be provoked on purpose.
@@ -572,6 +573,7 @@ def slack(s, prev, args):
         links.append(f'<{args.run_url}|Full table>')
     if args.tracking_url:
         links.append(f'<{args.tracking_url}|Tracking epic>')
+    links.append(f'<{GUIDE_URL}|📖 Guide>')
     if links:
         lines += ['', ' · '.join(links)]
     return '\n'.join(lines) + '\n'
@@ -643,6 +645,7 @@ def issue_body(s, rows, args):
     ]
     if args.run_url:
         lines += ['', f'Full table: {args.run_url}']
+    lines += ['', f'How to fix a gap: [guide]({GUIDE_URL}#closing-a-gap)']
     return '\n'.join(lines) + '\n'
 
 
@@ -677,6 +680,7 @@ def area_issues(rows, args):
         ] + gap_table(gaps)
         if args.run_url:
             lines += ['', f'Full table: {args.run_url}']
+        lines += ['', f'How to fix a gap: [guide]({GUIDE_URL}#closing-a-gap)']
         out.append((f'{AREA_TITLE_PREFIX}{area}: missing response or bad-request tests', '\n'.join(lines) + '\n', area,
                     len(gaps), [g['operationId'] for g in gaps]))
     return out

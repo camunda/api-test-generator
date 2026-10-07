@@ -310,6 +310,40 @@ describe('request-validation: unenforcedStringFormats', () => {
       }
     });
 
+    it('accepts a boolean acknowledgedNotPlanned on a knownIssues entry and rejects anything else', () => {
+      const write = (v: unknown) =>
+        fs.writeFileSync(
+          path.join(cfgDir, 'request-validation.json'),
+          JSON.stringify({
+            knownIssues: [{ summary: 's', url: 'https://x/1', acknowledgedNotPlanned: v }],
+          }),
+        );
+      write(true);
+      expect(
+        loadRequestValidationConfig(tmpRoot, 'probe').knownIssues?.[0]?.acknowledgedNotPlanned,
+      ).toBe(true);
+      write('yes');
+      expect(() => loadRequestValidationConfig(tmpRoot, 'probe')).toThrow(
+        /acknowledgedNotPlanned\? \}/,
+      );
+    });
+
+    it('rejects acknowledgedNotPlanned on an operation-scoped knownIssue, where it would do nothing', () => {
+      fs.writeFileSync(
+        path.join(cfgDir, 'request-validation.json'),
+        JSON.stringify({
+          excludeOperations: [
+            {
+              operationId: 'createWorkspace',
+              reason: 'x',
+              knownIssue: { summary: 's', url: 'https://x/1', acknowledgedNotPlanned: true },
+            },
+          ],
+        }),
+      );
+      expect(() => loadRequestValidationConfig(tmpRoot, 'probe')).toThrow(/excludeOperations/);
+    });
+
     it('parses a suite-wide knownIssues array and rejects a malformed one', () => {
       fs.writeFileSync(
         path.join(cfgDir, 'request-validation.json'),

@@ -83,6 +83,11 @@ describe('the fail-if-slack-failed action', () => {
     for (const d of descriptions) expect(d ?? '').not.toContain('${{');
   });
 
+  it('points the error at the checklist that says what to check', () => {
+    const r = run('failure');
+    expect(r.stdout).toContain('docs/hub-nightly-cookbook.md');
+  });
+
   it('fails the run when any Slack step failed, and says why', () => {
     const r = run('success failure skipped');
     expect(r.status).toBe(1);
@@ -151,5 +156,14 @@ describe('workflows whose manual run is a dry run that posts nothing', () => {
       const token = steps.find((st) => st.uses === './.github/actions/slack-token');
       expect(token?.if, 'the token step needs an if that skips a dry run').toMatch(/dry_run/);
     }
+  });
+});
+
+describe('the comment on a camunda-hub PR whose generator gap the PR caused', () => {
+  it('links the PR-check cookbook', () => {
+    const text = readFileSync(join(root, '.github/workflows/hub-pr-check.yml'), 'utf8');
+    expect(text).toContain(
+      '[PR-check cookbook](https://github.com/camunda/api-test-generator/blob/main/docs/hub-pr-check-cookbook.md)',
+    );
   });
 });

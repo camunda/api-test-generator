@@ -23,6 +23,6 @@ runs:
         OUTCOMES: ${{ inputs.outcomes }}
       run: |
         if [[ " ${OUTCOMES} " == *" failure "* ]]; then
-          echo "::error title=Slack alert not posted::A Slack step failed (outcomes: ${OUTCOMES}). The alert for this run did not go out. Check the Vault role and the Slack bot; the tests themselves may be fine."
+          echo "::error title=Slack alert not posted::A Slack step failed (outcomes: ${OUTCOMES}). The alert for this run did not go out. Check the Vault role and the Slack bot; the tests themselves may be fine. What to check, in order: https://github.com/camunda/api-test-generator/blob/main/docs/hub-nightly-cookbook.md"
           exit 1
         fi

@@ -6,6 +6,11 @@ dependency graph, then emits scenario-driven test files with full request/respon
 Also emits **negative request-validation tests** (intended HTTP 400) covering ~24 distinct
 malformed-request scenario kinds.
 
+> **Owning or working with the camunda-hub suite?** Start with the cookbook that matches you:
+> [your PR check is red, or you are adding an endpoint](docs/hub-pr-check-cookbook.md) ·
+> [a message in the nightly Slack channel](docs/hub-nightly-cookbook.md) ·
+> [the weekly coverage report](docs/hub-response-coverage-report.md).
+
 ## Architecture
 
 ```
@@ -566,6 +571,8 @@ These live under `configs/<active-config>/`:
 | `request-defaults.json` | Default values for request body fields per operation |
 | `fixtures/` | BPMN, DMN, and form files used by deployment tests, plus `deployment-artifacts.json` registry |
 | `codegen/playwright/roles/<role>/` | Per-role bundles consumed by the materializer (`call-site.tmpl`, optional `imports.tmpl`, `support.<ext>` or `support.<ext>.tmpl`, `match.json`) |
+
+The table above lists some of the inputs a config can have (the files differ per config, and it is not a complete list for any of them). For **camunda-hub** the main ones under `configs/camunda-hub/` are `positive-suppress.json`, `request-validation.json`, `conflict-replay.json`, `search-paging.json`, `optional-fields.json`, `coverage-floors.json`, `spec-pin.json`, `regression-invariants.test.ts`, `ontology/`, `fixtures/` and `codegen/`. What each does is in the [weekly coverage guide](docs/hub-response-coverage-report.md) and the [PR-check cookbook](docs/hub-pr-check-cookbook.md).
 
 ## Environment Variables
 

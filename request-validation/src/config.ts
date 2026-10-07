@@ -213,7 +213,7 @@ export interface RequestValidationConfig {
    * in the nightly's "skipped due to known issues" Slack thread alongside the
    * per-entry `knownIssue`s.
    */
-  knownIssues?: KnownIssue[];
+  knownIssues?: SuiteKnownIssue[];
   /**
    * Operations that answer 400 (not 403 or 500) when a resource-key body field
    * (a key of `resourceFixtures`) holds an object or array. For each, the body
@@ -265,6 +265,14 @@ export interface KnownIssue {
 }
 
 /**
+ * A suite-wide `knownIssues[]` entry. Only these can be acknowledged: set `acknowledgedNotPlanned` to true once the Hub
+ * issue is closed as not planned and the skip is kept on purpose, so the daily re-enable check stops reporting it.
+ */
+export interface SuiteKnownIssue extends KnownIssue {
+  acknowledgedNotPlanned?: boolean;
+}
+
+/**
  * Narrows an `excludeOperations` entry's `scenarioKinds` beyond "every
  * scenario of this kind" — see `RequestValidationConfig.excludeOperations`'s
  * doc comment for when to use `targets` vs `constraintKinds`. At least one of
@@ -309,7 +317,19 @@ function isKnownIssue(v: unknown): v is KnownIssue {
     v.summary.trim().length > 0 &&
     typeof v.url === 'string' &&
     v.url.trim().length > 0 &&
-    (v.tracker === undefined || (typeof v.tracker === 'string' && v.tracker.trim().length > 0))
+    (v.tracker === undefined || (typeof v.tracker === 'string' && v.tracker.trim().length > 0)) &&
+    // Only suite-wide knownIssues[] entries can be acknowledged; the re-enable check ignores the
+    // flag anywhere else, so accepting it there would be a silent no-op.
+    v.acknowledgedNotPlanned === undefined
+  );
+}
+
+function isSuiteKnownIssue(v: unknown): v is SuiteKnownIssue {
+  if (!isPlainObject(v)) return false;
+  const { acknowledgedNotPlanned, ...rest } = v;
+  return (
+    isKnownIssue(rest) &&
+    (acknowledgedNotPlanned === undefined || typeof acknowledgedNotPlanned === 'boolean')
   );
 }
 
@@ -496,9 +516,9 @@ export function loadRequestValidationConfig(
   }
   if ('knownIssues' in parsed) {
     const v = parsed.knownIssues;
-    if (!Array.isArray(v) || !v.every(isKnownIssue)) {
+    if (!Array.isArray(v) || !v.every(isSuiteKnownIssue)) {
       throw new Error(
-        `Invalid ${configPath}: "knownIssues" must be an array of { summary, url, tracker? } objects with non-empty strings.`,
+        `Invalid ${configPath}: "knownIssues" must be an array of { summary, url, tracker?, acknowledgedNotPlanned? } objects — summary/url/tracker non-empty strings, acknowledgedNotPlanned (when present) a boolean.`,
       );
     }
     merged.knownIssues = v;

@@ -1134,6 +1134,8 @@ jobs:
               echo "api-test-generator must be updated first; until then this check cannot validate the affected operations."
             fi
             echo
+            echo "What this means and what to do: [PR-check cookbook](https://github.com/camunda/api-test-generator/blob/main/docs/hub-pr-check-cookbook.md)."
+            echo
             echo "_Posted automatically by api-test-generator's Hub PR check; edited in place on later pushes._"
           } > "$body_file"
 

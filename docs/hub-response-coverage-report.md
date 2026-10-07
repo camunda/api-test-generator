@@ -38,14 +38,14 @@ Positive tests (the request is right)
 
 Negative tests (the request is wrong)
 • Bad request (400), Not authenticated (401), Forbidden (403), Not found (404), Conflict (409): "x of y" each
-• Every kind of bad request tested: 32 of 36 endpoints. <which kinds are missing most often>
+• Every kind of bad request tested: 32 of 64 endpoints. <which kinds are missing most often>
 
 Across positive and negative tests
 • Biggest gaps ...
 • N endpoints are missing a test for a success, 400, 401, 404 or 409 response
 ```
 
-- "x of y" means: y endpoints document that response, x of them have a test that asserts it.
+- "x of y" means: y endpoints document that response, x of them have a test that asserts it. Not every line counts endpoints: "Optional request fields" counts **fields** (63 of 68 fields), and the lifecycle lines count **resources** or **links**.
 - A number in brackets is the change since the previous scheduled report. Nothing is shown when it is unchanged or there is no previous report.
 - A "resource" is something the API lets you create, read by key and delete (files, folders, projects, and so on; one nested under a parent key counts too); it needs a
   restore flow too if a delete is soft: the key path has a `.../restoration` endpoint and the collection has a
@@ -59,9 +59,15 @@ Across positive and negative tests
   `EdgeLifecycle/<Edge>.lifecycle.spec.ts` was generated. A new link is listed by its add operation until the edge is added.
 - "Endpoints with no test at all" are listed with the issue that explains each one, taken from the `knownIssue` URL on the endpoint's
   entry in `positive-suppress.json` or `request-validation.json`. An endpoint with no such entry is listed bare, which means nobody has explained it yet.
+- **What counts as covered.** A test that exists in the generated files and asserts that response. A test left out by a suppression or exclusion in the config (usually for a
+  known Hub bug, but an exclusion needs only a `reason`) is **not** counted as tested: it stays in the "of" number and shows as held in the full table. The one exception is
+  the "Every kind of bad request" line, which treats a skip in two ways. A **kind** excluded in the config is
+  taken out of what that endpoint needs, so the endpoint can still count as fully covered by its other kinds. An endpoint whose
+  bad-request tests are **all** skipped or excluded is left out of both numbers.
+- The report's "Negative tests" section also counts 409 (a request that is wrong for the current state), although the generated 409 tests live in the positive suite, because they need setup calls first.
 - 500 responses are not counted. 403 is counted but not part of the "missing a test" roll-up (it is tracked separately).
-- "Every kind of bad request" counts kinds with at least one test (missing required field, wrong type, bad enum, and so on), not how many tests each kind has.
-  It is only as complete as the generator's own rules for when a kind applies, so for body-schema kinds treat it as an upper bound.
+- "Every kind of bad request" counts kinds with at least one test (missing required field, wrong type, bad enum, and so on), not how many tests each kind has. A kind skipped on purpose is not counted as missing and does not count as tested; it only leaves the endpoint's list of needed kinds.
+  It is only as complete as the generator's own rules for when a kind applies, so for body-schema kinds treat it as an upper bound: the headline can overstate real coverage.
 
 ## How it runs
 
@@ -104,12 +110,26 @@ cat /tmp/cov/slack.txt
 
 ## Closing a gap
 
-1. Open the area issue and find the endpoint and the response or bad-request kind it lacks.
-2. Add the test. Most are derived automatically; state-dependent 409/400 cases are written by hand in
-   `configs/camunda-hub/conflict-replay.json`. Search paging and optional fields have their own
-   `auto`/`exclude` config files. See AGENTS.md for each.
-3. Regenerate and check the number moved with the local command above.
-4. Raise the matching floor in `configs/camunda-hub/coverage-floors.json`.
+This is maintainer work: it needs the generator, not just Hub. An area issue lists, per endpoint, the **missing responses**
+and the **missing bad-request tests**. Find the endpoint's row, then use the table for what it lacks.
+
+| The row says it is missing | What it means | Where to look, and the usual fix |
+|---|---|---|
+| **success** | No success test for the endpoint | First check `configs/camunda-hub/positive-suppress.json`: if it is listed, read its `reason`: it says whether this is a Hub limitation (the fix is on the Hub side), a generator gap (for example the planner cannot source an ID), or an operation left out on purpose. Do not assume it is Hub's. If it is not listed, the generator could not chain the calls the endpoint needs (an ID it cannot create). See `unmappedOperations` in `generated/camunda-hub/playwright/coverage.json`, then teach the generator how to create that resource in `configs/camunda-hub/ontology/` (`entity-kinds.json`, `runtime-states.json`) or the fixtures |
+| **400**, **401**, **403**, **404** | A bad-request, no-auth, forbidden or not-found test is missing | Generated when the operation is eligible and not excluded. First check `excludeOperations` in `configs/camunda-hub/request-validation.json` (the entry always has a `reason`; a Hub issue is optional, and some exclusions such as `purgeFile` and `addMember` have only a reason). If it is not excluded, it is not eligible: **403** needs a request that reaches the authorization check, so a valid fixture-backed request body and path (`resourceFixtures` in the same file; the rule is `isAuthDenyEligible` in `request-validation/src/analysis/authDeny.ts`), and **404** needs an ID the generator can make up (`isNotFoundEligible` in `request-validation/src/analysis/notFoundFakeId.ts`). The fix is then fixture modelling or the eligibility rule, not an exclusion. The modes `authAbsentMode`, `authDenyMode` and `notFoundMode` in the same file set how Hub is expected to answer. A 404 test needs an ID it can make up, so an endpoint with no path key needs the not-found generator extended (`notFoundFakeId.ts` and the emitter that writes its tests). Do not add a test file by hand: generation deletes the output folder every time, and the report only counts generated files |
+| **409** | A documented conflict is not tested (only a 409 the spec documents is counted) | Needs a state first. In `configs/camunda-hub/conflict-replay.json`, use `replay` when repeating the same call is enough to conflict (a duplicate create), or `sequences` for setup calls followed by the call that should answer 409 (for example restoring a file whose project was deleted). List it under `untested` with an issue if it cannot be provoked. The weekly report reads the latest Hub `main` spec, but the invariant tests use the pinned one (`spec-pin.json`), and they fail an entry for a 409 the pinned spec does not document: if the 409 is new, bump the pin first (see the README) |
+| **a bad-request kind** (for example `allof-conflict`, `union`, `missing-body`) | The endpoint has no test of that kind | Generated from the spec's schema. For the body-shape kinds the report can list a kind that cannot be built for that endpoint, so first generate (see below) and look for the endpoint in `generated/camunda-hub/request-validation/COVERAGE.md`. If the kind applies but is not generated, the fix is in the generator's code (`request-validation/src/analysis/`, and `request-validation/scripts/generate.ts` decides which kinds count as applicable), not in config. If it does not apply it is an over-count: there is no switch today to mark a kind not applicable, so say so in the issue and leave it open |
+| **Lifecycle tests** (in the weekly Slack message, not in an area issue) | A resource or link has no create, read, delete flow | Add it to `configs/camunda-hub/ontology/entity-kinds.json` or `edges.json` |
+
+After the fix:
+
+1. Regenerate and run the report with the commands in "Running it yourself" above, and check that the number moved.
+2. Run `CONFIG=camunda-hub npx vitest run tests/request-validation configs/camunda-hub/regression-invariants.test.ts`. The report only reads the generated files; to see the new test pass against a real Hub, run the `hub-ondemand-test` workflow on your branch (Actions, Run workflow).
+3. Raise the matching number in `configs/camunda-hub/coverage-floors.json` in the same PR.
+4. If the fix needed a flag or a new resource, see "Adding or changing an endpoint in Hub" in the PR-check cookbook for the labels.
+
+`AGENTS.md` has more on each config file, but it is written for AI agents and is long. If a step here is unclear, ask in
+`#camunda-hub-pr-e2e-results`.
 
 ### Floors
 

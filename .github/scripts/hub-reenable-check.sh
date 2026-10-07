@@ -65,11 +65,20 @@ if [ "$suite_wide_count" -gt 0 ]; then
       echo "No GH_TOKEN_HUB — skipping state check for suite-wide ${url}"
       continue
     fi
-    state=$(GH_TOKEN="$GH_TOKEN_HUB" gh issue view "$url" --repo "$HUB_REPO" --json state --jq .state 2>/dev/null || true)
-    echo "suite-wide: ${url} -> ${state:-unresolved}"
+    view=$(GH_TOKEN="$GH_TOKEN_HUB" gh issue view "$url" --repo "$HUB_REPO" --json state,stateReason \
+      --jq '(.state // "") + " " + (.stateReason // "")' 2>/dev/null || true)
+    state=${view%% *}
+    reason=${view#* }
+    echo "suite-wide: ${url} -> ${state:-unresolved} ${reason}"
     if [ "$state" = "CLOSED" ]; then
-      add_summary "$(jq -nc --arg url "$url" --arg summary "$summary" \
-        '{type: "suite_wide_closed", url: $url, summary: $summary}')"
+      # A decline someone already looked at (acknowledgedNotPlanned on the entry) is not reported
+      # again: the skip stays on purpose, and repeating it every day would only be noise.
+      if [ "$reason" = "NOT_PLANNED" ] && [ "$(jq -r '.acknowledgedNotPlanned // false' <<<"$item")" = "true" ]; then
+        echo "suite-wide: ${url} closed as not planned and acknowledged — not reporting."
+        continue
+      fi
+      add_summary "$(jq -nc --arg url "$url" --arg summary "$summary" --arg reason "$reason" \
+        '{type: "suite_wide_closed", url: $url, summary: $summary, reason: $reason}')"
     fi
   done < <(jq -c '.suiteWide[]' <<<"$collected")
 fi

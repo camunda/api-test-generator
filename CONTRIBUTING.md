@@ -48,20 +48,11 @@ aborts the entire run with an actionable re-pin message. See
 
 ## Opening a fix PR for a not-yet-merged hub API change
 
-If you're adding/changing a `camunda-hub` endpoint and opening a matching
-PR here ahead of time (so coverage lands with the API change instead of
-being discovered by the nightly), **label it `nightly-api-fix`**.
-
-`.github/workflows/triage-camunda-hub-nightly.yml` runs after every
-nightly failure and, before opening its own fix PR for a test-generation
-bug or coverage gap, searches for open PRs labeled `nightly-api-fix`
-whose diff already covers the affected operation — if one exists, it
-links to it instead of duplicating the fix. That search only matches on
-the label; the bot applies it automatically to PRs it opens itself, but a
-manually-opened PR needs the label added by hand. Without it, the triage
-agent has no way to know your PR already covers the endpoint, and if the
-nightly runs before yours merges, it will open a competing fix PR (the
-two then race to merge, and the loser has to be closed as a duplicate).
+If you add or change a `camunda-hub` endpoint and need a matching PR here (a feature flag, a state-dependent 409, a new
+kind of resource), open it with your Hub PR and label it **`nightly-api-fix` and `do-not-close`**. The labels keep the
+nightly triage from opening a duplicate and keep the daily janitor from closing your PR. The full process, and why both
+labels are needed, is in
+[docs/hub-pr-check-cookbook.md](docs/hub-pr-check-cookbook.md#adding-or-changing-an-endpoint-in-hub-do-you-need-a-generator-pr).
 
 ## Closing a Hub test-coverage gap
 
