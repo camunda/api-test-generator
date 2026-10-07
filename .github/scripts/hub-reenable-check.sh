@@ -2,8 +2,9 @@
 # Core logic for hub-known-issue-reenable-check.yml (#432): detect camunda-hub
 # blocker issues that have closed since a suppress/exclude entry referenced
 # them, and for each one, remove the matching entries + open a draft PR so a
-# human (backed by an automatic live-Hub validation run) can confirm the
-# operation is safe to re-enable.
+# human (after running hub-ondemand-test.yml on the branch: the automatic live
+# check skips PRs from the automation account) can confirm the operation is
+# safe to re-enable.
 #
 # Deliberately fully deterministic — no LLM/agent judgment anywhere. Detecting
 # "is this issue closed" and "remove this JSON entry" are both pure mechanics;

@@ -20,10 +20,10 @@
 # for the triage agent's own issue filing, which implies read, so #432's
 # stated "grant Issues: Read" prerequisite needed no new provisioning) and
 # GH_TOKEN_GENERATOR (contents+PR write on api-test-generator, to open the
-# draft PR). No manual live-Hub validation dispatch is needed for any PR this
-# workflow opens: hub-pr-live-check.yml already fires automatically on every
-# same-repo PR targeting main that doesn't touch .github/** — exactly what
-# these PRs look like — as a native GitHub Actions check.
+# draft PR). This workflow dispatches no live-Hub validation, and
+# hub-pr-live-check.yml skips every PR from the automation account (the AI agents
+# open their PRs with the same token), so a person runs hub-ondemand-test.yml on
+# the PR's branch before merging.
 name: Hub known-issue re-enable check
 
 on:

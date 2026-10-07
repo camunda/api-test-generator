@@ -55,6 +55,8 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           HEAD_REF: ${{ github.event.pull_request.head.ref }}
           PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          ACTOR: ${{ github.actor }}
+          SENDER: ${{ github.event.sender.login }}
         run: |
           set -euo pipefail
           # SECURITY: a PR opened by one of our AI agents is not run automatically either. The live check below runs
@@ -63,14 +65,35 @@ jobs:
           # The agents and the deterministic scripts (spec-bump, re-enable check) open their PRs with the same
           # automation identity (qa-processes), and an agent chooses its own branch name, so neither the branch name
           # nor anything else a PR says about itself can tell them apart. Every PR from that identity is therefore
-          # skipped, and so is one with an empty branch name or author. Both values are only read from the environment.
+          # skipped, and so is one whose event was triggered by that identity (a commit it pushed to someone else's PR), or with an
+          # empty branch name, author or actor. Both values are only read from the environment.
           agent=false
           case "$HEAD_REF" in
             '' | fix/coverage-* | fix/nightly-triage-*) agent=true ;;
           esac
-          case "$PR_AUTHOR" in
-            '' | 'qa-processes[bot]' | 'app/qa-processes') agent=true ;;
-          esac
+          # Who opened the PR is not enough: the automation token can also push a commit to a PR a person opened, and
+          # that commit would run on the next event. So the account that triggered this event (the pusher, for a
+          # synchronize event) is checked as well.
+          for who in "$PR_AUTHOR" "$ACTOR" "$SENDER"; do
+            case "$who" in
+              '' | 'qa-processes[bot]' | 'app/qa-processes') agent=true ;;
+            esac
+          done
+          # A person's PR can also carry an earlier commit the automation account pushed, which would run on a later
+          # event from the person. So the commits are checked too (author and committer login). A commit can claim any
+          # identity, so this is a second line, not proof; the event check above is the one that cannot be forged.
+          # An unreadable commit list fails closed.
+          if [ "$agent" != true ]; then
+            if logins=$(gh api --paginate "repos/$REPO/pulls/$PR_NUMBER/commits" --jq '.[] | (.author.login // ""), (.committer.login // "")' 2>/dev/null); then
+              while IFS= read -r who; do
+                case "$who" in
+                  'qa-processes[bot]' | 'app/qa-processes') agent=true ;;
+                esac
+              done <<<"$logins"
+            else
+              agent=true
+            fi
+          fi
           if [ "$agent" = true ]; then
             echo "::warning::PR branch '$HEAD_REF' (author '$PR_AUTHOR') comes from the automation account or an AI agent branch — skipping the automatic live-Hub check; read the diff, then run hub-ondemand-test.yml on the branch before merging."
             echo "proceed=false" >> "$GITHUB_OUTPUT"

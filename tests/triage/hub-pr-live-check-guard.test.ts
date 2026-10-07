@@ -27,11 +27,28 @@ function guardScript(): string {
 }
 
 // Runs the guard with a fake `gh pr diff` that prints DIFF_FILES (or fails). Returns the proceed output.
-function proceed(headRef: string, author: string, diff: string | 'fail' = 'src/a.ts'): string {
+function proceed(
+  headRef: string,
+  author: string,
+  diff: string | 'fail' = 'src/a.ts',
+  actor = author,
+  sender = actor,
+  commits = 'esraagamal6\nesraagamal6\n',
+): string {
   const dir = mkdtempSync(join(tmpdir(), 'live-guard-'));
   writeFileSync(
     join(dir, 'gh'),
-    '#!/usr/bin/env bash\n[ "$FAKE_DIFF" = fail ] && exit 1\nprintf "%s\\n" "$FAKE_DIFF"\n',
+    [
+      '#!/usr/bin/env bash',
+      'if [ "$1" = api ]; then',
+      '  [ "$FAKE_COMMITS" = fail ] && exit 1',
+      '  printf "%s" "$FAKE_COMMITS"',
+      '  exit 0',
+      'fi',
+      '[ "$FAKE_DIFF" = fail ] && exit 1',
+      'printf "%s\\n" "$FAKE_DIFF"',
+      '',
+    ].join('\n'),
   );
   chmodSync(join(dir, 'gh'), 0o755);
   const out = join(dir, 'output');
@@ -47,7 +64,10 @@ function proceed(headRef: string, author: string, diff: string | 'fail' = 'src/a
       PR_NUMBER: '1',
       HEAD_REF: headRef,
       PR_AUTHOR: author,
+      ACTOR: actor,
+      SENDER: sender,
       FAKE_DIFF: diff,
+      FAKE_COMMITS: commits,
     },
   });
   expect(r.status, r.stderr).toBe(0);
@@ -81,9 +101,36 @@ describe('hub-pr-live-check guard', () => {
     }
   });
 
+  it("skips a person's PR when the automation account triggered the event, for example by pushing a commit", () => {
+    expect(proceed('claude/some-change', 'esraagamal6', 'src/a.ts', 'qa-processes[bot]')).toBe(
+      'false',
+    );
+    expect(
+      proceed('claude/some-change', 'esraagamal6', 'src/a.ts', 'esraagamal6', 'app/qa-processes'),
+    ).toBe('false');
+    expect(
+      proceed('claude/some-change', 'esraagamal6', 'src/a.ts', 'esraagamal6', 'esraagamal6'),
+    ).toBe('true');
+  });
+
+  it("skips a person's PR that carries a commit by the automation account, and fails closed when the commits cannot be read", () => {
+    const base = [
+      'claude/some-change',
+      'esraagamal6',
+      'src/a.ts',
+      'esraagamal6',
+      'esraagamal6',
+    ] as const;
+    expect(proceed(...base, 'esraagamal6\nqa-processes[bot]\n')).toBe('false');
+    expect(proceed(...base, 'app/qa-processes\nesraagamal6\n')).toBe('false');
+    expect(proceed(...base, 'fail')).toBe('false');
+    expect(proceed(...base, '\n\n')).toBe('true');
+  });
+
   it('fails closed on an empty branch name or author', () => {
     expect(proceed('', 'someone')).toBe('false');
     expect(proceed('claude/some-change', '')).toBe('false');
+    expect(proceed('claude/some-change', 'someone', 'src/a.ts', '')).toBe('false');
     expect(proceed('chore/spec-bump-camunda-hub', '')).toBe('false');
   });
 
