@@ -41,43 +41,50 @@ function same(a: unknown, b: unknown): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
 }
 
-// Floors: same shape as before, every number equal except the one the PR may raise, which must not go down.
+function own(o: Record<string, unknown>, key: string): unknown {
+  return Object.hasOwn(o, key) ? o[key] : undefined;
+}
+
+function mustRise(label: string, was: unknown, now: unknown): string[] {
+  if (typeof was !== 'number' || typeof now !== 'number' || now <= was) {
+    return [`the floor ${label} must go up, but went from ${String(was)} to ${String(now)}`];
+  }
+  return [];
+}
+
+// Floors: compared by structure, never by flattened names (a top-level key such as "assertedByStatus.403" would
+// collide with the nested one). Every key of the file, at the top level and one level down, must be present on both
+// sides with the same value, except the one floor the PR may raise, which must go up strictly.
 function checkFloors(base: unknown, head: unknown, candidate: Candidate): string[] {
   if (!isRecord(base) || !isRecord(head)) return ['coverage-floors.json is not an object'];
   const out: string[] = [];
   const code = candidate.kind === 'status' ? candidate.code : undefined;
-  const allowed =
-    candidate.kind === 'status' ? `assertedByStatus.${code}` : 'lifecycleCreateCovered';
 
-  const flat = (o: Record<string, unknown>): Map<string, unknown> => {
-    const m = new Map<string, unknown>();
-    for (const [k, v] of Object.entries(o)) {
-      if (isRecord(v)) {
-        for (const [k2, v2] of Object.entries(v)) m.set(`${k}.${k2}`, v2);
-      } else {
-        m.set(k, v);
+  for (const key of new Set([...Object.keys(base), ...Object.keys(head)])) {
+    const was = own(base, key);
+    const now = own(head, key);
+    if (key === 'zeroTestOperations') {
+      // The whole list must be unchanged. An entry is an exception someone decided on, so it is never added,
+      // edited or removed here.
+      if (!same(was, now)) {
+        out.push('zeroTestOperations changed (no entry may be added, edited or removed)');
       }
-    }
-    return m;
-  };
-  const b = flat(base);
-  const h = flat(head);
-  for (const key of new Set([...b.keys(), ...h.keys()])) {
-    if (key === 'zeroTestOperations') continue;
-    const was = b.get(key);
-    const now = h.get(key);
-    if (key === allowed) {
-      if (typeof was !== 'number' || typeof now !== 'number' || now <= was) {
-        out.push(`the floor ${key} must go up, but went from ${String(was)} to ${String(now)}`);
+    } else if (candidate.kind === 'lifecycle' && key === 'lifecycleCreateCovered') {
+      out.push(...mustRise(key, was, now));
+    } else if (isRecord(was) && isRecord(now)) {
+      for (const sub of new Set([...Object.keys(was), ...Object.keys(now)])) {
+        const label = `${key}.${sub}`;
+        if (candidate.kind === 'status' && key === 'assertedByStatus' && sub === code) {
+          out.push(...mustRise(label, own(was, sub), own(now, sub)));
+        } else if (!same(own(was, sub), own(now, sub))) {
+          out.push(
+            `the floor ${label} changed from ${String(own(was, sub))} to ${String(own(now, sub))}`,
+          );
+        }
       }
     } else if (!same(was, now)) {
       out.push(`the floor ${key} changed from ${String(was)} to ${String(now)}`);
     }
-  }
-  // zeroTestOperations: the whole list must be unchanged. An entry is an exception someone decided on, so it is
-  // never added, edited or removed here.
-  if (!same(base.zeroTestOperations, head.zeroTestOperations)) {
-    out.push('zeroTestOperations changed (no entry may be added, edited or removed)');
   }
   return out;
 }

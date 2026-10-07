@@ -195,6 +195,34 @@ describe('checkChange: a status PR', () => {
     expect(usedOnly.some((m) => m.includes('which setup does not provision'))).toBe(true);
   });
 
+  it('rejects a dotted top-level key that would mimic a nested floor, and any added or removed key', () => {
+    // The nested floor stays at 61 while a top-level "assertedByStatus.403": 62 pretends to raise it.
+    const fake = check(status, change({ headFloors: { ...floors, 'assertedByStatus.403': 62 } }));
+    expect(
+      fake.some((m) => m.includes('assertedByStatus.403 must go up, but went from 61 to 61')),
+    ).toBe(true);
+    expect(
+      fake.some((m) => m.includes('the floor assertedByStatus.403 changed from undefined to 62')),
+    ).toBe(true);
+    const extra = check(
+      status,
+      change({
+        headFloors: {
+          ...floors,
+          assertedByStatus: { ...floors.assertedByStatus, '403': 62 },
+          brandNewFloor: 1,
+        },
+      }),
+    );
+    expect(extra.some((m) => m.includes('the floor brandNewFloor changed'))).toBe(true);
+    const dropped = { ...floors, assertedByStatus: { '2xx': 64, '403': 62 } };
+    expect(
+      check(status, change({ headFloors: dropped })).some((m) =>
+        m.includes('assertedByStatus.404 changed'),
+      ),
+    ).toBe(true);
+  });
+
   it('rejects an edited or removed zeroTestOperations entry', () => {
     const base = { ...floors, assertedByStatus: { ...floors.assertedByStatus, '403': 62 } };
     for (const zeroTestOperations of [
