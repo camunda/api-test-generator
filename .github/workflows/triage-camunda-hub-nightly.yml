@@ -715,7 +715,7 @@ jobs:
              for the operationId FIRST. If it appears in any listed PR's diff: do NOT attempt a fix —
              set action "skip" and fix_pr_url to that PR's url. Otherwise, per the guidance's
              guardrails, either apply a minimal fix and open an api-test-generator PR using
-             GH_TOKEN_GENERATOR (labels nightly-api-fix and auto-generated, already pre-created), or — if you're not fully
+             GH_TOKEN_GENERATOR (labels nightly-api-fix, auto-generated and hub, already pre-created), or — if you're not fully
              confident — action "report-only". Never push directly to main.
           9. Write the full triage result to /tmp/hub-triage.json in the exact schema from the guidance.
           EOF

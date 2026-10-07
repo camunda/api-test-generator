@@ -33,7 +33,7 @@ function pr(n: number, over: Partial<RunPr> = {}): RunPr {
     baseRefName: 'main',
     isDraft: true,
     author: 'app/qa-processes',
-    labels: ['nightly-api-fix', 'auto-generated'],
+    labels: ['nightly-api-fix', 'auto-generated', 'hub'],
     state: 'OPEN',
     headRefOid: 'aaaaaaa1111111',
     ...over,
@@ -183,7 +183,7 @@ describe('PRs the account already had before the run', () => {
     headRefOid: oid,
     isDraft: true,
     baseRefName: 'main',
-    labels: ['auto-generated', 'nightly-api-fix'],
+    labels: ['auto-generated', 'hub', 'nightly-api-fix'],
   });
   const old = (n: number, over: Partial<RunPr> = {}) =>
     pr(n, { headRefName: 'fix/coverage-older-1', state: 'CLOSED', ...over });
@@ -215,7 +215,7 @@ describe('PRs the account already had before the run', () => {
       [{ baseRefName: 'dev' }, 'base main to dev'],
       [
         { labels: ['auto-generated'] },
-        'labels [auto-generated, nightly-api-fix] to [auto-generated]',
+        'labels [auto-generated, hub, nightly-api-fix] to [auto-generated]',
       ],
     ];
     for (const [change, text] of cases) {
@@ -227,7 +227,7 @@ describe('PRs the account already had before the run', () => {
 
   it('does not mind the order of the labels', () => {
     const v = verify(
-      [old(50, { labels: ['nightly-api-fix', 'auto-generated'] })],
+      [old(50, { labels: ['nightly-api-fix', 'auto-generated', 'hub'] })],
       selection,
       [],
       RUN,
