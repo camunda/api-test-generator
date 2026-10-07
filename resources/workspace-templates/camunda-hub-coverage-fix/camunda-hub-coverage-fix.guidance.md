@@ -170,8 +170,9 @@ response, is not held by an exclusion, and has no scoped exclusion. Work out **w
    - **B. A fixture that setup does not create yet (report only, with a ready-to-apply proposal).** The one thing
      missing is a test fixture (a member, a record the path or body needs) that setup could create through a Hub API
      call the spec describes. **Never edit `scripts/e2e/run-hub.sh` or any other script, workflow or template
-     yourself**: the PR's live-Hub check checks out the PR's own code and runs it with Hub access the moment the PR
-     opens, before any verification, so a changed script would run unreviewed. Write `action: "report-only"` and put
+     yourself**: any live-Hub run on the PR (the automatic one for a person's PR, `hub-ondemand-test.yml` on request for
+     an agent's) checks out the PR's own code and runs it with Hub access, and once merged the script runs in every Hub
+     suite, so a script change is never something to have in a PR before a person has written or approved it. Write `action: "report-only"` and put
      the exact change in `proposal`: the lines to add next to the existing fixtures (modelled on them), the one
      fixture entry for `request-validation.json`, the floor to raise, and the spec section that describes the call.
      A person applies it. This holds for any operation, not one endpoint.
@@ -273,8 +274,9 @@ something the job runs.
 - `camunda-hub`: read only, always.
 - `api-test-generator`: a draft PR only, never a push to `main`.
 - Never edit a script, a workflow or a template: `scripts/**`, `.github/**`, `request-validation/src/**`,
-  `request-validation/templates/**`. The PR's live-Hub check runs the PR's own code with Hub access the moment the PR
-  opens, before any verification. A change to any of them is a proposal, never a PR.
+  `request-validation/templates/**`. Any live-Hub run on a PR (the automatic one for a person's PR, the on-demand one a
+  person starts on an agent's branch) runs the PR's own code with Hub access, and after the merge they run in every
+  Hub suite. A change to any of them is a proposal, never a PR.
 - No suppression, exclusion, known issue, `zeroTestOperations` change, weakened assertion, `test.skip` or `it.skip`, or
   lowered floor. Ever.
 - No PR without a proof that the targeted number went up and the checks pass.
