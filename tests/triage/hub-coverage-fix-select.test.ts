@@ -14,7 +14,6 @@ import {
   parseRows,
   resourceFromBranch,
   select,
-  WEEKLY_CAP,
 } from '../../scripts/triage/hub-coverage-fix-select.ts';
 
 const now = new Date('2026-10-12T07:00:00Z');
@@ -53,7 +52,7 @@ describe('kebab and resourceFromBranch', () => {
 describe('select', () => {
   it('picks every gap when nothing is open and the budget allows', () => {
     const s = select(['ProjectSnapshot', 'Version'], rows, [], now);
-    expect(s.budget).toBe(WEEKLY_CAP);
+    expect(s.budget).toBe(2);
     expect(s.candidates.map((c) => c.resource)).toEqual(['ProjectSnapshot', 'Version']);
     expect(s.candidates[0]).toEqual({
       resource: 'ProjectSnapshot',
@@ -63,24 +62,16 @@ describe('select', () => {
     expect(s.skipped).toEqual([]);
   });
 
-  it('counts recent agent PRs, open or closed, against the weekly cap', () => {
+  it('has no weekly cap: recent agent PRs for other areas do not reduce what may be picked', () => {
     const prs = [
       pr({ number: 1, state: 'CLOSED', headRefName: 'fix/coverage-old-thing-1' }),
       pr({ number: 2, state: 'MERGED', headRefName: 'fix/coverage-other-thing-2' }),
+      pr({ number: 3, state: 'MERGED', headRefName: 'fix/coverage-third-thing-3' }),
     ];
-    const s = select(['ProjectSnapshot'], rows, prs, now);
-    expect(s.recentCount).toBe(2);
-    expect(s.budget).toBe(0);
-    expect(s.candidates).toEqual([]);
-    expect(s.skipped[0]?.reason).toContain('weekly cap');
-  });
-
-  it('stops at the budget that is left', () => {
-    const prs = [pr({ headRefName: 'fix/coverage-old-thing-1' })];
     const s = select(['ProjectSnapshot', 'Version'], rows, prs, now);
-    expect(s.budget).toBe(1);
-    expect(s.candidates).toHaveLength(1);
-    expect(s.skipped).toHaveLength(1);
+    expect(s.recentCount).toBe(3);
+    expect(s.budget).toBe(2);
+    expect(s.candidates.map((c) => c.resource)).toEqual(['ProjectSnapshot', 'Version']);
   });
 
   it('does not count PRs older than the window, or PRs that are not the agent', () => {
@@ -91,7 +82,7 @@ describe('select', () => {
     ];
     const s = select(['ProjectSnapshot'], rows, prs, now);
     expect(s.recentCount).toBe(0);
-    expect(s.budget).toBe(WEEKLY_CAP);
+    expect(s.budget).toBe(1);
   });
 
   it('allows a retry after an old closed PR for the same resource, because the branch name is unique', () => {
@@ -287,7 +278,7 @@ describe('command line', () => {
       { encoding: 'utf8' },
     );
     const parsed: unknown = JSON.parse(out);
-    expect(parsed).toMatchObject({ budget: 2, candidates: [{ resource: 'ProjectSnapshot' }] });
+    expect(parsed).toMatchObject({ budget: 1, candidates: [{ resource: 'ProjectSnapshot' }] });
   });
 
   it('exits non-zero with an error when the report has no lifecycle section', () => {

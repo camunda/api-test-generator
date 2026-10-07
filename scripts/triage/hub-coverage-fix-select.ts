@@ -1,7 +1,7 @@
 // Picks which coverage gaps the coverage-fix agent may work on in one run, and enforces its limits
 // in code so the agent's own playbook is not the only guard:
-//   - at most WEEKLY_CAP agent PRs in any WINDOW_DAYS days (open or closed),
-//   - at most one agent PR per API area, counting recent PRs and any still open.
+//   - at most one agent PR per API area, counting PRs from the last WINDOW_DAYS days and any still open.
+// There is no cap on the number of PRs per run or per week: the areas and the gaps are the limit.
 //
 // Only the gap kind the pilot allows is considered: a resource with no create-read-delete test
 // (`lifecycle.createMissing` in the weekly report's summary.json). Everything else is the agent's
@@ -13,7 +13,6 @@
 
 import { readFileSync } from 'node:fs';
 
-export const WEEKLY_CAP = 2;
 export const WINDOW_DAYS = 7;
 export const BRANCH_PREFIX = 'fix/coverage-';
 
@@ -83,7 +82,8 @@ export function select(
 ): Selection {
   const agentPrs = prs.filter((p) => p.headRefName.startsWith(BRANCH_PREFIX));
   const recent = agentPrs.filter((p) => isRecent(p.createdAt, now));
-  const budget = Math.max(0, WEEKLY_CAP - recent.length);
+  // No weekly cap: every gap can get a PR, one per area. The budget the verifier checks is the number of gaps.
+  const budget = createMissing.length;
 
   const areaOf = new Map<string, string>();
   for (const r of rows) areaOf.set(r.operationId, r.area);
@@ -135,8 +135,6 @@ export function select(
       skipped.push({ resource, reason: `area ${area} already has an agent PR (recent or open)` });
     } else if (takenAreas.has(area)) {
       skipped.push({ resource, reason: `area ${area} already has a candidate in this run` });
-    } else if (candidates.length >= budget) {
-      skipped.push({ resource, reason: `weekly cap of ${WEEKLY_CAP} PRs reached` });
     } else {
       candidates.push({ resource, createOp, area });
       takenAreas.add(area);
