@@ -158,7 +158,7 @@ Skipped tests point to a Hub bug. This job watches those bugs. When one closes, 
 
 | Message | Meaning | Do this |
 |---|---|---|
-| 🎉 *issue* is closed — re-enabled: `ops` → draft PR | The skip was removed in a draft PR | Review the draft PR and let the live check run. Merge if it is green **and** the Hub issue was closed as fixed. If Hub closed it as not planned, close the PR: the skip must stay |
+| 🎉 *issue* is closed — re-enabled: `ops` → draft PR | The skip was removed in a draft PR | Review the draft PR and run `hub-ondemand-test` on its branch (the automatic live check skips PRs from the automation account). Merge if it is green **and** the Hub issue was closed as fixed. If Hub closed it as not planned, close the PR: the skip must stay |
 | 🎉 … already has an open unskip PR | A PR for it exists already | Review that PR |
 | ⚠️ … breaks local generate/tests | Removing the skip makes generation or tests fail | Open the workflow run and investigate |
 | ⚠️ … no generator token was available | The job could not open a PR this time | Nothing, it retries next run |

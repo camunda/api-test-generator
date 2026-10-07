@@ -207,9 +207,10 @@ operation(s) get their tests back: ${ops}." >/dev/null
     printf '%s\n' "$removed_ops" | sed '/^$/d' | sed 's/^/- `/; s/$/`/'
     echo
     echo "This PR is a **draft** — it is not ready to merge on its own. The native"
-    echo "\`Hub PR live check\` (see the Checks tab) runs automatically against a live"
-    echo "Hub; if the upstream fix was only partial, that check will fail and someone"
-    echo "should investigate before merging."
+    echo "\`Hub PR live check\` does not run on PRs from the automation account, so run"
+    echo "\`hub-ondemand-test.yml\` on this branch against a live Hub; if the upstream"
+    echo "fix was only partial, that run will fail and someone should investigate before"
+    echo "merging."
     echo
     echo "Closed blocker: ${url}"
     echo
@@ -237,9 +238,8 @@ operation(s) get their tests back: ${ops}." >/dev/null
   add_summary "$(jq -nc --arg url "$url" --arg title "$title" --arg ops "$ops" --arg pr "$pr_url" \
     '{type: "opened", url: $url, title: $title, operations: $ops, pr_url: $pr}')"
 
-  # No manual live-Hub validation dispatch needed here: hub-pr-live-check.yml
-  # already fires automatically on this PR (same-repo, targets main, touches
-  # only configs/camunda-hub/*.json — never .github/**) as a native check.
+  # No live-Hub validation is dispatched here, and hub-pr-live-check.yml skips PRs from the automation account
+  # (the AI agents use the same identity), so a person runs hub-ondemand-test.yml on this branch before merging.
 
   git checkout main 2>/dev/null || true
 done < <(jq -c '.opScoped[]' <<<"$collected")

@@ -816,10 +816,11 @@ automatically against a live Hub:
 [hub-pr-live-check.yml](.github/workflows/hub-pr-live-check.yml) fires on every
 same-repo `pull_request` targeting `main` whose diff doesn't touch `.github/**`,
 and runs the PR's own code with Hub access the moment it opens, so its guard
-skips agent PRs (branches `fix/coverage-*` and `fix/nightly-triage-*`, and any
-other PR from the `qa-processes` account except the `chore/spec-bump-camunda-hub`
-and `chore/hub-unskip-*` branches that deterministic scripts use; an empty branch
-or author fails closed). For those, a person reads the diff and then runs
+skips agent PRs: every PR from the `qa-processes` account (the agents and the
+deterministic scripts use the same token, and an agent picks its own branch
+name, so no branch name can be trusted), branches `fix/coverage-*` and
+`fix/nightly-triage-*`, and an empty branch or author. For those, a person
+reads the diff and then runs
 [hub-ondemand-test.yml](.github/workflows/hub-ondemand-test.yml) on the branch
 before merging. The `hub-invariants` job that runs automatically via `ci.yml`
 only checks static invariants against the pinned spec, so it is not a substitute.
@@ -878,9 +879,10 @@ reverts and reports instead of opening a broken PR. Entirely deterministic —
 no agent involved, unlike the triage flow above; detecting a closed issue and
 removing a JSON entry are pure mechanics. Same two-App-token split as the
 triage agent (`GH_TOKEN_HUB` for the issue-state check, `GH_TOKEN_GENERATOR`
-for the PR); its PRs (branch `chore/hub-unskip-*`, opened by a script, not an
-agent) get the automatic live check from `hub-pr-live-check.yml`, unlike the
-AI agents' PRs (see the triage agent's own paragraph above). Top-level `knownIssues[]`
+for the PR); its PRs (branch `chore/hub-unskip-*`) come from the same account
+as the AI agents, so `hub-pr-live-check.yml` skips them too: a person runs
+`hub-ondemand-test.yml` on the branch before merging (see the triage agent's
+own paragraph above). Top-level `knownIssues[]`
 entries (suite-wide, no `operationId`) get a Slack mention when closed but are
 never auto-acted on — there's nothing mechanical to remove for them. Silent
 (no Slack post) when there's nothing to report, matching spec-bump-check's

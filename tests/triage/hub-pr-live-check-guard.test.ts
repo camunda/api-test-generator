@@ -66,20 +66,25 @@ describe('hub-pr-live-check guard', () => {
     expect(proceed('fix/coverage-x-1', 'someone')).toBe('false');
   });
 
-  it('does not trust the branch name: any other PR from the automation account is skipped', () => {
-    expect(proceed('chore/innocent-looking-name', 'qa-processes[bot]')).toBe('false');
-    expect(proceed('feat/anything', 'app/qa-processes')).toBe('false');
-  });
-
-  it('keeps the live check for the automation PRs that deterministic scripts open', () => {
-    expect(proceed('chore/spec-bump-camunda-hub', 'qa-processes[bot]')).toBe('true');
-    expect(proceed('chore/hub-unskip-123', 'qa-processes[bot]')).toBe('true');
+  it('skips every PR from the automation account, whatever its branch is called', () => {
+    // An agent holds the same token as the deterministic scripts and picks its own branch name, so a branch the
+    // scripts happen to use proves nothing.
+    for (const branch of [
+      'chore/innocent-looking-name',
+      'chore/spec-bump-camunda-hub',
+      'chore/spec-bump-camunda-oca',
+      'chore/hub-unskip-123',
+      'feat/anything',
+    ]) {
+      expect(proceed(branch, 'qa-processes[bot]'), branch).toBe('false');
+      expect(proceed(branch, 'app/qa-processes'), branch).toBe('false');
+    }
   });
 
   it('fails closed on an empty branch name or author', () => {
     expect(proceed('', 'someone')).toBe('false');
-    expect(proceed('chore/spec-bump-camunda-hub', '')).toBe('true');
     expect(proceed('claude/some-change', '')).toBe('false');
+    expect(proceed('chore/spec-bump-camunda-hub', '')).toBe('false');
   });
 
   it('keeps the existing .github rule and the unreadable-diff rule', () => {
