@@ -107,6 +107,11 @@ describe('verify', () => {
     expect(v.some((m) => m.includes('missing the label nightly-api-fix'))).toBe(true);
   });
 
+  it('rejects a new PR that was closed again, since nothing is left to review', () => {
+    const v = verify([pr(1, { state: 'CLOSED' })], selection, [URL(1)], RUN, false, BOT, 0, []);
+    expect(v.some((m) => m.includes('not open (CLOSED)'))).toBe(true);
+  });
+
   it('rejects a PR the agent reported but that does not exist', () => {
     const v = verify([], selection, [URL(9)], RUN, false, BOT, 0, []);
     expect(v.some((m) => m.includes('reported by the agent but not found'))).toBe(true);
@@ -176,6 +181,9 @@ describe('PRs the account already had before the run', () => {
     number: n,
     state,
     headRefOid: oid,
+    isDraft: true,
+    baseRefName: 'main',
+    labels: ['auto-generated', 'nightly-api-fix'],
   });
   const old = (n: number, over: Partial<RunPr> = {}) =>
     pr(n, { headRefName: 'fix/coverage-older-1', state: 'CLOSED', ...over });
@@ -201,6 +209,36 @@ describe('PRs the account already had before the run', () => {
     expect(v.some((m) => m.includes('changed during the run'))).toBe(true);
   });
 
+  it('rejects an old PR of the agent account that was marked ready, retargeted or relabelled', () => {
+    const cases: [Partial<RunPr>, string][] = [
+      [{ isDraft: false }, 'draft true to false'],
+      [{ baseRefName: 'dev' }, 'base main to dev'],
+      [
+        { labels: ['auto-generated'] },
+        'labels [auto-generated, nightly-api-fix] to [auto-generated]',
+      ],
+    ];
+    for (const [change, text] of cases) {
+      const v = verify([old(50, change)], selection, [], RUN, false, BOT, 100, [was(50)]);
+      expect(v).toHaveLength(1);
+      expect(v[0]).toContain(text);
+    }
+  });
+
+  it('does not mind the order of the labels', () => {
+    const v = verify(
+      [old(50, { labels: ['nightly-api-fix', 'auto-generated'] })],
+      selection,
+      [],
+      RUN,
+      false,
+      BOT,
+      100,
+      [was(50)],
+    );
+    expect(v).toEqual([]);
+  });
+
   it('accepts old PRs that did not change, and changes to PRs of other people', () => {
     const prs = [old(50), old(51, { author: 'alice', state: 'MERGED' })];
     expect(verify(prs, selection, [], RUN, false, BOT, 100, [was(50), was(51)])).toEqual([]);
@@ -213,7 +251,18 @@ describe('PRs the account already had before the run', () => {
   });
 
   it('parses the snapshot strictly', () => {
-    expect(parsePreRun([{ number: 1, state: 'OPEN', headRefOid: 'abc' }])).toHaveLength(1);
+    const good = {
+      number: 1,
+      state: 'OPEN',
+      headRefOid: 'abc',
+      isDraft: true,
+      baseRefName: 'main',
+      labels: [{ name: 'b' }, { name: 'a' }],
+    };
+    expect(parsePreRun([good])[0]?.labels).toEqual(['a', 'b']);
+    expect(() => parsePreRun([{ number: 1, state: 'OPEN', headRefOid: 'abc' }])).toThrow(
+      'pre-run PR record 0',
+    );
     expect(() => parsePreRun([{ number: 1 }])).toThrow('pre-run PR record 0');
     expect(() => parsePreRun({})).toThrow('not a list');
   });

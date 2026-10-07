@@ -30,17 +30,29 @@ export interface RunPr {
   headRefOid: string;
 }
 
-// What a PR looked like just before the agent started: enough to see that it changed during the run.
+// What a PR looked like just before the agent started: enough to see that it changed during the run. It holds
+// what the guarded checks look at (state, commit, draft, base, labels), so changing any of them is noticed.
 export interface PreRunPr {
   number: number;
   state: string;
   headRefOid: string;
+  isDraft: boolean;
+  baseRefName: string;
+  labels: string[];
 }
 
 export const REQUIRED_LABELS = ['nightly-api-fix', 'auto-generated'];
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
+}
+
+// Label names, sorted, so two lists can be compared as text.
+function labelNames(labels: unknown[]): string[] {
+  return labels
+    .map((l) => (isRecord(l) && typeof l.name === 'string' ? l.name : ''))
+    .filter((n) => n !== '')
+    .sort();
 }
 
 export function parseRunPrs(prs: unknown): RunPr[] {
@@ -61,7 +73,7 @@ export function parseRunPrs(prs: unknown): RunPr[] {
     ) {
       throw new Error(`PR record ${i} does not have the expected fields`);
     }
-    const labels = p.labels.map((l) => (isRecord(l) && typeof l.name === 'string' ? l.name : ''));
+    const labels = labelNames(p.labels);
     return {
       number: p.number,
       url: p.url,
@@ -83,11 +95,23 @@ export function parsePreRun(prs: unknown): PreRunPr[] {
       !isRecord(p) ||
       typeof p.number !== 'number' ||
       typeof p.state !== 'string' ||
-      typeof p.headRefOid !== 'string'
+      typeof p.headRefOid !== 'string' ||
+      typeof p.isDraft !== 'boolean' ||
+      typeof p.baseRefName !== 'string' ||
+      !Array.isArray(p.labels)
     ) {
-      throw new Error(`pre-run PR record ${i} does not have number, state and headRefOid`);
+      throw new Error(
+        `pre-run PR record ${i} does not have number, state, headRefOid, isDraft, baseRefName and labels`,
+      );
     }
-    return { number: p.number, state: p.state, headRefOid: p.headRefOid };
+    return {
+      number: p.number,
+      state: p.state,
+      headRefOid: p.headRefOid,
+      isDraft: p.isDraft,
+      baseRefName: p.baseRefName,
+      labels: labelNames(p.labels),
+    };
   });
 }
 
@@ -182,6 +206,9 @@ export function verify(
       }
       areas.set(candidate.area, p.url);
     }
+    if (p.state !== 'OPEN') {
+      violations.push(`${p.url}: not open (${p.state}), so there is nothing to review`);
+    }
     if (!p.isDraft) violations.push(`${p.url}: not a draft`);
     if (p.baseRefName !== 'main') violations.push(`${p.url}: base is ${p.baseRefName}, not main`);
     for (const label of REQUIRED_LABELS) {
@@ -201,10 +228,23 @@ export function verify(
   for (const p of allPrs) {
     if (p.number > baseline || !bots.has(p.author)) continue;
     const was = before.get(p.number);
-    if (was && (was.state !== p.state || was.headRefOid !== p.headRefOid)) {
-      violations.push(
-        `${p.url}: changed during the run (state ${was.state} to ${p.state}, commit ${was.headRefOid.slice(0, 7)} to ${p.headRefOid.slice(0, 7)})`,
-      );
+    if (!was) continue;
+    const changes: string[] = [];
+    if (was.state !== p.state) changes.push(`state ${was.state} to ${p.state}`);
+    if (was.headRefOid !== p.headRefOid) {
+      changes.push(`commit ${was.headRefOid.slice(0, 7)} to ${p.headRefOid.slice(0, 7)}`);
+    }
+    if (was.isDraft !== p.isDraft) changes.push(`draft ${was.isDraft} to ${p.isDraft}`);
+    if (was.baseRefName !== p.baseRefName) {
+      changes.push(`base ${was.baseRefName} to ${p.baseRefName}`);
+    }
+    const wasLabels = [...was.labels].sort();
+    const nowLabels = [...p.labels].sort();
+    if (wasLabels.join(',') !== nowLabels.join(',')) {
+      changes.push(`labels [${wasLabels.join(', ')}] to [${nowLabels.join(', ')}]`);
+    }
+    if (changes.length > 0) {
+      violations.push(`${p.url}: changed during the run (${changes.join('; ')})`);
     }
   }
 

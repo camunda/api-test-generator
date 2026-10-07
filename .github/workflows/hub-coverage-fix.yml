@@ -359,7 +359,7 @@ jobs:
           set -euo pipefail
           limit=1000
           gh pr list --repo "$GITHUB_REPOSITORY" --state all --app qa-processes --limit "$limit" \
-            --json number,state,headRefOid > "${GITHUB_WORKSPACE}/pre-run-prs.json"
+            --json number,state,headRefOid,isDraft,baseRefName,labels > "${GITHUB_WORKSPACE}/pre-run-prs.json"
           n="$(jq 'length' "${GITHUB_WORKSPACE}/pre-run-prs.json")"
           echo "PRs of the agent account: ${n}"
           if [ "$n" -ge "$limit" ]; then

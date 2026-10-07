@@ -8,6 +8,7 @@ import {
   type AgentPr,
   kebab,
   parseCreateMissing,
+  parseKnown,
   parsePrs,
   parseRows,
   resourceFromBranch,
@@ -156,6 +157,19 @@ describe('select', () => {
     expect(s.skipped[0]?.reason).toContain('createUnknown');
   });
 
+  it('never selects a resource the report marks known, even though it is missing', () => {
+    const s = select(['ProjectSnapshot', 'Version'], rows, [], now, ['Version']);
+    expect(s.candidates.map((c) => c.resource)).toEqual(['ProjectSnapshot']);
+    expect(s.skipped).toEqual([
+      { resource: 'Version', reason: expect.stringContaining('known and tracked') },
+    ]);
+  });
+
+  it('does not spend the budget or an area on a known resource', () => {
+    const s = select(['Gadget', 'Widget'], rows, [], now, ['Gadget']);
+    expect(s.candidates.map((c) => c.resource)).toEqual(['Widget']);
+  });
+
   it('selects nothing when there is no gap', () => {
     const s = select([], rows, [], now);
     expect(s.candidates).toEqual([]);
@@ -169,6 +183,14 @@ describe('parsers are strict', () => {
     expect(parseCreateMissing({ lifecycle: { createMissing: [] } })).toEqual([]);
     expect(parseRows([{ operationId: 'a', area: 'X' }])).toEqual([{ operationId: 'a', area: 'X' }]);
     expect(parsePrs([])).toEqual([]);
+  });
+
+  it('read the known list and reject a report without it', () => {
+    expect(parseKnown({ lifecycle: { known: ['A'] } })).toEqual(['A']);
+    expect(parseKnown({ lifecycle: { known: [] } })).toEqual([]);
+    expect(() => parseKnown({ lifecycle: {} })).toThrow('lifecycle.known');
+    expect(() => parseKnown({ lifecycle: { known: [1] } })).toThrow('lifecycle.known');
+    expect(() => parseKnown(null)).toThrow('lifecycle.known');
   });
 
   it('reject a report without the lifecycle list, so a format change cannot disable the agent', () => {
@@ -218,7 +240,7 @@ describe('command line', () => {
     const dir = mkdtempSync(join(tmpdir(), 'cov-fix-'));
     writeFileSync(
       join(dir, 'summary.json'),
-      JSON.stringify({ lifecycle: { createMissing: ['ProjectSnapshot'] } }),
+      JSON.stringify({ lifecycle: { createMissing: ['ProjectSnapshot'], known: [] } }),
     );
     writeFileSync(join(dir, 'rows.json'), JSON.stringify(rows));
     writeFileSync(join(dir, 'prs.json'), '[]');

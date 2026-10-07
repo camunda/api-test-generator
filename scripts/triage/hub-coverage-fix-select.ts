@@ -66,7 +66,13 @@ function isRecent(createdAt: string, now: Date): boolean {
   return now.getTime() - t < WINDOW_DAYS * 86_400_000;
 }
 
-export function select(createMissing: string[], rows: Row[], prs: AgentPr[], now: Date): Selection {
+export function select(
+  createMissing: string[],
+  rows: Row[],
+  prs: AgentPr[],
+  now: Date,
+  known: string[] = [],
+): Selection {
   const agentPrs = prs.filter((p) => p.headRefName.startsWith(BRANCH_PREFIX));
   const recent = agentPrs.filter((p) => isRecent(p.createdAt, now));
   const budget = Math.max(0, WEEKLY_CAP - recent.length);
@@ -96,10 +102,18 @@ export function select(createMissing: string[], rows: Row[], prs: AgentPr[], now
   const candidates: Candidate[] = [];
   const skipped: Skipped[] = [];
   const takenAreas = new Set<string>();
+  const knownSet = new Set(known);
   for (const resource of [...createMissing].sort()) {
     const createOp = `create${resource}`;
     const area = areaOf.get(createOp);
-    if (!area) {
+    if (knownSet.has(resource)) {
+      // The report marks it known: its create operation is suppressed or excluded in the config, tracked by an
+      // issue. The playbook says such gaps are never touched, so the agent must not be told they are allowed work.
+      skipped.push({
+        resource,
+        reason: 'known and tracked: its create operation is suppressed or excluded in the config',
+      });
+    } else if (!area) {
       skipped.push({ resource, reason: `no operation ${createOp} in the report` });
     } else if (busyAreas.has(area)) {
       skipped.push({ resource, reason: `area ${area} already has an agent PR (recent or open)` });
@@ -133,6 +147,17 @@ export function parseCreateMissing(summary: unknown): string[] {
   if (!Array.isArray(list) || !list.every((x): x is string => typeof x === 'string')) {
     throw new Error(
       'summary.json has no lifecycle.createMissing list of resource names: the report format may have changed',
+    );
+  }
+  return list;
+}
+
+export function parseKnown(summary: unknown): string[] {
+  const list =
+    isRecord(summary) && isRecord(summary.lifecycle) ? summary.lifecycle.known : undefined;
+  if (!Array.isArray(list) || !list.every((x): x is string => typeof x === 'string')) {
+    throw new Error(
+      'summary.json has no lifecycle.known list of resource names: the report format may have changed',
     );
   }
   return list;
@@ -185,11 +210,13 @@ if (process.argv[1] && import.meta.filename === process.argv[1]) {
   }
   const now = nowIso ? new Date(nowIso) : new Date();
   try {
+    const summary = readJson(summaryPath);
     const selection = select(
-      parseCreateMissing(readJson(summaryPath)),
+      parseCreateMissing(summary),
       parseRows(readJson(rowsPath)),
       parsePrs(readJson(prsPath)),
       now,
+      parseKnown(summary),
     );
     process.stdout.write(`${JSON.stringify(selection, null, 2)}\n`);
   } catch (e) {
