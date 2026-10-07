@@ -33,7 +33,7 @@ function pr(n: number, over: Partial<RunPr> = {}): RunPr {
     baseRefName: 'main',
     isDraft: true,
     author: 'app/qa-processes',
-    labels: ['nightly-api-fix', 'auto-generated'],
+    labels: ['nightly-api-fix', 'auto-generated', 'hub'],
     state: 'OPEN',
     headRefOid: 'aaaaaaa1111111',
     ...over,
@@ -105,6 +105,18 @@ describe('verify', () => {
     expect(v.some((m) => m.includes('not a draft'))).toBe(true);
     expect(v.some((m) => m.includes('not main'))).toBe(true);
     expect(v.some((m) => m.includes('missing the label nightly-api-fix'))).toBe(true);
+  });
+
+  it('rejects a PR that lacks any one required label, and names it', () => {
+    const all = ['nightly-api-fix', 'auto-generated', 'hub'];
+    for (const missing of all) {
+      const labels = all.filter((l) => l !== missing);
+      const v = verify([pr(1, { labels })], selection, [URL(1)], RUN, false, BOT, 0, []);
+      expect(v.some((m) => m.includes(`missing the label ${missing}`))).toBe(true);
+    }
+    expect(verify([pr(1, { labels: all })], selection, [URL(1)], RUN, false, BOT, 0, [])).toEqual(
+      [],
+    );
   });
 
   it('rejects a new PR that was closed again, since nothing is left to review', () => {
@@ -183,7 +195,7 @@ describe('PRs the account already had before the run', () => {
     headRefOid: oid,
     isDraft: true,
     baseRefName: 'main',
-    labels: ['auto-generated', 'nightly-api-fix'],
+    labels: ['auto-generated', 'hub', 'nightly-api-fix'],
   });
   const old = (n: number, over: Partial<RunPr> = {}) =>
     pr(n, { headRefName: 'fix/coverage-older-1', state: 'CLOSED', ...over });
@@ -215,7 +227,7 @@ describe('PRs the account already had before the run', () => {
       [{ baseRefName: 'dev' }, 'base main to dev'],
       [
         { labels: ['auto-generated'] },
-        'labels [auto-generated, nightly-api-fix] to [auto-generated]',
+        'labels [auto-generated, hub, nightly-api-fix] to [auto-generated]',
       ],
     ];
     for (const [change, text] of cases) {
@@ -227,7 +239,7 @@ describe('PRs the account already had before the run', () => {
 
   it('does not mind the order of the labels', () => {
     const v = verify(
-      [old(50, { labels: ['nightly-api-fix', 'auto-generated'] })],
+      [old(50, { labels: ['nightly-api-fix', 'auto-generated', 'hub'] })],
       selection,
       [],
       RUN,

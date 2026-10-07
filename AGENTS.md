@@ -798,7 +798,7 @@ test-generation failure, which is fixed or reported instead) gets a
 filed/linked `camunda-hub` issue (the OpenAPI v2 spec is the request/response
 oracle), fingerprint-deduped so it's filed once, not
 every night. `api-test-generator` may instead get a PR (never a direct push to
-`main`, labelled `nightly-api-fix` and `auto-generated`), for three cases: (1) a test-generation bug or (2) an unmapped operation,
+`main`, labelled `nightly-api-fix`, `auto-generated` and `hub`), for three cases: (1) a test-generation bug or (2) an unmapped operation,
 each with an obvious, minimal, safe fix; or (3) a **confirmed product bug**,
 where instead of a code fix the agent **suppresses the affected test**
 (`positive-suppress.json` / `request-validation.json`, scoped to the exact

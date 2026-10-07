@@ -41,7 +41,7 @@ export interface PreRunPr {
   labels: string[];
 }
 
-export const REQUIRED_LABELS = ['nightly-api-fix', 'auto-generated'];
+export const REQUIRED_LABELS = ['nightly-api-fix', 'auto-generated', 'hub'];
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
