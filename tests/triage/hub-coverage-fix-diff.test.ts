@@ -10,6 +10,15 @@ import {
 } from '../../scripts/triage/hub-coverage-fix-diff.ts';
 import type { Candidate } from '../../scripts/triage/hub-coverage-fix-select.ts';
 
+// The text of the script that sets the fixture variables (scripts/e2e/run-hub.sh on the default branch).
+const PROVISIONED = `
+  export RV_FIXTURE_V2_PROJECT_KEY; RV_FIXTURE_V2_PROJECT_KEY="$(make)"
+  export RV_FIXTURE_MEMBER_EMAIL; RV_FIXTURE_MEMBER_EMAIL="x@example.com"
+  export RV_FIXTURE_OTHER_KEY; RV_FIXTURE_OTHER_KEY="y"
+  echo "$RV_FIXTURE_USED_ONLY"
+`;
+const check = (c: Candidate, ch: PrChange) => checkChange(c, ch, PROVISIONED);
+
 const status: Candidate = {
   resource: 'removeMember',
   createOp: 'removeMember',
@@ -57,24 +66,24 @@ function change(
 
 describe('checkChange: a status PR', () => {
   it('accepts one new fixture entry and the matching floor going up', () => {
-    expect(checkChange(status, change())).toEqual([]);
+    expect(check(status, change())).toEqual([]);
   });
 
   it('rejects a file outside the config and the floors, such as generator code or a test', () => {
-    const v = checkChange(
+    const v = check(
       status,
       change({ files: [RV_FILE, FLOORS_FILE, 'request-validation/src/analysis/authDeny.ts'] }),
     );
     expect(v).toEqual([
       'touches request-validation/src/analysis/authDeny.ts, which a status PR may not change',
     ]);
-    expect(
-      checkChange(status, change({ files: [RV_FILE, FLOORS_FILE, INVARIANTS_FILE] })),
-    ).toHaveLength(1);
+    expect(check(status, change({ files: [RV_FILE, FLOORS_FILE, INVARIANTS_FILE] }))).toHaveLength(
+      1,
+    );
   });
 
   it('rejects any change to excludeOperations', () => {
-    const v = checkChange(
+    const v = check(
       status,
       change({
         headRv: {
@@ -88,7 +97,7 @@ describe('checkChange: a status PR', () => {
   });
 
   it('rejects a changed mode or any other key', () => {
-    const v = checkChange(
+    const v = check(
       status,
       change({
         headRv: {
@@ -103,13 +112,12 @@ describe('checkChange: a status PR', () => {
 
   it('rejects a changed or removed fixture, and a value that is not an RV_FIXTURE_ name', () => {
     expect(
-      checkChange(
-        status,
-        change({ headRv: { ...rv, resourceFixtures: { projectKey: 'OTHER' } } }),
-      ).some((m) => m.includes('was changed or removed')),
+      check(status, change({ headRv: { ...rv, resourceFixtures: { projectKey: 'OTHER' } } })).some(
+        (m) => m.includes('was changed or removed'),
+      ),
     ).toBe(true);
     expect(
-      checkChange(
+      check(
         status,
         change({
           headRv: { ...rv, resourceFixtures: { ...rv.resourceFixtures, k: 'process.env.X' } },
@@ -119,19 +127,21 @@ describe('checkChange: a status PR', () => {
   });
 
   it('rejects a PR that adds no fixture entry', () => {
-    const v = checkChange(status, change({ headRv: rv }));
+    const v = check(status, change({ headRv: rv }));
     expect(v).toContain('request-validation.json: no fixture entry was added');
   });
 
   it('rejects a lowered floor, another floor raised, and a new zeroTestOperations entry', () => {
-    const lowered = checkChange(
+    const lowered = check(
       status,
       change({
         headFloors: { ...floors, assertedByStatus: { ...floors.assertedByStatus, '403': 60 } },
       }),
     );
-    expect(lowered.some((m) => m.includes('assertedByStatus.403 went from 61 to 60'))).toBe(true);
-    const other = checkChange(
+    expect(
+      lowered.some((m) => m.includes('assertedByStatus.403 must go up, but went from 61 to 60')),
+    ).toBe(true);
+    const other = check(
       status,
       change({
         headFloors: {
@@ -141,7 +151,7 @@ describe('checkChange: a status PR', () => {
       }),
     );
     expect(other.some((m) => m.includes('assertedByStatus.404 changed'))).toBe(true);
-    const zero = checkChange(
+    const zero = check(
       status,
       change({
         headFloors: {
@@ -159,8 +169,55 @@ describe('checkChange: a status PR', () => {
     );
   });
 
+  it('rejects an unchanged floor: the selected floor must go up strictly', () => {
+    const v = check(status, change({ headFloors: floors }));
+    expect(
+      v.some((m) => m.includes('assertedByStatus.403 must go up, but went from 61 to 61')),
+    ).toBe(true);
+  });
+
+  it('rejects a fixture whose variable setup does not export, or that is only used', () => {
+    const unprovisioned = check(
+      status,
+      change({
+        headRv: { ...rv, resourceFixtures: { ...rv.resourceFixtures, k: 'RV_FIXTURE_NOPE' } },
+      }),
+    );
+    expect(
+      unprovisioned.some((m) =>
+        m.includes('names RV_FIXTURE_NOPE, which setup does not provision'),
+      ),
+    ).toBe(true);
+    const usedOnly = check(
+      status,
+      change({
+        headRv: { ...rv, resourceFixtures: { ...rv.resourceFixtures, k: 'RV_FIXTURE_USED_ONLY' } },
+      }),
+    );
+    expect(usedOnly.some((m) => m.includes('which setup does not provision'))).toBe(true);
+  });
+
+  it('rejects more than one added fixture entry', () => {
+    const v = check(
+      status,
+      change({
+        headRv: {
+          ...rv,
+          resourceFixtures: {
+            ...rv.resourceFixtures,
+            a: 'RV_FIXTURE_MEMBER_EMAIL',
+            b: 'RV_FIXTURE_OTHER_KEY',
+          },
+        },
+      }),
+    );
+    expect(v).toContain(
+      'request-validation.json: 2 fixture entries were added, at most one is allowed',
+    );
+  });
+
   it('rejects a PR that does not touch the floors file', () => {
-    expect(checkChange(status, change({ files: [RV_FILE] }))).toContain(
+    expect(check(status, change({ files: [RV_FILE] }))).toContain(
       'does not raise a floor in coverage-floors.json',
     );
   });
@@ -174,20 +231,20 @@ describe('checkChange: a lifecycle PR', () => {
   });
 
   it('accepts the entry, the floor and the adapted invariant', () => {
-    expect(checkChange(lifecycle, lc())).toEqual([]);
+    expect(check(lifecycle, lc())).toEqual([]);
   });
 
   it('rejects other files, a floor that went down, and any other floor change', () => {
+    expect(check(lifecycle, lc({ files: [ENTITY_KINDS_FILE, FLOORS_FILE, RV_FILE] }))).toHaveLength(
+      1,
+    );
     expect(
-      checkChange(lifecycle, lc({ files: [ENTITY_KINDS_FILE, FLOORS_FILE, RV_FILE] })),
-    ).toHaveLength(1);
-    expect(
-      checkChange(lifecycle, lc({ headFloors: { ...floors, lifecycleCreateCovered: 4 } })).some(
-        (m) => m.includes('lifecycleCreateCovered went from 5 to 4'),
+      check(lifecycle, lc({ headFloors: { ...floors, lifecycleCreateCovered: 4 } })).some((m) =>
+        m.includes('lifecycleCreateCovered must go up, but went from 5 to 4'),
       ),
     ).toBe(true);
     expect(
-      checkChange(
+      check(
         lifecycle,
         lc({
           headFloors: {

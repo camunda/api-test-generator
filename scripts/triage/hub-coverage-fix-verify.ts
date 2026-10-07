@@ -192,6 +192,7 @@ export function verify(
   baseline: number,
   preRun: PreRunPr[],
   changes?: Map<number, PrChange>,
+  provisioned = '',
 ): string[] {
   const violations: string[] = [];
   const candidateByKebab = new Map(selection.candidates.map((c) => [branchKey(c), c]));
@@ -230,7 +231,8 @@ export function verify(
       if (!change) {
         violations.push(`${p.url}: its changed files could not be checked`);
       } else {
-        for (const v of checkChange(candidate, change)) violations.push(`${p.url}: ${v}`);
+        for (const v of checkChange(candidate, change, provisioned))
+          violations.push(`${p.url}: ${v}`);
       }
     }
     if (p.state !== 'OPEN') {
@@ -298,6 +300,7 @@ if (process.argv[1] && import.meta.filename === process.argv[1]) {
     limitArg,
     preRunPath,
     changesPath,
+    provisionedPath,
   ] = process.argv.slice(2);
   const baseline = Number(baselineArg);
   const limit = Number(limitArg);
@@ -310,11 +313,12 @@ if (process.argv[1] && import.meta.filename === process.argv[1]) {
     !logins ||
     !preRunPath ||
     !changesPath ||
+    !provisionedPath ||
     !Number.isInteger(baseline) ||
     !Number.isInteger(limit)
   ) {
     console.error(
-      'usage: hub-coverage-fix-verify.ts <prs.json> <selection.json> <result.json> <run-id> <true|false> <bot logins> <baseline PR number> <list limit> <pre-run PRs.json> <pr-changes.json>',
+      'usage: hub-coverage-fix-verify.ts <prs.json> <selection.json> <result.json> <run-id> <true|false> <bot logins> <baseline PR number> <list limit> <pre-run PRs.json> <pr-changes.json> <fixture-setup-script>',
     );
     process.exit(2);
   }
@@ -324,6 +328,7 @@ if (process.argv[1] && import.meta.filename === process.argv[1]) {
     const reported = reportedPrUrls(JSON.parse(readFileSync(resultPath, 'utf8')));
     const preRun = parsePreRun(JSON.parse(readFileSync(preRunPath, 'utf8')));
     const changes = parseChanges(JSON.parse(readFileSync(changesPath, 'utf8')));
+    const provisioned = readFileSync(provisionedPath, 'utf8');
     assertComplete(prs, limit);
     const violations = verify(
       prs,
@@ -335,6 +340,7 @@ if (process.argv[1] && import.meta.filename === process.argv[1]) {
       baseline,
       preRun,
       changes,
+      provisioned,
     );
     for (const v of violations) console.error(`::error::${v}`);
     process.stdout.write(`${JSON.stringify({ violations }, null, 2)}\n`);

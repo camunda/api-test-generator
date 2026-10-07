@@ -624,4 +624,4 @@ jobs:
             "${RUNNER_TEMP}/run-prs.json" "${RUNNER_TEMP}/pre/selection.json" \
             "${RUNNER_TEMP}/post/hub-coverage-fix.json" "$GITHUB_RUN_ID" "$DRY_RUN" \
             "app/qa-processes,qa-processes[bot]" "$BASELINE" "$limit" "${RUNNER_TEMP}/pre/pre-run-prs.json" \
-            "${RUNNER_TEMP}/pr-changes.json"
+            "${RUNNER_TEMP}/pr-changes.json" scripts/e2e/run-hub.sh

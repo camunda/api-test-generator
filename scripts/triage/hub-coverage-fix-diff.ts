@@ -67,8 +67,8 @@ function checkFloors(base: unknown, head: unknown, candidate: Candidate): string
     const was = b.get(key);
     const now = h.get(key);
     if (key === allowed) {
-      if (typeof was !== 'number' || typeof now !== 'number' || now < was) {
-        out.push(`the floor ${key} went from ${String(was)} to ${String(now)}`);
+      if (typeof was !== 'number' || typeof now !== 'number' || now <= was) {
+        out.push(`the floor ${key} must go up, but went from ${String(was)} to ${String(now)}`);
       }
     } else if (!same(was, now)) {
       out.push(`the floor ${key} changed from ${String(was)} to ${String(now)}`);
@@ -85,8 +85,14 @@ function checkFloors(base: unknown, head: unknown, candidate: Candidate): string
   return out;
 }
 
-// request-validation.json: only new fixture entries.
-function checkRv(base: unknown, head: unknown): string[] {
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+// request-validation.json: exactly one new fixture entry, naming an environment variable that setup provisions.
+// `provisioned` is the text of the script that sets the RV_FIXTURE_* variables, read from the default branch on the
+// verify runner (the agent cannot change it, and its PR may not touch it).
+function checkRv(base: unknown, head: unknown, provisioned: string): string[] {
   if (!isRecord(base) || !isRecord(head)) return ['request-validation.json is not an object'];
   const out: string[] = [];
   for (const key of new Set([...Object.keys(base), ...Object.keys(head)])) {
@@ -112,14 +118,22 @@ function checkRv(base: unknown, head: unknown): string[] {
         out.push(
           `request-validation.json: ${key}.${name} is not an RV_FIXTURE_* environment variable name`,
         );
+      } else if (!new RegExp(`\\bexport\\s+${escapeRegExp(value)}\\b`).test(provisioned)) {
+        out.push(
+          `request-validation.json: ${key}.${name} names ${value}, which setup does not provision`,
+        );
       }
     }
   }
   if (added === 0) out.push('request-validation.json: no fixture entry was added');
+  if (added > 1)
+    out.push(
+      `request-validation.json: ${added} fixture entries were added, at most one is allowed`,
+    );
   return out;
 }
 
-export function checkChange(candidate: Candidate, change: PrChange): string[] {
+export function checkChange(candidate: Candidate, change: PrChange, provisioned: string): string[] {
   const out: string[] = [];
   const allowedFiles =
     candidate.kind === 'status'
@@ -132,7 +146,8 @@ export function checkChange(candidate: Candidate, change: PrChange): string[] {
   if (!change.files.includes(FLOORS_FILE))
     out.push('does not raise a floor in coverage-floors.json');
   out.push(...checkFloors(change.base.floors, change.head.floors, candidate));
-  if (candidate.kind === 'status') out.push(...checkRv(change.base.rv, change.head.rv));
+  if (candidate.kind === 'status')
+    out.push(...checkRv(change.base.rv, change.head.rv, provisioned));
   return out;
 }
 
