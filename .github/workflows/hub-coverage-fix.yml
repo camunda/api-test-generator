@@ -108,19 +108,27 @@ jobs:
       - name: Check the report files
         run: |
           set -euo pipefail
-          for f in summary.json rows.json; do
+          for f in summary.json rows.json hub-ref.txt; do
             if [ ! -s "${REPORT_DIR}/${f}" ]; then
-              echo "::error::${f} is missing from the coverage report artifact."
+              echo "::error::${f} is missing from the coverage report artifact (a report from before hub-ref.txt existed cannot be used)."
               exit 1
             fi
           done
+          # A manual run of the weekly report can audit any camunda-hub ref. Only a report about main is
+          # trusted, because the agent acts on what the report says.
+          hub_ref="$(tr -d '[:space:]' < "${REPORT_DIR}/hub-ref.txt")"
+          if [ "$hub_ref" != "main" ]; then
+            echo "::error::The report audited camunda-hub ref '${hub_ref}', not main; refusing to use it."
+            exit 1
+          fi
 
       # --- Limits, enforced in code, before any agent runs ---------------------
       # Fails closed: if the PR history cannot be read, or a query comes back full (so it may be cut
       # off), the weekly cap and the busy areas cannot be counted, so the run stops rather than guessing.
-      # Two queries, merged: every OPEN nightly-api-fix PR (an old open PR still holds its area), and every
-      # one created in the last 8 days, open or closed (the weekly cap counts 7). A single "newest 100"
-      # query would eventually push an old open PR out of the list.
+      # Two queries, merged: every OPEN PR (an old open PR still holds its area), and every one created in
+      # the last 8 days, open or closed (the weekly cap counts 7). A single "newest 100" query would
+      # eventually push an old open PR out of the list. There is no label filter on purpose: a label can be
+      # removed by anyone, which would hide a PR from the count. The selector picks the agent's PRs by branch.
       - name: List the agent's PR history
         env:
           GH_TOKEN: ${{ github.token }}
@@ -129,9 +137,9 @@ jobs:
           limit=200
           fields=number,url,createdAt,headRefName,state
           week_ago="$(date -u -d '8 days ago' +%Y-%m-%dT%H:%M:%SZ)"
-          gh pr list --repo "$GITHUB_REPOSITORY" --state open --label nightly-api-fix --limit "$limit" \
+          gh pr list --repo "$GITHUB_REPOSITORY" --state open --limit "$limit" \
             --json "$fields" > "${RUNNER_TEMP}/prs-open.json"
-          gh pr list --repo "$GITHUB_REPOSITORY" --state all --label nightly-api-fix --limit "$limit" \
+          gh pr list --repo "$GITHUB_REPOSITORY" --state all --limit "$limit" \
             --search "created:>=${week_ago}" --json "$fields" > "${RUNNER_TEMP}/prs-recent.json"
           for f in prs-open prs-recent; do
             if [ "$(jq 'length' "${RUNNER_TEMP}/${f}.json")" -ge "$limit" ]; then
