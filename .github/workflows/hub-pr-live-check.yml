@@ -53,8 +53,18 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
         run: |
           set -euo pipefail
+          # SECURITY: a PR opened by one of our AI agents (fix/coverage-*, fix/nightly-triage-*) is not run
+          # automatically either. The live check below runs the PR's own code with Hub access the moment the PR opens,
+          # and the verification of what the agent changed only runs later, so a person reads the diff first and then
+          # runs hub-ondemand-test.yml on the branch. The branch name is only ever passed through the environment.
+          if bash .github/scripts/hub-live-check-is-agent-branch.sh "$HEAD_REF"; then
+            echo "::warning::PR branch '$HEAD_REF' belongs to an AI agent — skipping the automatic live-Hub check; read the diff, then run hub-ondemand-test.yml on the branch before merging."
+            echo "proceed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           # SECURITY (mirrors triage-camunda-hub-nightly.yml's identical
           # guard): calling a local reusable workflow (`uses: ./...`) resolves
           # to the version of that file AS IT EXISTS ON THE PR's OWN COMMIT —
