@@ -164,9 +164,7 @@ describe('checkChange: a status PR', () => {
         },
       }),
     );
-    expect(zero.some((m) => m.includes('zeroTestOperations got a new entry (removeMember)'))).toBe(
-      true,
-    );
+    expect(zero.some((m) => m.includes('zeroTestOperations changed'))).toBe(true);
   });
 
   it('rejects an unchanged floor: the selected floor must go up strictly', () => {
@@ -195,6 +193,30 @@ describe('checkChange: a status PR', () => {
       }),
     );
     expect(usedOnly.some((m) => m.includes('which setup does not provision'))).toBe(true);
+  });
+
+  it('rejects an edited or removed zeroTestOperations entry', () => {
+    const base = { ...floors, assertedByStatus: { ...floors.assertedByStatus, '403': 62 } };
+    for (const zeroTestOperations of [
+      [],
+      [{ operationId: 'getClusterUsageMetrics', reason: 'a different reason' }],
+    ]) {
+      const v = check(status, change({ headFloors: { ...base, zeroTestOperations } }));
+      expect(v.some((m) => m.includes('zeroTestOperations changed'))).toBe(true);
+    }
+  });
+
+  it('counts a fixture key that only exists on Object.prototype as a new entry, and validates it', () => {
+    const headRv = JSON.parse(
+      '{"excludeOperations":[{"operationId":"purgeFile","reason":"r"}],"authDenyMode":"fixtures","pathResourceFixtures":{},"resourceFixtures":{"projectKey":"RV_FIXTURE_V2_PROJECT_KEY","constructor":"not-a-variable"}}',
+    );
+    const v = check(status, change({ headRv }));
+    expect(v.some((m) => m.includes('resourceFixtures.constructor is not an RV_FIXTURE_*'))).toBe(
+      true,
+    );
+    const base = { ...rv, resourceFixtures: { ...rv.resourceFixtures, constructor: 'x' } };
+    const c = change({ headRv: base });
+    expect(check(status, c).some((m) => m.includes('resourceFixtures.constructor'))).toBe(true);
   });
 
   it('rejects more than one added fixture entry', () => {

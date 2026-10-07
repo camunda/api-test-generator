@@ -74,13 +74,10 @@ function checkFloors(base: unknown, head: unknown, candidate: Candidate): string
       out.push(`the floor ${key} changed from ${String(was)} to ${String(now)}`);
     }
   }
-  // zeroTestOperations: nothing may be added.
-  const baseZero = Array.isArray(base.zeroTestOperations) ? base.zeroTestOperations : [];
-  const headZero = Array.isArray(head.zeroTestOperations) ? head.zeroTestOperations : [];
-  const baseIds = new Set(baseZero.map((e) => (isRecord(e) ? e.operationId : e)));
-  for (const e of headZero) {
-    const id = isRecord(e) ? e.operationId : e;
-    if (!baseIds.has(id)) out.push(`zeroTestOperations got a new entry (${String(id)})`);
+  // zeroTestOperations: the whole list must be unchanged. An entry is an exception someone decided on, so it is
+  // never added, edited or removed here.
+  if (!same(base.zeroTestOperations, head.zeroTestOperations)) {
+    out.push('zeroTestOperations changed (no entry may be added, edited or removed)');
   }
   return out;
 }
@@ -108,11 +105,13 @@ function checkRv(base: unknown, head: unknown, provisioned: string): string[] {
     const b = isRecord(base[key]) ? base[key] : {};
     const h = isRecord(head[key]) ? head[key] : {};
     for (const [name, value] of Object.entries(b)) {
-      if (!same(h[name], value))
+      if (!Object.hasOwn(h, name) || !same(h[name], value))
         out.push(`request-validation.json: ${key}.${name} was changed or removed`);
     }
     for (const [name, value] of Object.entries(h)) {
-      if (name in b) continue;
+      // Own properties only: `in` would treat names inherited from Object.prototype (constructor, toString)
+      // as already present and let such an entry through unchecked.
+      if (Object.hasOwn(b, name)) continue;
       added++;
       if (typeof value !== 'string' || !/^RV_FIXTURE_[A-Z0-9_]+$/.test(value)) {
         out.push(
