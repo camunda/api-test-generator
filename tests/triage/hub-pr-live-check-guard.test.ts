@@ -33,7 +33,7 @@ function proceed(
   diff: string | 'fail' = 'src/a.ts',
   actor = author,
   sender = actor,
-  commits = 'esraagamal6\nesraagamal6\n',
+  history = 'esraagamal6\nesraagamal6\n',
 ): string {
   const dir = mkdtempSync(join(tmpdir(), 'live-guard-'));
   writeFileSync(
@@ -41,8 +41,8 @@ function proceed(
     [
       '#!/usr/bin/env bash',
       'if [ "$1" = api ]; then',
-      '  [ "$FAKE_COMMITS" = fail ] && exit 1',
-      '  printf "%s" "$FAKE_COMMITS"',
+      '  [ "$FAKE_HISTORY" = fail ] && exit 1',
+      '  printf "%s" "$FAKE_HISTORY"',
       '  exit 0',
       'fi',
       '[ "$FAKE_DIFF" = fail ] && exit 1',
@@ -67,7 +67,7 @@ function proceed(
       ACTOR: actor,
       SENDER: sender,
       FAKE_DIFF: diff,
-      FAKE_COMMITS: commits,
+      FAKE_HISTORY: history,
     },
   });
   expect(r.status, r.stderr).toBe(0);
@@ -113,7 +113,8 @@ describe('hub-pr-live-check guard', () => {
     ).toBe('true');
   });
 
-  it("skips a person's PR that carries a commit by the automation account, and fails closed when the commits cannot be read", () => {
+  it("skips a person's PR when an earlier run on the branch was triggered by the automation account, and fails closed when the history cannot be read", () => {
+    // The run history is the unforgeable record of who pushed: commit author and committer can claim any identity.
     const base = [
       'claude/some-change',
       'esraagamal6',
@@ -124,7 +125,8 @@ describe('hub-pr-live-check guard', () => {
     expect(proceed(...base, 'esraagamal6\nqa-processes[bot]\n')).toBe('false');
     expect(proceed(...base, 'app/qa-processes\nesraagamal6\n')).toBe('false');
     expect(proceed(...base, 'fail')).toBe('false');
-    expect(proceed(...base, '\n\n')).toBe('true');
+    expect(proceed(...base, '')).toBe('true');
+    expect(proceed(...base, 'esraagamal6\nsomeoneelse\n')).toBe('true');
   });
 
   it('fails closed on an empty branch name or author', () => {
