@@ -16,7 +16,14 @@
 //   node hub-coverage-fix-verify.ts <prs.json> <selection.json> <result.json> <run-id> <true|false dry run> <bot logins, comma separated> <baseline PR number> <list limit> <pre-run PRs.json>
 
 import { readFileSync } from 'node:fs';
-import { BRANCH_PREFIX, type Candidate, kebab, type Selection } from './hub-coverage-fix-select.ts';
+import {
+  BRANCH_PREFIX,
+  branchKey,
+  type Candidate,
+  type Selection,
+  STATUS_CODES,
+  type StatusCode,
+} from './hub-coverage-fix-select.ts';
 
 export interface RunPr {
   number: number;
@@ -128,7 +135,17 @@ export function parseSelection(v: unknown): Selection {
     ) {
       throw new Error(`selection.json candidate ${i} has no resource, createOp and area`);
     }
-    return { resource: c.resource, createOp: c.createOp, area: c.area };
+    const kind = c.kind === undefined ? 'lifecycle' : c.kind;
+    if (kind !== 'lifecycle' && kind !== 'status') {
+      throw new Error(`selection.json candidate ${i} has an unknown kind`);
+    }
+    const code = STATUS_CODES.find((x) => x === c.code);
+    if (kind === 'status' && !code) {
+      throw new Error(`selection.json candidate ${i} is a status gap without a 403 or 404 code`);
+    }
+    const candidate: Candidate = { resource: c.resource, createOp: c.createOp, area: c.area, kind };
+    if (kind === 'status' && code) candidate.code = code as StatusCode;
+    return candidate;
   });
   return { budget: v.budget, recentCount: 0, candidates, skipped: [] };
 }
@@ -176,7 +193,7 @@ export function verify(
   preRun: PreRunPr[],
 ): string[] {
   const violations: string[] = [];
-  const candidateByKebab = new Map(selection.candidates.map((c) => [kebab(c.resource), c]));
+  const candidateByKebab = new Map(selection.candidates.map((c) => [branchKey(c), c]));
 
   // Only PRs created after the baseline can be this run's work.
   const prs = allPrs.filter((p) => p.number > baseline);

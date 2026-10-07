@@ -6,12 +6,14 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import {
   type AgentPr,
+  branchKey,
   kebab,
   parseCreateMissing,
   parseKnown,
   parseOpenFixPrs,
   parsePrs,
   parseRows,
+  parseStatusGaps,
   resourceFromBranch,
   select,
 } from '../../scripts/triage/hub-coverage-fix-select.ts';
@@ -19,10 +21,13 @@ import {
 const now = new Date('2026-10-12T07:00:00Z');
 
 const rows = [
-  { operationId: 'createProjectSnapshot', area: 'Project Snapshot' },
-  { operationId: 'createVersion', area: 'Version' },
-  { operationId: 'createWidget', area: 'Widget' },
-  { operationId: 'createGadget', area: 'Widget' },
+  { operationId: 'createProjectSnapshot', area: 'Project Snapshot', notes: [] as string[] },
+  { operationId: 'createVersion', area: 'Version', notes: [] as string[] },
+  { operationId: 'createWidget', area: 'Widget', notes: [] as string[] },
+  { operationId: 'createGadget', area: 'Widget', notes: [] as string[] },
+  { operationId: 'removeMember', area: 'Member', notes: [] as string[] },
+  { operationId: 'addMember', area: 'Member', notes: ['auth-deny'] },
+  { operationId: 'removeClusterRegistration', area: 'Cluster', notes: [] as string[] },
 ];
 
 function pr(over: Partial<AgentPr>): AgentPr {
@@ -58,6 +63,7 @@ describe('select', () => {
       resource: 'ProjectSnapshot',
       createOp: 'createProjectSnapshot',
       area: 'Project Snapshot',
+      kind: 'lifecycle',
     });
     expect(s.skipped).toEqual([]);
   });
@@ -188,11 +194,100 @@ describe('select', () => {
   });
 });
 
+describe('status gaps (403 and 404)', () => {
+  const gaps = [
+    { operationId: 'removeMember', code: '403' as const },
+    { operationId: 'removeClusterRegistration', code: '403' as const },
+  ];
+
+  it('picks status gaps after lifecycle gaps, one per area, with a branch key that includes the code', () => {
+    const s = select(['Version'], rows, [], now, [], [], gaps);
+    expect(s.budget).toBe(3);
+    expect(s.candidates.map((c) => c.resource)).toEqual([
+      'Version',
+      'removeClusterRegistration',
+      'removeMember',
+    ]);
+    const m = s.candidates.find((c) => c.resource === 'removeMember');
+    expect(m).toEqual({
+      resource: 'removeMember',
+      createOp: 'removeMember',
+      area: 'Member',
+      kind: 'status',
+      code: '403',
+    });
+    expect(m && branchKey(m)).toBe('remove-member-403');
+    expect(resourceFromBranch('fix/coverage-remove-member-403-777')).toBe('remove-member-403');
+  });
+
+  it('keeps one PR per area: a second gap in the same area is skipped', () => {
+    const s = select(
+      [],
+      rows,
+      [],
+      now,
+      [],
+      [],
+      [
+        { operationId: 'removeMember', code: '403' },
+        { operationId: 'removeMember', code: '404' },
+      ],
+    );
+    expect(s.candidates).toHaveLength(1);
+    expect(s.skipped[0]?.reason).toContain('already has a candidate in this run');
+  });
+
+  it('skips a gap whose area has a recent or open agent PR, for either kind of gap', () => {
+    const prs = [pr({ headRefName: 'fix/coverage-remove-member-403-9', state: 'MERGED' })];
+    const s = select([], rows, prs, now, [], [], gaps);
+    expect(s.candidates.map((c) => c.resource)).toEqual(['removeClusterRegistration']);
+    expect(s.skipped[0]?.reason).toContain('area Member already has an agent PR');
+  });
+
+  it('skips a gap that an open fix PR already touches', () => {
+    const open = [{ number: 12, url: 'u', diff: '+ removeClusterRegistration' }];
+    const s = select([], rows, [], now, [], open, gaps);
+    expect(s.candidates.map((c) => c.resource)).toEqual(['removeMember']);
+    expect(s.skipped[0]?.reason).toContain('open PR #12');
+  });
+
+  it('reads the gaps from the report, leaving out held operations and scoped exclusions', () => {
+    const summary = {
+      missing: { '403': ['addMember', 'removeMember', 'heldOp'], '404': ['purgeFile'] },
+      heldCells: { '403': ['heldOp'], '404': [] },
+    };
+    const parsed = parseStatusGaps(summary, [
+      ...rows,
+      { operationId: 'heldOp', area: 'X', notes: [] },
+      { operationId: 'purgeFile', area: 'File', notes: ['not-found-fake-id'] },
+    ]);
+    expect(parsed).toEqual([{ operationId: 'removeMember', code: '403' }]);
+  });
+
+  it('rejects a report without the lists, so a format change cannot hide or invent gaps', () => {
+    expect(() => parseStatusGaps({}, rows)).toThrow('missing and heldCells');
+    expect(() =>
+      parseStatusGaps({ missing: { '403': [] }, heldCells: { '403': [], '404': [] } }, rows),
+    ).toThrow('for 404');
+    expect(() =>
+      parseStatusGaps(
+        { missing: { '403': [1], '404': [] }, heldCells: { '403': [], '404': [] } },
+        rows,
+      ),
+    ).toThrow('for 403');
+  });
+});
+
 describe('parsers are strict', () => {
   it('read a well-formed summary, rows and PR list', () => {
     expect(parseCreateMissing({ lifecycle: { createMissing: ['A', 'B'] } })).toEqual(['A', 'B']);
     expect(parseCreateMissing({ lifecycle: { createMissing: [] } })).toEqual([]);
-    expect(parseRows([{ operationId: 'a', area: 'X' }])).toEqual([{ operationId: 'a', area: 'X' }]);
+    expect(parseRows([{ operationId: 'a', area: 'X' }])).toEqual([
+      { operationId: 'a', area: 'X', notes: [] },
+    ]);
+    expect(parseRows([{ operationId: 'a', area: 'X', notes: ['auth-deny'] }])[0]?.notes).toEqual([
+      'auth-deny',
+    ]);
     expect(parsePrs([])).toEqual([]);
   });
 
@@ -225,6 +320,7 @@ describe('parsers are strict', () => {
     expect(() => parseRows({})).toThrow('not a list');
     expect(() => parseRows([{ operationId: 'a', area: 'X' }, { operationId: 1 }])).toThrow('row 1');
     expect(() => parseRows(['z'])).toThrow('row 0');
+    expect(() => parseRows([{ operationId: 'a', area: 'X', notes: [1] }])).toThrow('notes');
   });
 
   it('reject any malformed PR record instead of dropping it, so the weekly count cannot shrink', () => {
@@ -258,7 +354,11 @@ describe('command line', () => {
     const dir = mkdtempSync(join(tmpdir(), 'cov-fix-'));
     writeFileSync(
       join(dir, 'summary.json'),
-      JSON.stringify({ lifecycle: { createMissing: ['ProjectSnapshot'], known: [] } }),
+      JSON.stringify({
+        lifecycle: { createMissing: ['ProjectSnapshot'], known: [] },
+        missing: { '403': [], '404': [] },
+        heldCells: { '403': [], '404': [] },
+      }),
     );
     writeFileSync(join(dir, 'rows.json'), JSON.stringify(rows));
     writeFileSync(join(dir, 'prs.json'), '[]');

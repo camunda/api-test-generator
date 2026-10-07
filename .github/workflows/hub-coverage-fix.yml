@@ -1,7 +1,8 @@
 # description: Coverage-fix agent for the camunda-hub generated API tests. Reads the weekly
 #              response-coverage report, picks the gaps the playbook allows (a resource with
-#              no create-read-delete test), and runs a Claude Code agent that opens small
-#              draft PRs in api-test-generator. The limits (no weekly cap, one PR per
+#              no create-read-delete test, or an operation with no 403 or 404 test), and runs
+#              a Claude Code agent that opens small draft PRs in api-test-generator, or writes a
+#              proposal when a gap needs more than a config entry. The limits (no weekly cap, one PR per
 #              API area) are enforced in code before the agent starts. camunda-hub is read
 #              only: no token for it is given to the agent. Manual trigger only, dry run by
 #              default, until the pilot is trusted (epic #678).
