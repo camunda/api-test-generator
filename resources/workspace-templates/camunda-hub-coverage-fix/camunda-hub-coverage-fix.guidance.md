@@ -37,7 +37,7 @@ one-line reason and do nothing else.
 
 1. **Never close a gap by hiding it.** No new entry in `positive-suppress.json`, no new
    `excludeOperations`, no new `knownIssues`, no change to `zeroTestOperations`, no
-   weakened assertion, no `skip`. The numbers would improve while nothing is tested.
+   weakened assertion, no `test.skip` or `it.skip`. The numbers would improve while nothing is tested.
 2. **Never lower a floor** in `configs/camunda-hub/coverage-floors.json`. You raise the matching floor in the same PR (see below).
 3. **Proof before a PR.** Open a PR only if the report script shows the targeted number going up on your
    branch and the invariants still pass. If not, open no PR.
@@ -115,7 +115,8 @@ Leave the PR in draft: a person decides, after that check, whether it is good.
 
 Work in `{{.WorkspacePath}}/api-test-generator` (already on `main`).
 
-1. Branch: `fix/coverage-<resource-kebab>`.
+1. Branch: `fix/coverage-<resource-kebab>`. Start every resource from a clean `main`: run `git switch main`
+   first (and `git status` must show nothing), so a second resource never inherits the first one's commit or floor change.
 2. Commit with a message that names the resource and the number before and after. Follow the repo's commit
    rules (Conventional Commits, lowercase subject).
 3. Push with the token the job gives you for this repo only. The job removes the global git credentials
@@ -173,7 +174,7 @@ is one plain line a person can read without opening the PR.
 
 - `camunda-hub`: read only, always.
 - `api-test-generator`: a draft PR only, never a push to `main`.
-- No suppression, exclusion, known issue, `zeroTestOperations` change, weakened assertion, `skip`, or
+- No suppression, exclusion, known issue, `zeroTestOperations` change, weakened assertion, `test.skip` or `it.skip`, or
   lowered floor. Ever.
 - No PR without a proof that the targeted number went up and the checks pass.
 - At most 2 PRs in any 7 days, and one PR per API area.
