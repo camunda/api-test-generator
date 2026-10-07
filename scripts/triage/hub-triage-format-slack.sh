@@ -252,13 +252,18 @@ case "$MODE" in
         x
         | sub("^(?<sha>[0-9a-f]{7,40})(?![0-9a-zA-Z])";
               "<https://github.com/camunda/camunda-hub/commit/\(.sha)|\(.sha[0:10])>")
-        | gsub("#(?<n>[0-9]+)";
+        | gsub("#(?<n>[0-9]+)(?![0-9a-zA-Z])";
                "<https://github.com/camunda/camunda-hub/pull/\(.n)|#\(.n)>");
-      # The icon follows the decision of the agent, not the mere presence of a commit:
-      # :hourglass_flowing_sand: only when no Hub bug was filed because of it, otherwise :link:
-      # (context only, e.g. a fix PR was opened for a new endpoint).
-      def relatedCommitNote(x; action):
-        (if action == "skip" then ":hourglass_flowing_sand:" else ":link:" end) as $icon
+      # The icon follows the reason, not the bare action: skip is also used when an open fix PR
+      # already covers a test-generation finding. :hourglass_flowing_sand: only when a product
+      # finding was held back because of the commit (skip, no fix PR, not test-generation),
+      # otherwise :link: (context only).
+      def recentChangeSkip(f):
+        (f.action // "") == "skip"
+        and (f.subcategory // "") != "test-generation"
+        and ((f.fix_pr_url // "") | tostring | length) == 0;
+      def relatedCommitNote(x; f):
+        (if recentChangeSkip(f) then ":hourglass_flowing_sand:" else ":link:" end) as $icon
         | if has_url(x) and (x | test("^https?://")) then compactLink(x; $icon)
           elif (x | type) == "string" and (x | length) > 0 then $icon + " " + commitRefLinks(x)
           else "" end;
@@ -272,7 +277,7 @@ case "$MODE" in
         ((((f.action // "") == "fix-pr" and has_url(f.fix_pr_url)) or has_url(f.suppress_pr_url)) or undecided(f)) as $needs_ta_medic
         | ([
             (if (f.known_issue // false) then compactLink(f.known_issue_url; ":ticket:") else "" end),
-            relatedCommitNote(f.related_commit; (f.action // "")),
+            relatedCommitNote(f.related_commit; f),
             compactLink(f.issue_url; ":memo:"),
             compactLink(f.fix_pr_url; if (f.action // "") == "skip" then ":recycle:" else ":hammer_and_wrench:" end),
             compactLink(f.suppress_pr_url; ":no_entry:")

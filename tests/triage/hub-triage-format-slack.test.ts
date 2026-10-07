@@ -12,7 +12,7 @@ const script = join(
 
 const HUB = 'https://github.com/camunda/camunda-hub';
 
-function threadLine(relatedCommit: unknown, action = 'report-only'): string {
+function threadLine(relatedCommit: unknown, extra: Record<string, unknown> = {}): string {
   const dir = mkdtempSync(join(tmpdir(), 'triage-format-'));
   const file = join(dir, 'hub-triage.json');
   writeFileSync(
@@ -26,8 +26,9 @@ function threadLine(relatedCommit: unknown, action = 'report-only'): string {
           subcategory: 'test-generation',
           expected: '400',
           actual: '404',
-          action,
+          action: 'report-only',
           related_commit: relatedCommit,
+          ...extra,
         },
       ],
     }),
@@ -73,13 +74,31 @@ describe('triage Slack thread: related_commit links', () => {
     expect(text).toContain(`<${HUB}/pull/22|#22>`);
   });
 
-  it('uses the wait-and-see icon only when no Hub bug was filed, and a link icon otherwise', () => {
-    const skipped = threadLine('8fa152b500 (#1)', 'skip');
-    expect(skipped).toContain(':hourglass_flowing_sand:');
-    expect(skipped).not.toContain(':link:');
-    const fixed = threadLine('8fa152b500 (#1)', 'fix-pr');
+  it('uses the wait-and-see icon only for a product finding held back for the commit', () => {
+    const held = threadLine('8fa152b500 (#1)', { subcategory: null, action: 'skip' });
+    expect(held).toContain(':hourglass_flowing_sand:');
+    expect(held).not.toContain(':link:');
+    const fixed = threadLine('8fa152b500 (#1)', { action: 'fix-pr', fix_pr_url: `${HUB}/pull/2` });
     expect(fixed).toContain(':link:');
     expect(fixed).not.toContain(':hourglass_flowing_sand:');
+  });
+
+  it('keeps the link icon when skip means an open fix PR already covers a test-generation finding', () => {
+    const deduped = threadLine('8fa152b500 (#1)', {
+      action: 'skip',
+      fix_pr_url: 'https://github.com/camunda/api-test-generator/pull/9',
+    });
+    expect(deduped).toContain(':link:');
+    expect(deduped).not.toContain(':hourglass_flowing_sand:');
+    const noUrl = threadLine('8fa152b500 (#1)', { action: 'skip' });
+    expect(noUrl).toContain(':link:');
+    expect(noUrl).not.toContain(':hourglass_flowing_sand:');
+  });
+
+  it('does not link a number followed by letters as a PR', () => {
+    const text = threadLine('8fa152b500 (#123abc)');
+    expect(text).not.toContain('/pull/');
+    expect(text).toContain('#123abc');
   });
 
   it('prints no related-commit marker when the value is empty or not a string', () => {
