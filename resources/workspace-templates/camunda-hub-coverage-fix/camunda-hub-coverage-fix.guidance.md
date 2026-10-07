@@ -160,7 +160,7 @@ response, is not held by an exclusion, and has no scoped exclusion. Work out **w
      `request-validation/src/analysis/notFoundFakeId.ts` (it needs an ID it can make up).
 2. **Decide which of three outcomes it is.** This applies to any operation, not to one endpoint: the question is
    always "what is the one thing missing, and may I add it?".
-   - **Config only (you may fix it).** The only thing missing is an entry in `resourceFixtures` or
+   - **A. Config only (you may fix it).** The only thing missing is an entry in `resourceFixtures` or
      `pathResourceFixtures` in `request-validation.json`, and the value you would map it to is an environment
      variable that setup **already provisions**: for camunda-hub, `scripts/e2e/run-hub.sh` creates the fixtures and
      exports each `RV_FIXTURE_*` variable, so the name must appear there as `export <NAME>`. Search that file for the
