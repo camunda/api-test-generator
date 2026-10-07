@@ -69,6 +69,13 @@ describe('checkChange: a status PR', () => {
     expect(check(status, change())).toEqual([]);
   });
 
+  it('rejects the setup script and any other file the live check would run', () => {
+    for (const f of ['scripts/e2e/run-hub.sh', '.github/workflows/hub-pr-live-check.yml']) {
+      const v = check(status, change({ files: [RV_FILE, FLOORS_FILE, f] }));
+      expect(v).toEqual([`touches ${f}, which a status PR may not change`]);
+    }
+  });
+
   it('rejects a file outside the config and the floors, such as generator code or a test', () => {
     const v = check(
       status,

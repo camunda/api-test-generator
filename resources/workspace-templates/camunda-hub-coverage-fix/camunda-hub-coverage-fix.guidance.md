@@ -158,7 +158,8 @@ response, is not held by an exclusion, and has no scoped exclusion. Work out **w
      `request-validation/src/analysis/authDeny.ts` (it needs a request that reaches the authority check, so every key
      and body field needs a valid, fixture-backed value); for **404**, `isNotFoundEligible` in
      `request-validation/src/analysis/notFoundFakeId.ts` (it needs an ID it can make up).
-2. **Decide which of two outcomes it is.**
+2. **Decide which of three outcomes it is.** This applies to any operation, not to one endpoint: the question is
+   always "what is the one thing missing, and may I add it?".
    - **Config only (you may fix it).** The only thing missing is an entry in `resourceFixtures` or
      `pathResourceFixtures` in `request-validation.json`, and the value you would map it to is an environment
      variable that setup **already provisions**: for camunda-hub, `scripts/e2e/run-hub.sh` creates the fixtures and
@@ -166,12 +167,23 @@ response, is not held by an exclusion, and has no scoped exclusion. Work out **w
      exact name. (`request-validation/templates/support/global-setup.ts` is the generic setup for other configs; it
      does not decide what exists on Hub.) Add exactly one entry, shaped like its neighbours, nothing else. The
      verify job checks the same thing from `main`: one new entry, whose variable `run-hub.sh` exports.
-   - **Anything else (report only, with a proposal).** That is: a change to generator code or setup code
-     (`request-validation/src/**`, `request-validation/templates/**`, `scripts/e2e/run-hub.sh`), a fixture that setup does not provision yet,
-     a validation order that makes Hub answer 400 before 403 or 404, an exclusion or scoped exclusion (its
-     `reason` is a decision, never overturn it), or a contract that contradicts the test (for example a documented
-     idempotent delete that cannot return 404). Edit nothing. Write `action: "report-only"` and fill `proposal` (see
-     the output section): the file and the change you would make, and why it is not safe for you to make.
+   - **B. A fixture that setup does not create yet (report only, with a ready-to-apply proposal).** The one thing
+     missing is a test fixture (a member, a record the path or body needs) that setup could create through a Hub API
+     call the spec describes. **Never edit `scripts/e2e/run-hub.sh` or any other script, workflow or template
+     yourself**: the PR's live-Hub check checks out the PR's own code and runs it with Hub access the moment the PR
+     opens, before any verification, so a changed script would run unreviewed. Write `action: "report-only"` and put
+     the exact change in `proposal`: the lines to add next to the existing fixtures (modelled on them), the one
+     fixture entry for `request-validation.json`, the floor to raise, and the spec section that describes the call.
+     A person applies it. This holds for any operation, not one endpoint.
+   - **C. Anything else (report only, with a proposal).** That is: a change to generator code
+     (`request-validation/src/**`, `request-validation/templates/**`), a fixture that needs a product setting, a
+     cluster, a feature flag or a call the spec does not describe, a validation order that makes Hub answer 400
+     before 403 or 404 and that no fixture can fix, an exclusion or scoped exclusion (its `reason` is a decision,
+     never overturn it), or a contract that contradicts the test (for example a documented idempotent delete that
+     cannot return 404). Edit nothing. Write `action: "report-only"` and fill `proposal` (see the output section):
+     the file and the change you would make, and why it is not safe for you to make.
+   The verify job checks the same boundaries from GitHub after the run, and fails the run on any PR that touches a
+   file outside `request-validation.json` and `coverage-floors.json`.
 3. **Regenerate and measure** exactly as for a lifecycle gap (step 6 there). For a config-only fix, the operation
    must disappear from `missing["<code>"]` in `/tmp/coverage-after/summary.json`, the `codes["<code>"]` numerator
    must go up by exactly one, and nothing else may go down. If it did not move, drop the change and write
@@ -260,6 +272,9 @@ something the job runs.
 
 - `camunda-hub`: read only, always.
 - `api-test-generator`: a draft PR only, never a push to `main`.
+- Never edit a script, a workflow or a template: `scripts/**`, `.github/**`, `request-validation/src/**`,
+  `request-validation/templates/**`. The PR's live-Hub check runs the PR's own code with Hub access the moment the PR
+  opens, before any verification. A change to any of them is a proposal, never a PR.
 - No suppression, exclusion, known issue, `zeroTestOperations` change, weakened assertion, `test.skip` or `it.skip`, or
   lowered floor. Ever.
 - No PR without a proof that the targeted number went up and the checks pass.
