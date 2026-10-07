@@ -161,6 +161,9 @@ jobs:
           path: ${{ secrets.VAULT_JWT_PATH }}
           role: ${{ secrets.VAULT_JWT_ROLE }}
           jwtGithubAudience: ${{ secrets.VAULT_JWT_AUDIENCE }}
+          # Only the step outputs are used. Exporting would leave the workspace-install PAT in the
+          # environment of every later step, including the agent.
+          exportEnv: false
           secrets: |
             secret/data/products/qa/ci/common CLAUDE_API_KEY | ANTHROPIC_API_KEY ;
             secret/data/products/qa/ci/common GH_TOKEN | GH_PAT ;
@@ -329,8 +332,21 @@ jobs:
           EOF
           )
 
+          # The agent gets a scrubbed environment, not the job's. Earlier steps and actions can leave
+          # credentials in the job environment (Vault exports, the OIDC request token for Vault login),
+          # and the agent runs with --dangerously-skip-permissions on text it did not write. Only what
+          # it needs is passed: its own API key, the scoped PR token (empty in a dry run), its inputs.
           set +e
-          claude -p "$prompt" --dangerously-skip-permissions
+          env -i \
+            HOME="$HOME" PATH="$PATH" LANG=C.UTF-8 CI=true \
+            ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY" \
+            GH_TOKEN_GENERATOR="$GH_TOKEN_GENERATOR" \
+            GITHUB_RUN_ID="$GITHUB_RUN_ID" \
+            COVERAGE_REPORT_DIR="$COVERAGE_REPORT_DIR" \
+            COVERAGE_CANDIDATES_FILE="$COVERAGE_CANDIDATES_FILE" \
+            OPEN_FIX_PRS_FILE="$OPEN_FIX_PRS_FILE" \
+            RECENT_COVERAGE_FIX_PRS_FILE="$RECENT_COVERAGE_FIX_PRS_FILE" \
+            claude -p "$prompt" --dangerously-skip-permissions
           agent_rc=$?
           set -e
           echo "claude exit code: ${agent_rc}"
@@ -352,6 +368,12 @@ jobs:
           set -euo pipefail
           f="${GITHUB_WORKSPACE}/hub-coverage-fix.json"
           jq empty "$f" || { echo "::error::The agent result is not valid JSON."; exit 1; }
+          # The crash sentinel is valid JSON too: a run where the agent wrote no result must not pass.
+          if [ "$(jq -r '.agent_error // false' "$f")" = "true" ]; then
+            echo "::error::The agent did not write a result (crash sentinel)."; exit 1
+          fi
+          jq -e '(.gaps | type) == "array" and (.counts | type) == "object"' "$f" >/dev/null \
+            || { echo "::error::The agent result has no gaps array or counts object."; exit 1; }
           opened="$(jq '[.gaps[]? | select(.pr_url != null and .pr_url != "")] | length' "$f")"
           bad="$(jq --arg re '^https://github.com/camunda/api-test-generator/pull/[0-9]+$' \
             '[.gaps[]? | select(.pr_url != null and .pr_url != "" and (.pr_url | test($re) | not))] | length' "$f")"

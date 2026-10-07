@@ -126,6 +126,22 @@ describe('select', () => {
     expect(s.skipped[0]?.reason).toContain('already has an agent PR');
   });
 
+  it('treats an area as busy when the earlier PR fixed a resource that is no longer missing', () => {
+    // Widget was fixed by a recent merged PR, so only Gadget is still missing. Both are in the same area.
+    const prs = [pr({ state: 'MERGED', headRefName: 'fix/coverage-widget-333' })];
+    const s = select(['Gadget'], rows, prs, now);
+    expect(s.candidates).toEqual([]);
+    expect(s.skipped).toEqual([
+      { resource: 'Gadget', reason: expect.stringContaining('already has an agent PR') },
+    ]);
+  });
+
+  it('ignores an earlier PR whose resource is not in the report at all', () => {
+    const prs = [pr({ headRefName: 'fix/coverage-no-such-resource-1' })];
+    const s = select(['Version'], rows, prs, now);
+    expect(s.candidates.map((c) => c.resource)).toEqual(['Version']);
+  });
+
   it('picks one resource per area when two missing resources share an area', () => {
     const s = select(['Widget', 'Gadget'], rows, [], now);
     expect(s.candidates.map((c) => c.resource)).toEqual(['Gadget']);

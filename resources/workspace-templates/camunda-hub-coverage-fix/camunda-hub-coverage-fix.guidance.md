@@ -140,8 +140,9 @@ Work in `{{.WorkspacePath}}/api-test-generator` (already on `main`).
    first, so set the push URL for this one push:
    `git push "https://x-access-token:${GH_TOKEN_GENERATOR}@github.com/camunda/api-test-generator.git" <branch>`.
    Never push to `main`.
-4. Open the PR as a **draft**:
-   `gh pr create --draft --repo camunda/api-test-generator --base main --label nightly-api-fix --label auto-generated`.
+4. Open the PR as a **draft**, authenticating `gh` with the scoped token for this one command (there is no
+   ambient `GH_TOKEN` in your environment):
+   `GH_TOKEN="$GH_TOKEN_GENERATOR" gh pr create --draft --repo camunda/api-test-generator --base main --label nightly-api-fix --label auto-generated`.
    Title: `test(coverage-fix): add <Resource> create-read-delete lifecycle`. The body has the gap, the
    numbers before and after, the commands you ran, the report run URL, a note that the standalone create, get and
    delete feature specs of the resource are replaced by the lifecycle test, and the line

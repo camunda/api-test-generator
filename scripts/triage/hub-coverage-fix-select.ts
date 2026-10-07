@@ -74,17 +74,23 @@ export function select(createMissing: string[], rows: Row[], prs: AgentPr[], now
   const areaOf = new Map<string, string>();
   for (const r of rows) areaOf.set(r.operationId, r.area);
 
+  // Resolve a prior PR's resource to its area through EVERY create operation in the report, not only
+  // the ones still missing a test: a resource the earlier PR already fixed is no longer in
+  // createMissing, but its area is still busy.
+  const areaByKebab = new Map<string, string>();
+  for (const r of rows) {
+    if (r.operationId.startsWith('create') && r.operationId.length > 'create'.length) {
+      areaByKebab.set(kebab(r.operationId.slice('create'.length)), r.area);
+    }
+  }
+
   // An area is busy when an agent PR for one of its resources is recent or still open.
-  const busyKebabs = new Set<string>();
+  const busyAreas = new Set<string>();
   for (const p of agentPrs) {
     if (!isRecent(p.createdAt, now) && p.state.toLowerCase() !== 'open') continue;
     const k = resourceFromBranch(p.headRefName);
-    if (k) busyKebabs.add(k);
-  }
-  const busyAreas = new Set<string>();
-  for (const resource of createMissing) {
-    const area = areaOf.get(`create${resource}`);
-    if (area && busyKebabs.has(kebab(resource))) busyAreas.add(area);
+    const area = k ? areaByKebab.get(k) : undefined;
+    if (area) busyAreas.add(area);
   }
 
   const candidates: Candidate[] = [];
