@@ -101,7 +101,7 @@ or
 | 🧪 test-generation | api-test-generator | The generator wrote a wrong test, or none, for an endpoint |
 | 🎫 known issue | Already tracked | A Hub issue exists; nothing new to file |
 | 📝 filed | New | A new Hub issue was opened tonight |
-| ⏩ skipped (recent change) | Explained by a Hub change | A Hub product failure that an intentional recent Hub change explains, so no Hub issue is filed; the generated tests or the pin need to catch up. The commit and PR are linked. Never used for 🧪 test-generation: a recent change does not excuse a wrong generated test |
+| ⏩ skipped (recent change) | Hub changed on purpose | Hub changed this endpoint a few days ago, so the failure is expected and no Hub bug is filed. The commit that changed it is linked. Usually nothing to do: the tests are rebuilt from the latest spec every night |
 
 The **thread** under the digest has one line per failure: the category icon, the operation, and links to the Hub
 issue (🎫) or the fix or suppress PR it opened. Pings:
