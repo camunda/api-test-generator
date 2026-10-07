@@ -115,7 +115,7 @@ Each link tells you whether something was done and what you do next:
 | ♻️ | An open PR already covers this, so none was opened | Review that PR |
 | ⛔ | A **suppress PR**: it switches the test off until the Hub bug is fixed. This is the only PR that skips a test | Review the PR |
 | ⏳ | No Hub bug filed: Hub changed this endpoint recently and the agent could not tell who is wrong | Investigate manually |
-| 🔗 | A recent Hub commit touched this endpoint. A hint only: it does **not** mean a PR exists | Look for a 🛠️ on the same line. With no 🛠️ the generator owner needs to look |
+| 🔗 | A recent Hub commit touched this endpoint. A hint only: it does **not** mean a PR exists | Look for a 🛠️ or ♻️ on the same line. With neither, the generator owner needs to look |
 | ⚠️ | The agent tried to open an issue or PR and failed | The generator owner fixes it by hand |
 
 Pings:

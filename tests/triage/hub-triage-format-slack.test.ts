@@ -95,6 +95,14 @@ describe('triage Slack thread: related_commit links', () => {
     expect(noUrl).not.toContain(':hourglass_flowing_sand:');
   });
 
+  it('keeps the link icon for a skipped non-product finding', () => {
+    for (const category of ['infrastructure', 'flakiness']) {
+      const text = threadLine('8fa152b500 (#1)', { category, subcategory: null, action: 'skip' });
+      expect(text).toContain(':link:');
+      expect(text).not.toContain(':hourglass_flowing_sand:');
+    }
+  });
+
   it('does not link a number followed by letters as a PR', () => {
     const text = threadLine('8fa152b500 (#123abc)');
     expect(text).not.toContain('/pull/');

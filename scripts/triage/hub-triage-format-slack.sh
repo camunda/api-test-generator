@@ -256,10 +256,11 @@ case "$MODE" in
                "<https://github.com/camunda/camunda-hub/pull/\(.n)|#\(.n)>");
       # The icon follows the reason, not the bare action: skip is also used when an open fix PR
       # already covers a test-generation finding. :hourglass_flowing_sand: only when a product
-      # finding was held back because of the commit (skip, no fix PR, not test-generation),
-      # otherwise :link: (context only).
+      # finding was held back because of the commit (skip, category product, no fix PR, not
+      # test-generation), otherwise :link: (context only).
       def recentChangeSkip(f):
         (f.action // "") == "skip"
+        and (f.category // "") == "product"
         and (f.subcategory // "") != "test-generation"
         and ((f.fix_pr_url // "") | tostring | length) == 0;
       def relatedCommitNote(x; f):
