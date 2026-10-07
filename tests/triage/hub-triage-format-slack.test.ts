@@ -12,7 +12,7 @@ const script = join(
 
 const HUB = 'https://github.com/camunda/camunda-hub';
 
-function threadLine(relatedCommit: unknown): string {
+function threadLine(relatedCommit: unknown, action = 'report-only'): string {
   const dir = mkdtempSync(join(tmpdir(), 'triage-format-'));
   const file = join(dir, 'hub-triage.json');
   writeFileSync(
@@ -26,7 +26,7 @@ function threadLine(relatedCommit: unknown): string {
           subcategory: 'test-generation',
           expected: '400',
           actual: '404',
-          action: 'report-only',
+          action,
           related_commit: relatedCommit,
         },
       ],
@@ -38,7 +38,7 @@ function threadLine(relatedCommit: unknown): string {
 describe('triage Slack thread: related_commit links', () => {
   it('links a leading sha to the camunda-hub commit and #N to the camunda-hub PR', () => {
     const text = threadLine('8fa152b500 feat(catalog): add endpoint (#28600)');
-    expect(text).toContain(`:fast_forward: <${HUB}/commit/8fa152b500|8fa152b500>`);
+    expect(text).toContain(`:link: <${HUB}/commit/8fa152b500|8fa152b500>`);
     expect(text).toContain(`(<${HUB}/pull/28600|#28600>)`);
   });
 
@@ -51,13 +51,13 @@ describe('triage Slack thread: related_commit links', () => {
   it('leaves an existing URL as a single link, without re-linking it', () => {
     const url = `${HUB}/pull/28600`;
     const text = threadLine(url);
-    expect(text).toContain(`:fast_forward: <${url}>`);
+    expect(text).toContain(`:link: <${url}>`);
     expect(text).not.toContain('commit/');
   });
 
   it('leaves plain text with no sha or #N unchanged', () => {
     const text = threadLine('explained by a recent change');
-    expect(text).toContain(':fast_forward: explained by a recent change');
+    expect(text).toContain(':link: explained by a recent change');
     expect(text).not.toContain('github.com');
   });
 
@@ -71,6 +71,15 @@ describe('triage Slack thread: related_commit links', () => {
     const text = threadLine('8fa152b500 (#1, #22)');
     expect(text).toContain(`<${HUB}/pull/1|#1>`);
     expect(text).toContain(`<${HUB}/pull/22|#22>`);
+  });
+
+  it('uses the skip icon only when the finding was skipped, and a link icon otherwise', () => {
+    const skipped = threadLine('8fa152b500 (#1)', 'skip');
+    expect(skipped).toContain(':fast_forward:');
+    expect(skipped).not.toContain(':link:');
+    const fixed = threadLine('8fa152b500 (#1)', 'fix-pr');
+    expect(fixed).toContain(':link:');
+    expect(fixed).not.toContain(':fast_forward:');
   });
 
   it('prints no related-commit marker when the value is empty or not a string', () => {

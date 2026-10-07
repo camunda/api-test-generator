@@ -76,7 +76,7 @@ If the failing operation matches a `knownIssue` (by `operationId` or the issue's
 
 ## Product-bug commit dedup (the core rule)
 
-This applies ONLY to failures you classify as **product** (`subcategory` null) that are **not** an already-known issue. It never applies to `subcategory: "test-generation"`: a recent camunda-hub commit does not excuse a broken generated test. A newly added operation always has a recent commit, and that is exactly when the generator needs a fix, so skipping it would leave the test red every night with no owner. A test-generation failure is handled only by "Fixing a test-generation / coverage bug" below: open the fix PR, or `report-only` with the reason. It is never `action: "skip"` because of a recent commit. Put the recent commit in `related_commit` only as context.
+This applies ONLY to failures you classify as **product** (`subcategory` null) that are **not** an already-known issue. It never applies to `subcategory: "test-generation"`: a recent camunda-hub commit does not excuse a broken generated test. A newly added operation always has a recent commit, and that is exactly when the generator needs a fix, so skipping it would leave the test red every night with no owner. A test-generation failure is handled only by "Fixing a test-generation / coverage bug" below: open the fix PR, or `report-only` with the reason. It is never `action: "skip"` because of a recent commit. Put the recent commit in `related_commit` only as context: the Slack thread shows it with a link icon, and only `action: "skip"` gets the skip icon. Count a finding in `counts.skipped_recent_change` only when its `action` is `"skip"` because of a recent commit.
 
 For any failure you classify as **product** and that is **not** an already-known issue:
 

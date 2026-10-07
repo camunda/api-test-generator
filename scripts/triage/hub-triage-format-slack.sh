@@ -254,10 +254,14 @@ case "$MODE" in
               "<https://github.com/camunda/camunda-hub/commit/\(.sha)|\(.sha[0:10])>")
         | gsub("#(?<n>[0-9]+)";
                "<https://github.com/camunda/camunda-hub/pull/\(.n)|#\(.n)>");
-      def relatedCommitNote(x):
-        if has_url(x) and (x | test("^https?://")) then compactLink(x; ":fast_forward:")
-        elif (x | type) == "string" and (x | length) > 0 then ":fast_forward: " + commitRefLinks(x)
-        else "" end;
+      # The icon follows the decision of the agent, not the mere presence of a commit: :fast_forward:
+      # only when the finding was skipped for it, otherwise :link: (context only, e.g. a fix PR
+      # was opened for a new endpoint).
+      def relatedCommitNote(x; action):
+        (if action == "skip" then ":fast_forward:" else ":link:" end) as $icon
+        | if has_url(x) and (x | test("^https?://")) then compactLink(x; $icon)
+          elif (x | type) == "string" and (x | length) > 0 then $icon + " " + commitRefLinks(x)
+          else "" end;
       # Compact per-finding line: title (category, operationId, short
       # expected/actual) + one links line (icon+URL only, whichever are
       # present — nothing shown for whichever are absent) + medic ping(s) +
@@ -268,7 +272,7 @@ case "$MODE" in
         ((((f.action // "") == "fix-pr" and has_url(f.fix_pr_url)) or has_url(f.suppress_pr_url)) or undecided(f)) as $needs_ta_medic
         | ([
             (if (f.known_issue // false) then compactLink(f.known_issue_url; ":ticket:") else "" end),
-            relatedCommitNote(f.related_commit),
+            relatedCommitNote(f.related_commit; (f.action // "")),
             compactLink(f.issue_url; ":memo:"),
             compactLink(f.fix_pr_url; if (f.action // "") == "skip" then ":recycle:" else ":hammer_and_wrench:" end),
             compactLink(f.suppress_pr_url; ":no_entry:")
