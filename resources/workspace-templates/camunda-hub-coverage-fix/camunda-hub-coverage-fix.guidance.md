@@ -90,21 +90,27 @@ an entry in `entity-kinds.json` that names its create, get and delete operations
      fixture, it is **not** a small fix and is report-only. A note in `entity-kinds.json` that says a template is
      still missing may be out of date: try the entry first, and let the regenerated suite and the report
      numbers (step 6) decide;
-   - **a test that names the separate feature specs of its create, get and delete operations.** Adding an entry
-     replaces the standalone `createX.feature.spec.ts`, `getX.feature.spec.ts` and `deleteX.feature.spec.ts` with
+   - **either no test names the separate feature specs of its create, get and delete operations, or the one
+     that does can be adapted under the four conditions below.** Adding an entry replaces the standalone
+     `createX.feature.spec.ts`, `getX.feature.spec.ts` and `deleteX.feature.spec.ts` with
      the one lifecycle test (this is how Project, Folder, File and Workspace already work). Search first:
      `grep -n "<createOp>\|<getOp>\|<deleteOp>" configs/camunda-hub/regression-invariants.test.ts`. Read each match.
-     A test that only uses the create step inside another operation's chain is fine (ProjectSnapshot has these).
+     No match, or a test that only uses the create step inside another operation's chain, is fine and needs no
+     test change (ProjectSnapshot is like this).
      A test that needs the standalone `.feature.spec.ts` of one of these operations (Version has one: a list of
      its operations that each must have a feature spec) would fail after the entry. You may then **adapt that
      one test**, and only under these conditions:
-       - the same check stays in force: for the three replaced operations, require the emitted `test(` in the
-         resource's `EntityLifecycle/<Resource>.lifecycle.spec.ts` instead of in the standalone file;
+       - the same check stays in force, per operation: for each of the three replaced operations, the test must
+         require evidence of that operation in the resource's `EntityLifecycle/<Resource>.lifecycle.spec.ts`. The
+         emitted lifecycle steps carry `operationId: "<op>"` (and the labels `invoke (establish): <op>` and
+         `invoke (revoke): <op>`), so assert that the generated file contains the create, get and delete
+         operation ids. Do not use the shared `test(` declaration alone: it depends only on the resource name
+         and would pass even if a step called the wrong operation;
        - every other operation in that test keeps its check exactly as it is;
        - nothing is deleted, skipped or loosened (rule 1), and no other test is touched;
        - the PR body gets its own section, **"Test change: needs careful review"**, with the test's name, the
          lines before and after, and why the new check is as strict as the old one.
-     If you cannot meet all four conditions, add nothing and record `report-only`.
+   If you cannot meet all four conditions, add nothing and record `report-only`.
    Otherwise record `action: "report-only"` and say what is missing.
 5. **Make the change.** Add the one entry to `entity-kinds.json`. Keep the file's order and formatting.
    If the new entry resolves an omission that the top-level `$comment` describes (for example "a Version
