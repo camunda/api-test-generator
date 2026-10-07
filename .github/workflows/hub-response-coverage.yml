@@ -261,6 +261,7 @@ jobs:
       # Reply in the weekly message's thread (same pattern as the nightly known-issue replies). Only when the
       # weekly message went out and the agent has PRs waiting for review.
       - name: Notify Slack (coverage-fix agent PRs, thread reply)
+        id: slack-agent-prs
         if: always() && steps.slack-notify.outputs.ts != '' && steps.agent-prs.outputs.text != ''
         continue-on-error: true
         uses: slackapi/slack-github-action@v2
@@ -279,4 +280,4 @@ jobs:
         if: always()
         uses: ./.github/actions/fail-if-slack-failed
         with:
-          outcomes: "${{ (steps.slack.outcome == 'success' && steps.slack.outputs.SLACK_BOT_TOKEN == '') && 'failure' || steps.slack.outcome }} ${{ steps.message.outcome }} ${{ steps.slack-notify.outcome }}"
+          outcomes: "${{ (steps.slack.outcome == 'success' && steps.slack.outputs.SLACK_BOT_TOKEN == '') && 'failure' || steps.slack.outcome }} ${{ steps.message.outcome }} ${{ steps.slack-notify.outcome }} ${{ steps.slack-agent-prs.outcome }}"
