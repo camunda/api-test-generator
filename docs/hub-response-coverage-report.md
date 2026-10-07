@@ -45,11 +45,16 @@ Across positive and negative tests
 • N endpoints are missing a test for a success, 400, 401, 404 or 409 response
 
 Tracking issue · Area issues: ...
+```
+
+When the coverage-fix agent has pull requests waiting for review, a reply appears **in the thread** of this message:
+
+```
 🤖 Coverage-fix agent: 1 PR waiting for review. These were opened by the agent, not a person; please review before merging: #690 ...
 ```
 
 - "x of y" means: y endpoints document that response, x of them have a test that asserts it. Not every line counts endpoints: "Optional request fields" counts **fields** (63 of 68 fields), and the lifecycle lines count **resources** or **links**.
-- The last line, starting with the robot, appears only when the coverage-fix agent (see "The coverage-fix agent" below) has pull requests waiting for review. It says how many and links each one. A week without such PRs has no extra line.
+- The thread reply, starting with the robot, appears only when the coverage-fix agent (see "The coverage-fix agent" below) has pull requests waiting for review. It says how many and links each one. A week without such PRs has no reply, and the main message never changes.
 - A number in brackets is the change since the previous scheduled report. Nothing is shown when it is unchanged or there is no previous report.
 - A "resource" is something the API lets you create, read by key and delete (files, folders, projects, and so on; one nested under a parent key counts too); it needs a
   restore flow too if a delete is soft: the key path has a `.../restoration` endpoint and the collection has a
@@ -166,7 +171,7 @@ review"** that shows the check before and after. Read that section first.
 
 **How you recognise its pull requests.** They are drafts, opened by the `qa-processes` bot, on a branch starting with
 `fix/coverage-`, with the labels `nightly-api-fix`, `auto-generated` and `hub`. The body ends with
-"Found by the camunda-hub coverage-fix agent". The weekly Slack message lists the ones still open.
+"Found by the camunda-hub coverage-fix agent". The thread under the weekly Slack message lists the ones still open.
 
 **Who reviews them.** A person, always, like any other pull request. A pull request that sits unreviewed is closed by the
 same stale-PR clean-up as the nightly fix pull requests.

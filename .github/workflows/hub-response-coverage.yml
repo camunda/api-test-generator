@@ -205,14 +205,21 @@ jobs:
           vault-jwt-role: ${{ secrets.VAULT_JWT_ROLE }}
           vault-jwt-audience: ${{ secrets.VAULT_JWT_AUDIENCE }}
 
-      # One extra Slack line when the coverage-fix agent has open PRs, so nobody mistakes them for a person's PRs
-      # or leaves them unreviewed. Empty when there are none. Never fails the run: the weekly message matters more.
+      # The coverage-fix agent's open PRs, posted as a reply in the weekly message's thread so the channel
+      # message stays the same. Empty when there are none (no reply). Never fails the run: the weekly message
+      # matters more.
       - name: List the coverage-fix agent's open PRs
+        id: agent-prs
         if: always() && steps.slack.outputs.SLACK_BOT_TOKEN != ''
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
-        run: bash .github/scripts/hub-coverage-agent-prs.sh coverage-report/agent-prs.txt
+        run: |
+          set -euo pipefail
+          bash .github/scripts/hub-coverage-agent-prs.sh coverage-report/agent-prs.txt
+          if [ -s coverage-report/agent-prs.txt ]; then
+            echo "text=$(cat coverage-report/agent-prs.txt)" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Build Slack message
         id: message
@@ -226,9 +233,6 @@ jobs:
             fi
             if [ -s coverage-report/area-links.txt ]; then
               text="$text"$'\n'"Area issues: $(paste -sd'\t' coverage-report/area-links.txt | sed 's/\t/ · /g')"
-            fi
-            if [ -s coverage-report/agent-prs.txt ]; then
-              text="$text"$'\n'"$(cat coverage-report/agent-prs.txt)"
             fi
           else
             text=":warning: *camunda-hub response coverage* could not run this week — see ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
@@ -251,6 +255,23 @@ jobs:
             {
               "channel": "#camunda-hub-nightly-test-results",
               "text": ${{ toJSON(steps.message.outputs.text) }},
+              "mrkdwn": true
+            }
+
+      # Reply in the weekly message's thread (same pattern as the nightly known-issue replies). Only when the
+      # weekly message went out and the agent has PRs waiting for review.
+      - name: Notify Slack (coverage-fix agent PRs, thread reply)
+        if: always() && steps.slack-notify.outputs.ts != '' && steps.agent-prs.outputs.text != ''
+        continue-on-error: true
+        uses: slackapi/slack-github-action@v2
+        with:
+          method: chat.postMessage
+          token: ${{ steps.slack.outputs.SLACK_BOT_TOKEN }}
+          payload: |
+            {
+              "channel": "#camunda-hub-nightly-test-results",
+              "thread_ts": ${{ toJSON(steps.slack-notify.outputs.ts) }},
+              "text": ${{ toJSON(steps.agent-prs.outputs.text) }},
               "mrkdwn": true
             }
 
