@@ -793,11 +793,12 @@ against the `knownIssue` configs, and checks `coverage.json`'s
 `summary.unmappedOperations` every run (these never show up as a failing test, so
 an all-green suite pair can still hide a real coverage gap). **The agent's**
 write access is asymmetric: it gets `camunda-hub` issues only, ever, never code
-or a PR there — a genuine product bug (no explaining recent commit) gets a
+or a PR there — a genuine product bug (no explaining recent commit; a recent commit never excuses a
+test-generation failure, which is fixed or reported instead) gets a
 filed/linked `camunda-hub` issue (the OpenAPI v2 spec is the request/response
 oracle), fingerprint-deduped so it's filed once, not
 every night. `api-test-generator` may instead get a PR (never a direct push to
-`main`), for three cases: (1) a test-generation bug or (2) an unmapped operation,
+`main`, labelled `nightly-api-fix` and `auto-generated`), for three cases: (1) a test-generation bug or (2) an unmapped operation,
 each with an obvious, minimal, safe fix; or (3) a **confirmed product bug**,
 where instead of a code fix the agent **suppresses the affected test**
 (`positive-suppress.json` / `request-validation.json`, scoped to the exact
