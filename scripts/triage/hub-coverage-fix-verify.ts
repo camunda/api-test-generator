@@ -129,12 +129,14 @@ function runResource(branch: string, runId: string): string | null {
   return middle === '' ? null : middle;
 }
 
-// The PR list is the newest `limit` PRs. If it is full and its oldest entry is still newer than the baseline,
-// PRs from the run may have fallen off the end: stop instead of verifying an incomplete list.
-export function assertComplete(prs: RunPr[], baseline: number, limit: number): void {
-  if (prs.length >= limit && Math.min(...prs.map((p) => p.number)) > baseline) {
+// The list holds every PR of the agent's account, newest first, up to `limit`. A full list may have lost
+// its oldest entries, and an old PR that is reopened or given a commit during the run could be one of them,
+// so a full list is never accepted. (A list that is empty is caught by the workflow, which knows the account
+// has opened PRs before.)
+export function assertComplete(prs: RunPr[], limit: number): void {
+  if (prs.length >= limit) {
     throw new Error(
-      `the PR list holds ${prs.length} PRs, all newer than #${baseline}: it may be cut off, so the run cannot be verified`,
+      `the list of the agent account's PRs holds ${prs.length} PRs, the most it can return: it may be cut off, so the run cannot be verified`,
     );
   }
 }
@@ -252,7 +254,7 @@ if (process.argv[1] && import.meta.filename === process.argv[1]) {
     const prs = parseRunPrs(JSON.parse(readFileSync(prsPath, 'utf8')));
     const reported = reportedPrUrls(JSON.parse(readFileSync(resultPath, 'utf8')));
     const preRun = parsePreRun(JSON.parse(readFileSync(preRunPath, 'utf8')));
-    assertComplete(prs, baseline, limit);
+    assertComplete(prs, limit);
     const violations = verify(
       prs,
       selection,

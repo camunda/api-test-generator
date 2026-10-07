@@ -223,15 +223,12 @@ describe('assertComplete', () => {
   const list = (numbers: number[]): RunPr[] => numbers.map((n) => pr(n));
 
   it('accepts a list that is not full', () => {
-    expect(() => assertComplete(list([101, 102]), 100, 200)).not.toThrow();
+    expect(() => assertComplete(list([101, 102]), 1000)).not.toThrow();
   });
 
-  it('accepts a full list that reaches back to the baseline', () => {
-    expect(() => assertComplete(list([100, 101, 102]), 100, 3)).not.toThrow();
-  });
-
-  it('rejects a full list that is entirely newer than the baseline: PRs may have fallen off', () => {
-    expect(() => assertComplete(list([101, 102, 103]), 100, 3)).toThrow('may be cut off');
+  it('rejects a full list, whatever its numbers, because older PRs may have fallen off the end', () => {
+    expect(() => assertComplete(list([1, 2, 3]), 3)).toThrow('may be cut off');
+    expect(() => assertComplete(list([101, 102, 103]), 3)).toThrow('may be cut off');
   });
 });
 
