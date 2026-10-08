@@ -13,7 +13,8 @@
 //     not before they run: once this check passes, the verify job starts the live Hub run on the verified commit
 //     (hub-coverage-fix-live-check.sh), so lines of an allowed shape execute with Hub access before anyone has read
 //     the diff. The shape check is what makes that acceptable; endpoint and body semantics are left to the reviewer.
-//     (A lifecycle PR is not started automatically: its ontology and test file are not checked that way.)
+//     (A lifecycle PR is started the same way when it changes only the floors and one plain-data entry of
+//     entity-kinds.json, see checkEntityKinds; one that also edits the invariants test file, which is code, stays manual.)
 //   - A lifecycle PR's change to entity-kinds.json must be exactly one new entry for the selected resource, of a
 //     plain data shape (see checkEntityKinds); the invariants test file is arbitrary code and is not checked that way.
 //   - Neither may lower a floor, or add a zeroTestOperations entry.
@@ -273,25 +274,25 @@ const ENTITY_KEYS = [
 // The file drives the generator, so its content is data only: names and one description string.
 function checkEntityKinds(base: unknown, head: unknown, candidate: Candidate): string[] {
   const where = 'entity-kinds.json';
-  if (
-    !isRecord(base) ||
-    !isRecord(head) ||
-    !Array.isArray(base.kinds) ||
-    !Array.isArray(head.kinds)
-  ) {
+  if (!isRecord(base) || !isRecord(head)) {
+    return [`${where}: its content could not be read on both sides`];
+  }
+  const was: unknown = base.kinds;
+  const now: unknown = head.kinds;
+  if (!Array.isArray(was) || !Array.isArray(now)) {
     return [`${where}: its content could not be read on both sides`];
   }
   const out: string[] = [];
   for (const key of new Set([...Object.keys(base), ...Object.keys(head)])) {
     if (key !== 'kinds' && !same(base[key], head[key])) out.push(`${where}: "${key}" changed`);
   }
-  if (head.kinds.length !== base.kinds.length + 1) {
+  if (now.length !== was.length + 1) {
     return [...out, `${where}: exactly one entry must be added to kinds`];
   }
-  if (!base.kinds.every((k, i) => same(k, head.kinds[i]))) {
+  if (!was.every((k, i) => same(k, now[i]))) {
     out.push(`${where}: an existing entry was changed, removed or moved`);
   }
-  const entry: unknown = head.kinds[head.kinds.length - 1];
+  const entry: unknown = now[now.length - 1];
   if (!isRecord(entry)) return [...out, `${where}: the new entry is not an object`];
   for (const key of Object.keys(entry)) {
     if (!ENTITY_KEYS.includes(key)) out.push(`${where}: the new entry has an unknown key "${key}"`);
