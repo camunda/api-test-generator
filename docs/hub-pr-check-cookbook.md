@@ -5,8 +5,7 @@
 > you know Hub, not how the generator works; its few terms (generator gap, classifier, fingerprint) are explained in "Words used". The sections after it are reference for people who maintain the check. The check is
 > **informational, not required**: a red result does not block merging.
 
-Messages in `#camunda-hub-nightly-test-results` (nightly run, triage, spec bump, re-enable check, weekly report) are explained in
-[hub-nightly-cookbook.md](hub-nightly-cookbook.md).
+**Looking for something else?** This guide is only about the check on a single camunda-hub PR. For the nightly run, the spec-bump and re-enable alerts and the weekly report, see [how-it-works.md](how-it-works.md).
 
 ## Start here
 
