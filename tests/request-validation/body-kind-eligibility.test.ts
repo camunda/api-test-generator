@@ -2,20 +2,31 @@ import { describe, expect, it } from 'vitest';
 import {
   generateAllOfConflicts,
   generateAllOfMissingRequired,
+  isAllOfConflictEligible,
+  isAllOfMissingRequiredEligible,
 } from '../../request-validation/src/analysis/allOf.js';
 import {
-  eligibleAllOfKinds,
-  eligibleOneOfKinds,
+  generateMissingBody,
   isMissingBodyEligible,
-} from '../../request-validation/src/analysis/bodyKindEligibility.js';
-import { generateMissingBody } from '../../request-validation/src/analysis/bodyTopLevel.js';
+} from '../../request-validation/src/analysis/bodyTopLevel.js';
 import {
   generateOneOfCrossBleed,
   generateOneOfMultiAmbiguous,
+  isOneOfCrossBleedEligible,
+  isOneOfMultiAmbiguousEligible,
 } from '../../request-validation/src/analysis/oneOfAdvanced.js';
-import { generateOneOfAmbiguous } from '../../request-validation/src/analysis/oneOfAmbiguous.js';
-import { generateOneOfNoneMatch } from '../../request-validation/src/analysis/oneOfNoneMatch.js';
-import { generateUnionViolations } from '../../request-validation/src/analysis/unionViolations.js';
+import {
+  generateOneOfAmbiguous,
+  isOneOfAmbiguousEligible,
+} from '../../request-validation/src/analysis/oneOfAmbiguous.js';
+import {
+  generateOneOfNoneMatch,
+  isOneOfNoneMatchEligible,
+} from '../../request-validation/src/analysis/oneOfNoneMatch.js';
+import {
+  generateUnionViolations,
+  isUnionEligible,
+} from '../../request-validation/src/analysis/unionViolations.js';
 import type { OperationModel, SchemaFragment } from '../../request-validation/src/model/types.js';
 
 /**
@@ -25,8 +36,9 @@ import type { OperationModel, SchemaFragment } from '../../request-validation/sr
  * (and `missing-body` only for a required body). Every search endpoint then showed about eleven kinds as missing
  * that nothing could generate.
  *
- * `bodyKindEligibility.ts` repeats each generator's guard. This test runs the real generators over a set of body
- * shapes and checks that a kind is eligible exactly when its generator builds a scenario, so the two cannot drift.
+ * Each generator exports its exact eligibility and uses it itself; generate.ts calls the same functions. This test
+ * runs the real generators over a set of body shapes and checks that a kind is eligible exactly when its generator
+ * builds a scenario, a guard against a generator that stops using its own exported check.
  */
 const KINDS = [
   'missing-body',
@@ -77,9 +89,17 @@ function produced(o: OperationModel): Set<string> {
   );
 }
 
+/** What generate.ts asks, kind by kind: the generator's own exported eligibility. */
 function eligible(o: OperationModel): Set<string> {
-  const out = new Set([...eligibleOneOfKinds(o), ...eligibleAllOfKinds(o)]);
+  const out = new Set<string>();
   if (isMissingBodyEligible(o)) out.add('missing-body');
+  if (isUnionEligible(o)) out.add('union');
+  if (isOneOfAmbiguousEligible(o)) out.add('oneof-ambiguous');
+  if (isOneOfNoneMatchEligible(o)) out.add('oneof-none-match');
+  if (isOneOfMultiAmbiguousEligible(o)) out.add('oneof-multi-ambiguous');
+  if (isOneOfCrossBleedEligible(o)) out.add('oneof-cross-bleed');
+  if (isAllOfMissingRequiredEligible(o)) out.add('allof-missing-required');
+  if (isAllOfConflictEligible(o)) out.add('allof-conflict');
   return out;
 }
 
@@ -150,14 +170,15 @@ describe('body kind eligibility matches what the generators build', () => {
   });
 
   it('keeps the kinds that are generated: a root oneOf and a root allOf stay eligible', () => {
-    expect(eligibleOneOfKinds(op({ oneOf: [a, b, c] }))).toEqual(
-      new Set([
-        'union',
+    const o = op({ oneOf: [a, b, c] });
+    expect([...eligible(o)].sort()).toEqual(
+      [
         'oneof-ambiguous',
-        'oneof-none-match',
-        'oneof-multi-ambiguous',
         'oneof-cross-bleed',
-      ]),
+        'oneof-multi-ambiguous',
+        'oneof-none-match',
+        'union',
+      ].sort(),
     );
     expect(
       isMissingBodyEligible(op(obj({ name: { type: 'string' } }), { bodyRequired: true })),

@@ -6,6 +6,36 @@ interface Opts {
   capPerOperation?: number;
 }
 
+/** Two object variants that both list `required`: the pair a merged, ambiguous body can be built from. */
+export function isAmbiguousPair(
+  a: SchemaFragment | undefined,
+  b: SchemaFragment | undefined,
+): boolean {
+  return (
+    !!a &&
+    !!b &&
+    a.type === 'object' &&
+    b.type === 'object' &&
+    Array.isArray(a.required) &&
+    Array.isArray(b.required)
+  );
+}
+
+/**
+ * Whether a ROOT oneOf has such a pair (a oneOf nested inside a property is not looked at). generate.ts reuses this
+ * for the coverage report's applicability.
+ */
+export function isOneOfAmbiguousEligible(op: OperationModel): boolean {
+  const root = op.requestBodySchema;
+  if (!root || !Array.isArray(root.oneOf) || root.oneOf.length < 2) return false;
+  for (let i = 0; i < root.oneOf.length; i++) {
+    for (let j = i + 1; j < root.oneOf.length; j++) {
+      if (isAmbiguousPair(root.oneOf[i], root.oneOf[j])) return true;
+    }
+  }
+  return false;
+}
+
 export function generateOneOfAmbiguous(ops: OperationModel[], opts: Opts): ValidationScenario[] {
   const out: ValidationScenario[] = [];
   for (const op of ops) {
@@ -19,11 +49,10 @@ export function generateOneOfAmbiguous(ops: OperationModel[], opts: Opts): Valid
         if (opts.capPerOperation && produced >= opts.capPerOperation) break;
         const a = root.oneOf[i];
         const b = root.oneOf[j];
-        if (!a || !b || a.type !== 'object' || b.type !== 'object') continue;
-        if (!Array.isArray(a.required) || !Array.isArray(b.required)) continue;
+        if (!a || !b || !isAmbiguousPair(a, b)) continue;
         const merged: Record<string, unknown> = {};
-        for (const r of a.required) merged[r] = placeholder(a.properties?.[r]);
-        for (const r of b.required) merged[r] = placeholder(b.properties?.[r]);
+        for (const r of a.required ?? []) merged[r] = placeholder(a.properties?.[r]);
+        for (const r of b.required ?? []) merged[r] = placeholder(b.properties?.[r]);
         out.push({
           id: makeId([op.operationId, 'oneofAmbiguous', String(i), String(j)]),
           operationId: op.operationId,

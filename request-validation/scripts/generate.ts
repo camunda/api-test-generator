@@ -10,7 +10,12 @@ import {
   generateNestedAdditionalProps,
   generateUniqueItemsViolations,
 } from '../src/analysis/advancedSchema.js';
-import { generateAllOfConflicts, generateAllOfMissingRequired } from '../src/analysis/allOf.js';
+import {
+  generateAllOfConflicts,
+  generateAllOfMissingRequired,
+  isAllOfConflictEligible,
+  isAllOfMissingRequiredEligible,
+} from '../src/analysis/allOf.js';
 import {
   generateAuthAbsent,
   generateAuthInvalid,
@@ -18,11 +23,10 @@ import {
 } from '../src/analysis/authAbsent.js';
 import { generateAuthDeny, isAuthDenyEligible } from '../src/analysis/authDeny.js';
 import {
-  eligibleAllOfKinds,
-  eligibleOneOfKinds,
+  generateBodyTopTypeMismatch,
+  generateMissingBody,
   isMissingBodyEligible,
-} from '../src/analysis/bodyKindEligibility.js';
-import { generateBodyTopTypeMismatch, generateMissingBody } from '../src/analysis/bodyTopLevel.js';
+} from '../src/analysis/bodyTopLevel.js';
 import { generateBodyTypeMismatch } from '../src/analysis/bodyTypeMismatch.js';
 import { generateConstraintViolations } from '../src/analysis/constraintViolations.js';
 import { generateDeepMissingRequired } from '../src/analysis/deepMissingRequired.js';
@@ -44,9 +48,17 @@ import {
   generateDiscriminatorStructureMismatch,
   generateOneOfCrossBleed,
   generateOneOfMultiAmbiguous,
+  isOneOfCrossBleedEligible,
+  isOneOfMultiAmbiguousEligible,
 } from '../src/analysis/oneOfAdvanced.js';
-import { generateOneOfAmbiguous } from '../src/analysis/oneOfAmbiguous.js';
-import { generateOneOfNoneMatch } from '../src/analysis/oneOfNoneMatch.js';
+import {
+  generateOneOfAmbiguous,
+  isOneOfAmbiguousEligible,
+} from '../src/analysis/oneOfAmbiguous.js';
+import {
+  generateOneOfNoneMatch,
+  isOneOfNoneMatchEligible,
+} from '../src/analysis/oneOfNoneMatch.js';
 import { generatePaginationCursorInvalid } from '../src/analysis/paginationCursor.js';
 import {
   findPaginationLimitField,
@@ -71,7 +83,7 @@ import {
   isParamTypeMismatchEligible,
 } from '../src/analysis/parameters.js';
 import { generateTypeMismatch } from '../src/analysis/typeMismatch.js';
-import { generateUnionViolations } from '../src/analysis/unionViolations.js';
+import { generateUnionViolations, isUnionEligible } from '../src/analysis/unionViolations.js';
 import { loadRequestValidationConfig, type RequestValidationConfig } from '../src/config.js';
 import { STANDALONE_FIXTURE_FILES } from '../src/emit/materializeStandalone.js';
 import { emitQaTests } from '../src/emit/qaEmitter.js';
@@ -1391,9 +1403,9 @@ async function main() {
       const body = op.requestBodySchema || op.multipartSchema;
       if (body) {
         const f = analyzeBodyFeatures(body);
-        // Body kinds the generators build only from the ROOT of the body, or only for a required body, repeat
-        // their guard here (bodyKindEligibility.ts): a oneOf or allOf nested in a property (a search `filter`)
-        // or an optional body must not read as a missing test no generator could build.
+        // Body kinds the generators build only from the ROOT of the body, or only for a required body, reuse their
+        // generator's exact eligibility (exported from its own file): a oneOf or allOf nested in a property (a
+        // search `filter`) or an optional body must not read as a missing test no generator could build.
         if (isMissingBodyEligible(op)) applicable.add('missing-body');
         if (f.hasObject) {
           // required fields
@@ -1432,19 +1444,17 @@ async function main() {
           if (f.hasNestedObject) applicable.add('nested-additional-prop');
         }
         if (f.hasEnums) applicable.add('enum-violation');
-        const oneOfKinds = eligibleOneOfKinds(op);
-        if (oneOfKinds.has('union')) applicable.add('union');
-        if (oneOfKinds.has('oneof-ambiguous')) applicable.add('oneof-ambiguous');
-        if (oneOfKinds.has('oneof-none-match')) applicable.add('oneof-none-match');
-        if (oneOfKinds.has('oneof-multi-ambiguous')) applicable.add('oneof-multi-ambiguous');
-        if (oneOfKinds.has('oneof-cross-bleed')) applicable.add('oneof-cross-bleed');
+        if (isUnionEligible(op)) applicable.add('union');
+        if (isOneOfAmbiguousEligible(op)) applicable.add('oneof-ambiguous');
+        if (isOneOfNoneMatchEligible(op)) applicable.add('oneof-none-match');
+        if (isOneOfMultiAmbiguousEligible(op)) applicable.add('oneof-multi-ambiguous');
+        if (isOneOfCrossBleedEligible(op)) applicable.add('oneof-cross-bleed');
         if (f.hasDiscriminator) {
           applicable.add('discriminator-mismatch');
           applicable.add('discriminator-structure-mismatch');
         }
-        const allOfKinds = eligibleAllOfKinds(op);
-        if (allOfKinds.has('allof-missing-required')) applicable.add('allof-missing-required');
-        if (allOfKinds.has('allof-conflict')) applicable.add('allof-conflict');
+        if (isAllOfMissingRequiredEligible(op)) applicable.add('allof-missing-required');
+        if (isAllOfConflictEligible(op)) applicable.add('allof-conflict');
         if (f.hasUniqueItems) applicable.add('unique-items-violation');
         if (f.hasMultipleOf) applicable.add('multiple-of-violation');
         if (f.hasConstraints) applicable.add('constraint-violation');

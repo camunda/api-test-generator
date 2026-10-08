@@ -913,10 +913,11 @@ missing an applicable *kind* of bad-request test (it counts kinds with at least 
 not how many tests each kind has). That column is only as complete as the generator's own
 applicability rules (see "every new request-validation scenario kind needs an applicability
 rule"). The parameter kinds (`param-missing`, `param-type-mismatch`, `param-enum-violation`,
-`param-constraint-violation`) reuse their generators' exact eligibility, so they are accurate.
-The body-schema kinds (`allof-*`, `oneof-*`, `format-invalid`, `nested-additional-prop`,
-`additional-prop-general`, `missing-body`, `constraint-violation`, ...) are still derived from
-schema features, not from each generator's own gate, so for them the column can report a check the
+`param-constraint-violation`) and the body kinds `missing-body`, `union` and `oneof-*` and `allof-*` reuse their
+generators' exact eligibility (each generator exports it and uses it itself), so they are accurate: a oneOf or allOf
+nested in a property, or an optional body, no longer reads as a missing check. The other body-schema kinds
+(`format-invalid`, `nested-additional-prop`, `additional-prop-general`, `constraint-violation`, ...) are still derived
+from schema features, not from each generator's own gate, so for them the column can report a check the
 generator cannot build; treat those as an upper bound until each reuses its generator's eligibility. Each scheduled run also appends a row to `history.csv` in the artifact. This is a different axis from `npm run coverage:report` (which maps
 operations to generated specs). It is static analysis of generated output, needs no
 running Hub, and the script exits non-zero if the generated test format no longer
