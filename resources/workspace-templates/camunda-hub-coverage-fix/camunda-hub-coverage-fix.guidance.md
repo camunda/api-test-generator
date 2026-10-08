@@ -208,7 +208,7 @@ response, is not held by an exclusion, and has no scoped exclusion. Work out **w
      call they make and the spec section that describes it, and what you could not check without a live Hub.
    - **C. Anything else (report only, with a proposal).** That is: a change to generator code
      (`request-validation/src/**`, `request-validation/templates/**`), a fixture that needs a product setting, a
-     cluster, a feature flag or a call the spec does not describe, a validation order that makes Hub answer 400
+     cluster that has to exist, a feature flag that has to be switched on, or a call the spec does not describe, a validation order that makes Hub answer 400
      before 403 or 404 and that no fixture can fix, an exclusion or scoped exclusion (its `reason` is a decision,
      never overturn it), or a contract that contradicts the test (for example a documented idempotent delete that
      cannot return 404). Edit nothing. Write `action: "report-only"` and fill `proposal` (see the output section):
@@ -229,9 +229,18 @@ response, is not held by an exclusion, and has no scoped exclusion. Work out **w
    outcome B: exported by the block you added, which must be a new name, never an existing one).
 
 You cannot run a live Hub here, and the order in which Hub checks things (400, then 403, then 404) decides whether
-a new test passes. So be stricter than for a lifecycle gap: if you have any doubt that the request will reach the
-check the test targets, write `report-only` with a proposal and open no PR. A person reads any PR you do open and
-reads the live-Hub run that the verify job starts on the verified commit (`hub-ondemand-test.yml`) before it merges.
+a new test passes. You do not have to be sure the request reaches the check the test targets: the verify job starts the
+live-Hub run (`hub-ondemand-test.yml`) on the verified commit, and the generated test already asserts the expected
+status, so that run is what answers it. So when the fix is outcome A or B and your only doubt is whether Hub will answer
+with the expected status (rather than 400, 401 or another one), open the draft PR anyway and put a section **"What the
+live run must show"** in the body: the status the test expects, the other statuses you think are possible and why, and
+what a different answer would mean ("if the run is red with 401, this gap cannot be fixed this way: close the PR").
+Say it in the plain-words section too, in one sentence: "The live Hub test will tell us whether this works."
+
+Still `report-only` (no PR), however sure you are about the status: anything that is outcome C (generator code, an
+exclusion, a contract that contradicts the test, a fixture the spec gives no way to create, or one that needs a product
+setting or feature flag switched on), or a measurement that did not move as step 3 says. A person reads any PR you do
+open and reads the live-Hub run that the verify job starts on the verified commit before it merges.
 
 ## Opening the PR
 
