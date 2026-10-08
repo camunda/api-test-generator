@@ -194,20 +194,6 @@ today, never merges anything, and the thread under the weekly Slack message list
 "The coverage-fix agent" in [hub-response-coverage-report.md](hub-response-coverage-report.md) explains what it does and
 never does.
 
-## What the workflows depend on
-
-If one of these breaks, the matching alerts stop or fail. The owner and the rotation of each are to be named in the handover.
-
-| Dependency | Used for | Where it is configured |
-|---|---|---|
-| GitHub App `preview-envs` (read) | Cloning the private camunda-hub repo | Vault, `secret/data/products/web-modeler/ci/preview-envs`, read by `.github/actions/hub-clone-token` |
-| GitHub App `camunda/qa-processes` (write) | Opening and editing issues and comments | Vault, `secret/data/products/qa/ci/github.com/apps/camunda/qa-processes` |
-| Vault login (JWT role and an approle) | Every workflow reads its secrets from Vault | Repo secrets `VAULT_ADDR`, `VAULT_JWT_PATH`, `VAULT_JWT_ROLE`, `VAULT_JWT_AUDIENCE`, `VAULT_ROLE_ID`, `VAULT_SECRET_ID` |
-| Slack bot token | Every post in the Slack channels | Vault, `secret/data/products/qa/ci/common`, key `SLACK_BOT_USER_OAUTH_TOKEN`, read by `.github/actions/slack-token` |
-| TestRail credentials | Publishing the nightly results | Vault, `secret/data/products/qa/ci/common` |
-| Claude API key | The classifier on PRs and the nightly triage | Vault, `secret/data/products/qa/ci/common`, key `CLAUDE_API_KEY` (the workflows alias it to `ANTHROPIC_API_KEY`) |
-| Container registry login | Pulling the PR's Hub image | Repo secrets `CAMUNDA_CONTAINER_REGISTRY_USER` and `_PASSWORD` |
-
 ## Who to ask
 
 - Anything in this channel you cannot place: write in the channel.
@@ -225,3 +211,5 @@ More terms (medic, ontology, live check, invariant tests, fingerprint) are in th
 - **TestRail:** the test-management tool the nightly results are also published to.
 - **Vault:** the secrets store the workflows read their tokens from.
 - **Unmapped operation / coverage gap:** an endpoint with no generated test at all.
+
+What the workflows depend on (Vault, Slack token, registry login): [maintainers/workflow-dependencies.md](maintainers/workflow-dependencies.md).
