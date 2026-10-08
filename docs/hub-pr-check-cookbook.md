@@ -23,7 +23,7 @@ does not yet understand a new endpoint, or that the test run itself had a proble
 | Green (`success`) | The generated tests passed | Nothing |
 | Green, with `coverage gap: ...` in the description | Tests passed, but some endpoints have no generated test yet | Nothing is blocked. Someone should add tests later (see "Things that look wrong but are not" below) |
 | Red (`failure`) | Something failed | Follow the steps below |
-| No status at all | Usually skipped on purpose (draft PR, fork, docs-only change). Rarely the status could not be posted | Open the "Trigger api-test-generator hub suite" job on your PR and read its summary. **Skipped:** you do nothing. It was skipped on purpose. **Ran:** the tests ran but the status could not be posted (rare). Read the result in the run itself: open [hub-pr-check](https://github.com/camunda/api-test-generator/actions/workflows/hub-pr-check.yml) and find the run for your PR, or look for the Slack alert. If you cannot find it, ask in `#ask-qa` (tag `@test-automation-medic`) and include your PR link |
+| No status at all | Skipped on purpose (draft PR, fork, docs-only change) | Nothing |
 
 **How long it takes.** The check starts after Hub's image for your PR is built, and a run takes about 5 minutes. The status and the Slack alert appear when it finishes, not when it starts.
 
@@ -144,10 +144,7 @@ in api-test-generator against any branch.
 ## Things that look wrong but are not
 
 - *No status on my PR:* drafts, forks, `self-managed/*` bases and docs/frontend-only PRs are
-  skipped by design, but a missing status does not prove that. It is also missing when the reporter could not mint
-  its GitHub App token (that step is allowed to fail without failing the run). First open the "Trigger
-  api-test-generator hub suite" job on the PR, or the `hub-pr-check.yml` run, to see whether the check ran. If it was
-  skipped, mark the PR ready or dispatch it by hand. If it ran, ask in `#ask-qa` (tag `@test-automation-medic`).
+  skipped by design. There is nothing to do.
 - *Green despite a coverage gap:* intentional. A missing test is not a failing test, and the author of the
   camunda-hub PR cannot fix it (the fix is in the generator), so the check stays green while the gap is made
   visible: the status description, a tracking issue `[hub-pr-check] Coverage gap on camunda-hub#N`, and Slack
