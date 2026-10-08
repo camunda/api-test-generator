@@ -9,8 +9,11 @@
 //     request-validation.json it may only ADD one entry to resourceFixtures or pathResourceFixtures, and it must not
 //     change excludeOperations or any other key. In run-hub.sh it may only ADD a few lines, each one of a small set
 //     of fixture-creating shapes (see isAllowedSetupLine); a line of any other shape fails. Its only floor change is
-//     assertedByStatus[code] going up. What the added lines DO (which call, which body) is judged by a person: no
-//     automatic live run starts on an agent PR, so nothing executes until someone has read the diff.
+//     assertedByStatus[code] going up. What the added lines DO (which call, which body) is judged by a person, but
+//     not before they run: once this check passes, the verify job starts the live Hub run on the verified commit
+//     (hub-coverage-fix-live-check.sh), so lines of an allowed shape execute with Hub access before anyone has read
+//     the diff. The shape check is what makes that acceptable; endpoint and body semantics are left to the reviewer.
+//     (A lifecycle PR is not started automatically: its ontology and test file are not checked that way.)
 //   - Neither may lower a floor, or add a zeroTestOperations entry.
 //
 // Runs under plain `node` (type stripping): no enums, no parameter properties.
