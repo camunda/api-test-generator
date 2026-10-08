@@ -9,8 +9,14 @@
 //     request-validation.json it may only ADD one entry to resourceFixtures or pathResourceFixtures, and it must not
 //     change excludeOperations or any other key. In run-hub.sh it may only ADD a few lines, each one of a small set
 //     of fixture-creating shapes (see isAllowedSetupLine); a line of any other shape fails. Its only floor change is
-//     assertedByStatus[code] going up. What the added lines DO (which call, which body) is judged by a person: no
-//     automatic live run starts on an agent PR, so nothing executes until someone has read the diff.
+//     assertedByStatus[code] going up. What the added lines DO (which call, which body) is judged by a person, but
+//     not before they run: once this check passes, the verify job starts the live Hub run on the verified commit
+//     (hub-coverage-fix-live-check.sh), so lines of an allowed shape execute with Hub access before anyone has read
+//     the diff. The shape check is what makes that acceptable; endpoint and body semantics are left to the reviewer.
+//     (A lifecycle PR is started the same way when it changes only the floors and one plain-data entry of
+//     entity-kinds.json, see checkEntityKinds; one that also edits the invariants test file, which is code, stays manual.)
+//   - A lifecycle PR's change to entity-kinds.json must be exactly one new entry for the selected resource, of a
+//     plain data shape (see checkEntityKinds); the invariants test file is arbitrary code and is not checked that way.
 //   - Neither may lower a floor, or add a zeroTestOperations entry.
 //
 // Runs under plain `node` (type stripping): no enums, no parameter properties.
@@ -28,6 +34,8 @@ export interface FileState {
   floors: unknown;
   // The text of scripts/e2e/run-hub.sh on this side. Only needed when a PR changes that file.
   runHub?: string;
+  // The parsed ontology/entity-kinds.json on this side. Needed when a lifecycle PR changes that file.
+  entityKinds?: unknown;
 }
 
 // What the verify job gathers for one PR.
@@ -248,6 +256,81 @@ function checkRv(base: unknown, head: unknown, provisioned: Set<string>): string
   return out;
 }
 
+const ENTITY_KEYS = [
+  '@type',
+  'name',
+  'shape',
+  'identifiers',
+  'establishedBy',
+  'observableVia',
+  'revokedBy',
+  'restorableVia',
+  'description',
+];
+
+// entity-kinds.json: exactly one new entry appended to `kinds`, for the selected resource, of the plain "entity" shape,
+// with only the known keys and operation or identifier names of a simple shape. Nothing else in the file changes.
+// The file drives the generator, so its content is data only: names and one description string.
+function checkEntityKinds(base: unknown, head: unknown, candidate: Candidate): string[] {
+  const where = 'entity-kinds.json';
+  if (!isRecord(base) || !isRecord(head)) {
+    return [`${where}: its content could not be read on both sides`];
+  }
+  const was: unknown = base.kinds;
+  const now: unknown = head.kinds;
+  if (!Array.isArray(was) || !Array.isArray(now)) {
+    return [`${where}: its content could not be read on both sides`];
+  }
+  const out: string[] = [];
+  for (const key of new Set([...Object.keys(base), ...Object.keys(head)])) {
+    if (key !== 'kinds' && !same(base[key], head[key])) out.push(`${where}: "${key}" changed`);
+  }
+  if (now.length !== was.length + 1) {
+    return [...out, `${where}: exactly one entry must be added to kinds`];
+  }
+  if (!was.every((k, i) => same(k, now[i]))) {
+    out.push(`${where}: an existing entry was changed, removed or moved`);
+  }
+  const entry: unknown = now[now.length - 1];
+  if (!isRecord(entry)) return [...out, `${where}: the new entry is not an object`];
+  for (const key of Object.keys(entry)) {
+    if (!ENTITY_KEYS.includes(key)) out.push(`${where}: the new entry has an unknown key "${key}"`);
+  }
+  if (entry['@type'] !== 'EntityKind') out.push(`${where}: the new entry is not an EntityKind`);
+  if (entry.shape !== 'entity') out.push(`${where}: the new entry's shape must be "entity"`);
+  if (entry.name !== candidate.resource) {
+    out.push(`${where}: the new entry is for ${String(entry.name)}, not ${candidate.resource}`);
+  }
+  if (entry.establishedBy !== candidate.createOp) {
+    out.push(`${where}: establishedBy must be ${candidate.createOp}`);
+  }
+  // The operations an entry names are the API calls the generated lifecycle test makes. They are not taken from the
+  // agent's text: they must be exactly the ones the repo's naming gives for the resource (every existing entity entry
+  // follows it), so an entry cannot point the live run at some other operation, a destructive one for example.
+  const resource = candidate.resource;
+  if (entry.observableVia !== `get${resource}`) {
+    out.push(`${where}: observableVia must be get${resource}`);
+  }
+  if (entry.revokedBy !== `delete${resource}`) {
+    out.push(`${where}: revokedBy must be delete${resource}`);
+  }
+  if (entry.restorableVia !== undefined && entry.restorableVia !== `restore${resource}`) {
+    out.push(`${where}: restorableVia must be restore${resource} when present`);
+  }
+  const ids = entry.identifiers;
+  if (!Array.isArray(ids) || ids.length !== 1 || ids[0] !== `${resource}Key`) {
+    out.push(`${where}: identifiers must be exactly ["${resource}Key"]`);
+  }
+  if (
+    typeof entry.description !== 'string' ||
+    entry.description.length < 1 ||
+    entry.description.length > 2000
+  ) {
+    out.push(`${where}: description must be a text of 1 to 2000 characters`);
+  }
+  return out;
+}
+
 export function checkChange(candidate: Candidate, change: PrChange, provisioned: string): string[] {
   const out: string[] = [];
   const allowedFiles =
@@ -261,6 +344,9 @@ export function checkChange(candidate: Candidate, change: PrChange, provisioned:
   if (!change.files.includes(FLOORS_FILE))
     out.push('does not raise a floor in coverage-floors.json');
   out.push(...checkFloors(change.base.floors, change.head.floors, candidate));
+  if (candidate.kind === 'lifecycle' && change.files.includes(ENTITY_KINDS_FILE)) {
+    out.push(...checkEntityKinds(change.base.entityKinds, change.head.entityKinds, candidate));
+  }
   if (candidate.kind === 'status') {
     const exported = exportedFixtures(provisioned);
     if (change.files.includes(RUN_HUB_FILE)) {
@@ -288,9 +374,10 @@ export function parseChanges(v: unknown): Map<number, PrChange> {
       if (!isRecord(s) || !('rv' in s) || !('floors' in s)) {
         throw new Error(`PR #${n} changes: ${where} has no rv and floors`);
       }
-      return typeof s.runHub === 'string'
-        ? { rv: s.rv, floors: s.floors, runHub: s.runHub }
-        : { rv: s.rv, floors: s.floors };
+      const st: FileState = { rv: s.rv, floors: s.floors };
+      if (typeof s.runHub === 'string') st.runHub = s.runHub;
+      if ('entityKinds' in s) st.entityKinds = s.entityKinds;
+      return st;
     };
     if (
       !isRecord(c) ||

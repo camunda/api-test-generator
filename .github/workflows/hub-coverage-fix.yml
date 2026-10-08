@@ -539,11 +539,13 @@ jobs:
     # reached the agent (no baseline) or had nothing to do.
     if: ${{ always() && needs.fix.outputs.baseline != '' && needs.fix.outputs.count != '0' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     permissions:
-      contents: read
-      actions: read
-      pull-requests: read
+      # Write: pin each verified commit under a tag, so the live check runs exactly what was verified.
+      contents: write
+      # Write: start the live Hub check (hub-ondemand-test.yml) on each verified PR and comment its link.
+      actions: write
+      pull-requests: write
     steps:
       - name: Checkout api-test-generator
         uses: actions/checkout@v6
@@ -600,14 +602,37 @@ jobs:
           for n in $(jq -r --arg run "$GITHUB_RUN_ID" \
             '.[] | select(.number > '"$BASELINE"' and (.headRefName | test("^fix/coverage-.+-" + $run + "$"))) | .number' \
             "${RUNNER_TEMP}/run-prs.json"); do
-            base_sha="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${n}" --jq '.base.sha')"
-            head_sha="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${n}" --jq '.head.sha')"
-            gh api --paginate "repos/${GITHUB_REPOSITORY}/pulls/${n}/files?per_page=100" --jq '.[].filename' > "${RUNNER_TEMP}/files-${n}.txt"
+            # The base branch and its commit are read in one call, and the branch must be main: if a PR's base
+            # were changed to another branch, files that exist there would drop out of the comparison.
+            base_info="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${n}" --jq '.base.ref + " " + .base.sha')"
+            base_ref="${base_info%% *}"
+            base_sha="${base_info#* }"
+            if [ "$base_ref" != main ]; then
+              echo "::error::PR #$n: its base is $base_ref, not main"
+              exit 1
+            fi
+            # Every read below is pinned to the one head commit of the PR list snapshot (the same SHA the live
+            # check is later started on), never to the PR's current head, which may have moved.
+            head_sha="$(jq -r --argjson n "$n" '.[] | select(.number == $n) | .headRefOid' "${RUNNER_TEMP}/run-prs.json")"
+            # Both the new path and, for a rename, the old one count: a rename from an unapproved path into an
+            # approved one would otherwise look like a single allowed file.
+            gh api --paginate "repos/${GITHUB_REPOSITORY}/compare/${base_sha}...${head_sha}?per_page=100" \
+              --jq '.files[] | .filename, (.previous_filename // empty)' > "${RUNNER_TEMP}/files-${n}.txt"
+            # The compare API cuts its file list at 300 entries. This list is the allowlist gate for the live
+            # run, so fail closed: it must have as many files as the PR reports (the head is re-checked below),
+            # and an agent PR has a handful at most.
+            listed="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/compare/${base_sha}...${head_sha}?per_page=100" \
+              --jq '.files | length' | awk '{n += $1} END {print n + 0}')"
+            reported="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${n}" --jq '.changed_files')"
+            if [ "$listed" != "$reported" ] || [ "$listed" -gt 20 ]; then
+              echo "::error::PR #$n: the changed-file list is incomplete or too long ($listed listed, $reported reported)"
+              exit 1
+            fi
             for side in base head; do
               sha="$base_sha"; [ "$side" = head ] && sha="$head_sha"
-              for f in request-validation coverage-floors; do
+              for f in request-validation coverage-floors ontology/entity-kinds; do
                 gh api -H "Accept: application/vnd.github.raw" \
-                  "repos/${GITHUB_REPOSITORY}/contents/configs/camunda-hub/${f}.json?ref=${sha}" > "${RUNNER_TEMP}/${side}-${f}-${n}.json"
+                  "repos/${GITHUB_REPOSITORY}/contents/configs/camunda-hub/${f}.json?ref=${sha}" > "${RUNNER_TEMP}/${side}-$(basename "$f")-${n}.json"
               done
               gh api -H "Accept: application/vnd.github.raw" \
                 "repos/${GITHUB_REPOSITORY}/contents/scripts/e2e/run-hub.sh?ref=${sha}" > "${RUNNER_TEMP}/${side}-run-hub-${n}.sh"
@@ -618,12 +643,23 @@ jobs:
               --slurpfile bfl "${RUNNER_TEMP}/base-coverage-floors-${n}.json" \
               --slurpfile hrv "${RUNNER_TEMP}/head-request-validation-${n}.json" \
               --slurpfile hfl "${RUNNER_TEMP}/head-coverage-floors-${n}.json" \
+              --slurpfile bek "${RUNNER_TEMP}/base-entity-kinds-${n}.json" \
+              --slurpfile hek "${RUNNER_TEMP}/head-entity-kinds-${n}.json" \
               --rawfile brh "${RUNNER_TEMP}/base-run-hub-${n}.sh" \
               --rawfile hrh "${RUNNER_TEMP}/head-run-hub-${n}.sh" \
               '. + {($n): {files: ($files | split("\n") | map(select(. != ""))),
-                           base: {rv: $brv[0], floors: $bfl[0], runHub: $brh},
-                           head: {rv: $hrv[0], floors: $hfl[0], runHub: $hrh}}}' \
+                           base: {rv: $brv[0], floors: $bfl[0], runHub: $brh, entityKinds: $bek[0]},
+                           head: {rv: $hrv[0], floors: $hfl[0], runHub: $hrh, entityKinds: $hek[0]}}}' \
               "${RUNNER_TEMP}/pr-changes.json" > "${RUNNER_TEMP}/pr-changes.new" && mv "${RUNNER_TEMP}/pr-changes.new" "${RUNNER_TEMP}/pr-changes.json"
+          done
+          # A PR whose head moved while it was being read was not what was verified: fail instead of guessing.
+          for n in $(jq -r 'keys[]' "${RUNNER_TEMP}/pr-changes.json"); do
+            snap="$(jq -r --argjson n "$n" '.[] | select(.number == $n) | .headRefOid' "${RUNNER_TEMP}/run-prs.json")"
+            now="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${n}" --jq '.head.sha')"
+            if [ "$snap" != "$now" ]; then
+              echo "::error::PR #$n got a new commit while it was being verified ($snap -> $now)"
+              exit 1
+            fi
           done
           # Which fixture variables setup provisions, read at `main` through the API, never from this checkout: a
           # manual run can check out any branch, and a modified branch must not be able to change the answer.
@@ -634,3 +670,17 @@ jobs:
             "${RUNNER_TEMP}/post/hub-coverage-fix.json" "$GITHUB_RUN_ID" "$DRY_RUN" \
             "app/qa-processes,qa-processes[bot]" "$BASELINE" "$limit" "${RUNNER_TEMP}/pre/pre-run-prs.json" \
             "${RUNNER_TEMP}/pr-changes.json" "${RUNNER_TEMP}/run-hub.sh"
+
+      # The automatic live-Hub check skips PRs from the automation account (hub-pr-live-check.yml): it would run
+      # the PR's own code with Hub access before anyone had checked what the code is. Here the order is the other
+      # way round. This step runs only when the step above passed: the PR is a draft from this run, within its
+      # allowed files and config, and its setup lines match the allowed shapes. Only then is the same live check
+      # (hub-ondemand-test.yml, run on the verified commit) started, and its link put on the PR. The result is that
+      # run's status, not a check on the PR. Skipped in a dry run, which opens no PR.
+      - name: Start the live Hub check on each verified PR
+        if: ${{ env.DRY_RUN != 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASELINE: ${{ needs.fix.outputs.baseline }}
+        run: |
+          RUN_PRS="${RUNNER_TEMP}/run-prs.json" PR_CHANGES="${RUNNER_TEMP}/pr-changes.json" bash .github/scripts/hub-coverage-fix-live-check.sh
