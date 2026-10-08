@@ -191,8 +191,13 @@ export function checkRunHub(base: unknown, head: unknown): string[] {
       );
     }
   }
-  if (exportedFixtures(added.join('\n')).size === 0) {
-    out.push('run-hub.sh: the added lines export no RV_FIXTURE_* variable');
+  const before = exportedFixtures(base);
+  const fresh = [...exportedFixtures(added.join('\n'))].filter((name) => !before.has(name));
+  if (fresh.length === 0) {
+    out.push('run-hub.sh: the added lines export no new RV_FIXTURE_* variable');
+  }
+  for (const name of exportedFixtures(added.join('\n'))) {
+    if (before.has(name)) out.push(`run-hub.sh: the added lines re-export the existing ${name}`);
   }
   return out;
 }
@@ -261,8 +266,13 @@ export function checkChange(candidate: Candidate, change: PrChange, provisioned:
     if (change.files.includes(RUN_HUB_FILE)) {
       const errors = checkRunHub(change.base.runHub, change.head.runHub);
       out.push(...errors);
+      // The new mapping must use a variable the added block exports: an unrelated block plus a mapping to an
+      // existing variable would otherwise pass.
       if (errors.length === 0 && typeof change.head.runHub === 'string') {
-        for (const name of exportedFixtures(change.head.runHub)) exported.add(name);
+        exported.clear();
+        for (const name of exportedFixtures(change.head.runHub)) {
+          if (!exportedFixtures(String(change.base.runHub)).has(name)) exported.add(name);
+        }
       }
     }
     out.push(...checkRv(change.base.rv, change.head.rv, exported));

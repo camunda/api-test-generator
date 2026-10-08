@@ -414,7 +414,7 @@ describe('run-hub.sh additions for a status PR', () => {
         withLines(...Array.from({ length: 9 }, () => addMember, addEmail)),
       ).join(),
     ).toContain('at most 8');
-    expect(checkRunHub(baseSh, withLines(addMember)).join()).toContain('export no RV_FIXTURE_');
+    expect(checkRunHub(baseSh, withLines(addMember)).join()).toContain('export no new RV_FIXTURE_');
     expect(checkRunHub(undefined, good)).toHaveLength(1);
   });
 
@@ -499,6 +499,16 @@ describe('run-hub.sh additions for a status PR', () => {
 
   it('accepts the setup fixture when the variable it names is exported by the accepted added lines', () => {
     expect(check(status, withSetup(good))).toEqual([]);
+  });
+
+  it('rejects a mapping to an existing variable next to an unrelated added export, and a re-export of an existing name', () => {
+    const unrelated = withLines(addEmail);
+    const v = check(status, withSetup(unrelated, 'RV_FIXTURE_WORKSPACE_KEY'));
+    expect(
+      v.some((m) => m.includes('names RV_FIXTURE_WORKSPACE_KEY, which setup does not provision')),
+    ).toBe(true);
+    const reexport = withLines('  export RV_FIXTURE_WORKSPACE_KEY; RV_FIXTURE_WORKSPACE_KEY="x"');
+    expect(checkRunHub(baseSh, reexport).join()).toContain('re-export the existing');
   });
 
   it('does not count a variable as provisioned when it is only in a comment, the additions fail, or the name differs', () => {

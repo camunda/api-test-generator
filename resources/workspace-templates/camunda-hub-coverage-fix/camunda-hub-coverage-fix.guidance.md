@@ -22,7 +22,7 @@ fine and hides a gap.
 | Gap in the report | You |
 |---|---|
 | A resource with no create, read, delete test (`lifecycle.create`, listed under "Missing:" in the report) | **Fix.** See "Fixing a lifecycle gap". |
-| An operation with no 403 or 404 test, that is not excluded or held on purpose | **Fix only when the cause is config alone** (see "Fixing a 403 or 404 gap"). Anything that needs generator code, setup code or touching an exclusion: **report only, with a proposal.** |
+| An operation with no 403 or 404 test, that is not excluded or held on purpose | **Fix when the cause is config alone, or a missing fixture that one setup block can create** (see "Fixing a 403 or 404 gap", outcomes A and B). Anything that needs generator code, another kind of setup change or touching an exclusion: **report only, with a proposal.** |
 | A resource with no delete, restore test, or a link with no add, remove test | Report only for now. |
 | Untested 409 responses | **Never.** Nobody has been able to trigger them on Hub (#638). A guess gives a wrong test. |
 | "Every kind of bad request tested" | **Never.** The report says this over-counts gaps for some kinds. |
@@ -203,8 +203,9 @@ response, is not held by an exclusion, and has no scoped exclusion. Work out **w
      never overturn it), or a contract that contradicts the test (for example a documented idempotent delete that
      cannot return 404). Edit nothing. Write `action: "report-only"` and fill `proposal` (see the output section):
      the file and the change you would make, and why it is not safe for you to make.
-   The verify job checks the same boundaries from GitHub after the run, and fails the run on any PR that touches a
-   file outside `request-validation.json` and `coverage-floors.json`.
+   The verify job checks the same boundaries from GitHub after the run. It fails the run on any PR that touches a
+   file outside `request-validation.json` and `coverage-floors.json` (outcome A), or outside those two plus
+   `scripts/e2e/run-hub.sh` (outcome B, only the one allowed block).
 3. **Regenerate and measure** exactly as for a lifecycle gap (step 6 there). For a config-only fix, the operation
    must disappear from `missing["<code>"]` in `/tmp/coverage-after/summary.json`, the `codes["<code>"]` numerator
    must go up by exactly one, and nothing else may go down. If it did not move, drop the change and write
@@ -214,7 +215,8 @@ response, is not held by an exclusion, and has no scoped exclusion. Work out **w
 5. **Run the checks last** (step 8 there), then open the PR as the "Opening the PR" section says, with the branch
    `fix/coverage-<operation-kebab>-<code>-<run-id>` and the title
    `test(coverage-fix): add <operationId> <code> test`. In the body, say which config entry you added and why the
-   environment variable it names is already provisioned (give the file and line).
+   environment variable it names is provisioned (outcome A: already exported on `main`, give the file and line;
+   outcome B: exported by the block you added, which must be a new name, never an existing one).
 
 You cannot run a live Hub here, and the order in which Hub checks things (400, then 403, then 404) decides whether
 a new test passes. So be stricter than for a lifecycle gap: if you have any doubt that the request will reach the
