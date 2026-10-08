@@ -142,9 +142,9 @@ an entry in `entity-kinds.json` that names its create, get and delete operations
    A floor above the measured number also fails here: that is the check working.
 
 You cannot run a live Hub here, and you must not start any live-Hub run yourself. The native live-Hub check
-(`hub-pr-live-check.yml`) skips your PRs. Instead, the verify job starts `hub-ondemand-test.yml` on your branch after it has checked
+(`hub-pr-live-check.yml`) skips your PRs. Instead, the verify job starts `hub-ondemand-test.yml` after it has checked
 your PR from GitHub, and comments the run link on the PR. Do not claim in the PR that a person must start it. Say that
-the live check starts automatically after verification and that its result is on that run. Leave the PR in draft: a
+the live check starts automatically after verification, on a tag pinned at the commit that verification inspected (not on the branch, which may move), and that its result is on that run. Leave the PR in draft: a
 person decides, after reading the diff and that run, whether it is good.
 
 ## Fixing a 403 or 404 gap
@@ -202,7 +202,7 @@ response, is not held by an exclusion, and has no scoped exclusion. Work out **w
 You cannot run a live Hub here, and the order in which Hub checks things (400, then 403, then 404) decides whether
 a new test passes. So be stricter than for a lifecycle gap: if you have any doubt that the request will reach the
 check the test targets, write `report-only` with a proposal and open no PR. A person reads any PR you do open and
-reads the live-Hub run that the verify job starts on its branch (`hub-ondemand-test.yml`) before it merges.
+reads the live-Hub run that the verify job starts on the verified commit (`hub-ondemand-test.yml`) before it merges.
 
 ## Opening the PR
 

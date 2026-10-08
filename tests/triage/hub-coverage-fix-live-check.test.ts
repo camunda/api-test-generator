@@ -107,6 +107,8 @@ describe('hub-coverage-fix live check dispatch', () => {
       `workflow run hub-ondemand-test.yml --repo camunda/api-test-generator --ref ${tag}`,
     );
     expect(r.calls).toContain('actions/runs/42');
+    // The lookup is narrowed by commit on the server, before any limit is applied.
+    expect(r.calls).toContain(`--commit ${SHA}`);
     // Only this run's PR above the baseline: not #5 (old) and not #11 (another run).
     expect(r.calls.match(/workflow run/g)?.length).toBe(1);
   });

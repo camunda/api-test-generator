@@ -54,7 +54,7 @@ for _ in $(seq 1 "$poll_tries"); do
     n="${item%%:*}"
     sha="${item#*:}"
     id="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow=hub-ondemand-test.yml \
-      --event workflow_dispatch --limit 30 --json databaseId,createdAt,headSha \
+      --event workflow_dispatch --commit "$sha" --limit 30 --json databaseId,createdAt,headSha \
       --jq "[.[] | select(.headSha == \"$sha\" and .createdAt >= \"$since\")] | first | .databaseId // empty")"
     if [ -n "$id" ]; then
       note "$n" "The live Hub check was started automatically on the verified commit ${sha:0:7} after the verify job passed: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${id}"
