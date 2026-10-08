@@ -34,7 +34,7 @@ a **re-enable check** (a Hub bug we had worked around was fixed, so a skipped te
 | You see | Do this |
 |---|---|
 | Red PR check, alert says "likely a real regression" | It is probably your change. Read what the alert points to |
-| Red PR check, alert says "generator not handling a new endpoint" | Not a Hub bug. Ask in `#camunda-hub-pr-e2e-results` |
+| Red PR check, alert says "generator not handling a new endpoint" | Not a Hub bug. Ask in `#ask-qa` (tag `@test-automation-medic`) |
 | Red PR check, alert says "infrastructure failure" | Not yours. Open the failed step, find the outside cause, ask if unsure |
 | Nightly post shows failures | Open the triage thread: one line per failure says whose it is |
 | No nightly post in the morning | The run or the posting broke, not Hub. See "If a morning has no nightly post" in the nightly guide |
@@ -42,7 +42,7 @@ a **re-enable check** (a Hub bug we had worked around was fixed, so a skipped te
 | Re-enable check | A Hub bug was fixed. Bring the test back, or decide on a bug closed as not planned |
 | Weekly report lists gaps | Read the "what to do" column. Some are Hub bugs, some are generator gaps |
 | A draft PR from the coverage-fix agent | Read its "In plain words" section first. Review it like any PR |
-| Not sure | Post the run link in `#camunda-hub-pr-e2e-results` (for a question about how the generator works, `#ask-qa`) |
+| Not sure | Ask in `#ask-qa` (tag `@test-automation-medic`) and include the run link |
 
 ## Who owns what
 

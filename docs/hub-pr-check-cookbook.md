@@ -23,7 +23,7 @@ does not yet understand a new endpoint, or that the test run itself had a proble
 | Green (`success`) | The generated tests passed | Nothing |
 | Green, with `coverage gap: ...` in the description | Tests passed, but some endpoints have no generated test yet | Nothing is blocked. Someone should add tests later (see "Things that look wrong but are not" below) |
 | Red (`failure`) | Something failed | Follow the steps below |
-| No status at all | Usually skipped on purpose (draft PR, fork, docs-only change). Rarely the status could not be posted | Open the "Trigger api-test-generator hub suite" job on your PR and read its summary. **Skipped:** nothing is wrong. If the PR is a draft, mark it ready to run the check. **Ran:** the tests ran but the status could not be posted (rare). Read the result in the run itself: open [hub-pr-check](https://github.com/camunda/api-test-generator/actions/workflows/hub-pr-check.yml) and find the run for your PR, or look for the Slack alert. If you cannot find it, post your PR link in `#camunda-hub-pr-e2e-results` |
+| No status at all | Usually skipped on purpose (draft PR, fork, docs-only change). Rarely the status could not be posted | Open the "Trigger api-test-generator hub suite" job on your PR and read its summary. **Skipped:** nothing is wrong. If the PR is a draft, mark it ready to run the check. **Ran:** the tests ran but the status could not be posted (rare). Read the result in the run itself: open [hub-pr-check](https://github.com/camunda/api-test-generator/actions/workflows/hub-pr-check.yml) and find the run for your PR, or look for the Slack alert. If you cannot find it, ask in `#ask-qa` (tag `@test-automation-medic`) and include your PR link |
 
 **How long it takes.** The check starts after Hub's image for your PR is built, and a run takes about 5 minutes. The status and the Slack alert appear when it finishes, not when it starts.
 
@@ -31,15 +31,15 @@ does not yet understand a new endpoint, or that the test run itself had a proble
 
 | The alert says | Whose problem | What to do |
 |---|---|---|
-| "infrastructure failure" | Not yours, not Hub's. The run itself had a problem | Open the failed step in the run and read the error first. Find the outside cause (registry login, image pull, runner) and get it fixed or confirmed fixed; then re-run to check (see "Re-run without a new push" below). Do not re-run to hope it passes. If you cannot name a cause, ask in `#camunda-hub-pr-e2e-results` with the run link |
-| "looks flaky" | A real defect that comes and goes, not something to retry until green: a race or bad wait in a test, or a race or missed signal in Hub | Do not just re-run. Open the failing test in the run's report and look at the passed and failed attempts. If it is a Hub race, it is yours; if the test is at fault, ask in `#camunda-hub-pr-e2e-results` |
+| "infrastructure failure" | Not yours, not Hub's. The run itself had a problem | Open the failed step in the run and read the error first. Find the outside cause (registry login, image pull, runner) and get it fixed or confirmed fixed; then re-run to check (see "Re-run without a new push" below). Do not re-run to hope it passes. If you cannot name a cause, ask in `#ask-qa` (tag `@test-automation-medic`) with the run link |
+| "looks flaky" | A real defect that comes and goes, not something to retry until green: a race or bad wait in a test, or a race or missed signal in Hub | Do not just re-run. Open the failing test in the run's report and look at the passed and failed attempts. If it is a Hub race, it is yours; if the test is at fault, ask in `#ask-qa` (tag `@test-automation-medic`) |
 | "Hub PR image did not start" | Possibly yours: Hub did not become ready | Open the run, find the step "Wait for Hub to be ready", read the startup error |
-| "api-test-generator not yet handling a new/changed endpoint" | The generator's, not a Hub bug | When your spec change caused it, an issue `Generator gap on camunda-hub#N` is opened, and assigned to you if GitHub allows it (see the note under "Who gets told what" in the [maintainer reference](maintainers/hub-pr-check-reference.md)). Ask in `#camunda-hub-pr-e2e-results` for help |
+| "api-test-generator not yet handling a new/changed endpoint" | The generator's, not a Hub bug | When your spec change caused it, an issue `Generator gap on camunda-hub#N` is opened, and assigned to you if GitHub allows it (see the note under "Who gets told what" in the [maintainer reference](maintainers/hub-pr-check-reference.md)). Ask in `#ask-qa` (tag `@test-automation-medic`) for help |
 | "Likely a real regression from this PR" | Probably yours | Read the change the alert points to. The tests are right and Hub now answers differently |
 | "Could not confirm" | Unknown | Open the failing test in the run's report (steps below) |
 | Every test of **one new endpoint** fails with 404, and you added it behind a feature flag | Nobody's bug: the test Hub does not switch your flag on | Add the flag to `docker/docker-compose.hub.yml` **in the api-test-generator repo** (a PR there, then re-run the check), or suppress the endpoint with a reason and an issue. Details under "Common failure patterns" |
 
-Still stuck? Post the run link in `#camunda-hub-pr-e2e-results`. Every alert carries the links you need. For any other question or help, ask in `#ask-qa` and tag `@test-automation-medic`.
+Still stuck? Ask in `#ask-qa` (tag `@test-automation-medic`) and include the run link. Every alert carries the links you need.
 
 **Where to look (GitHub Actions pages, in `camunda/api-test-generator`)**
 
@@ -147,7 +147,7 @@ in api-test-generator against any branch.
   skipped by design, but a missing status does not prove that. It is also missing when the reporter could not mint
   its GitHub App token (that step is allowed to fail without failing the run). First open the "Trigger
   api-test-generator hub suite" job on the PR, or the `hub-pr-check.yml` run, to see whether the check ran. If it was
-  skipped, mark the PR ready or dispatch it by hand. If it ran, ask in `#camunda-hub-pr-e2e-results`.
+  skipped, mark the PR ready or dispatch it by hand. If it ran, ask in `#ask-qa` (tag `@test-automation-medic`).
 - *Green despite a coverage gap:* intentional. A missing test is not a failing test, and the author of the
   camunda-hub PR cannot fix it (the fix is in the generator), so the check stays green while the gap is made
   visible: the status description, a tracking issue `[hub-pr-check] Coverage gap on camunda-hub#N`, and Slack
