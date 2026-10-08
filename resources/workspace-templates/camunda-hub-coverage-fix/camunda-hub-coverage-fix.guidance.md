@@ -269,6 +269,17 @@ Work in `{{.WorkspacePath}}/api-test-generator` (already on `main`).
    edits the invariants test file: then a person starts it), and what the reviewer should do next (read the diff, then the run,
    or, when it does not start by itself, run `hub-ondemand-test.yml` on the branch). Avoid jargon such as fixture, lifecycle, entity-kind or floor; if you need
    one, explain it in a few words. The technical sections come after it.
+   **Right after it, add a section `## The test this adds`** so a reviewer can find the test in the live run without
+   searching. For every test your change makes appear, give: its full title as the report shows it (for example
+   `Workspaces Validation API Tests › removeMember - Denied (no permission)`), the generated file and line it lands in,
+   and the suite it runs in. Find the new tests by listing the test titles in `generated/camunda-hub/` before your
+   change and again after regenerating, and taking the titles that are new (there should be only the ones you expect;
+   if there are others, say so). The suite is: a 403 deny test runs in the `rbac` profile
+   (`generated/camunda-hub/request-validation/rbac/<area>-validation-api-tests.spec.ts`); a 404 test and the
+   missing-authentication tests run in the `secured` profile (`.../request-validation/secured/...`); a lifecycle test runs in the positive
+   suite (`generated/camunda-hub/playwright/templates/EntityLifecycle/<Resource>.lifecycle.spec.ts`). End the section
+   with how to see it: "In the live run's `hub-suite-reports` artifact, open the <profile> report and search for
+   `<operationId>`."
    Title: `test(coverage-fix): add <Resource> create-read-delete lifecycle`. The rest of the body has the gap, the
    numbers before and after, the commands you ran, the report run URL, a note that the standalone create, get and
    delete feature specs of the resource are replaced by the lifecycle test, and the line
