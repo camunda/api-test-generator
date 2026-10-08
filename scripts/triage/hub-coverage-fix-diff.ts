@@ -256,7 +256,6 @@ function checkRv(base: unknown, head: unknown, provisioned: Set<string>): string
   return out;
 }
 
-const NAME = /^[A-Za-z][A-Za-z0-9]*$/;
 const ENTITY_KEYS = [
   '@type',
   'name',
@@ -305,27 +304,29 @@ function checkEntityKinds(base: unknown, head: unknown, candidate: Candidate): s
   if (entry.establishedBy !== candidate.createOp) {
     out.push(`${where}: establishedBy must be ${candidate.createOp}`);
   }
-  for (const key of ['observableVia', 'revokedBy']) {
-    const v = entry[key];
-    if (typeof v !== 'string' || !NAME.test(v))
-      out.push(`${where}: ${key} is missing or not an operation name`);
+  // The operations an entry names are the API calls the generated lifecycle test makes. They are not taken from the
+  // agent's text: they must be exactly the ones the repo's naming gives for the resource (every existing entity entry
+  // follows it), so an entry cannot point the live run at some other operation, a destructive one for example.
+  const resource = candidate.resource;
+  if (entry.observableVia !== `get${resource}`) {
+    out.push(`${where}: observableVia must be get${resource}`);
   }
-  if (
-    entry.restorableVia !== undefined &&
-    (typeof entry.restorableVia !== 'string' || !NAME.test(entry.restorableVia))
-  ) {
-    out.push(`${where}: restorableVia is not an operation name`);
+  if (entry.revokedBy !== `delete${resource}`) {
+    out.push(`${where}: revokedBy must be delete${resource}`);
+  }
+  if (entry.restorableVia !== undefined && entry.restorableVia !== `restore${resource}`) {
+    out.push(`${where}: restorableVia must be restore${resource} when present`);
   }
   const ids = entry.identifiers;
-  if (
-    !Array.isArray(ids) ||
-    ids.length === 0 ||
-    !ids.every((i) => typeof i === 'string' && NAME.test(i))
-  ) {
-    out.push(`${where}: identifiers must be a list of simple names`);
+  if (!Array.isArray(ids) || ids.length !== 1 || ids[0] !== `${resource}Key`) {
+    out.push(`${where}: identifiers must be exactly ["${resource}Key"]`);
   }
-  if (typeof entry.description !== 'string' || entry.description.length > 2000) {
-    out.push(`${where}: description must be a text of at most 2000 characters`);
+  if (
+    typeof entry.description !== 'string' ||
+    entry.description.length < 1 ||
+    entry.description.length > 2000
+  ) {
+    out.push(`${where}: description must be a text of 1 to 2000 characters`);
   }
   return out;
 }

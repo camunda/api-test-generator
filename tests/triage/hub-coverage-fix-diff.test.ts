@@ -331,8 +331,28 @@ describe('checkChange: a lifecycle PR', () => {
       ],
       ['an unknown key', { ...newKind, run: 'rm -rf /' }, 'unknown key'],
       ['a non-entity shape', { ...newKind, shape: 'external-entity' }, 'shape must be'],
-      ['an odd operation name', { ...newKind, revokedBy: 'a b; c' }, 'revokedBy is missing or not'],
+      [
+        'an odd operation name',
+        { ...newKind, revokedBy: 'a b; c' },
+        'revokedBy must be deleteVersion',
+      ],
       ['an odd identifier', { ...newKind, identifiers: ['a"b'] }, 'identifiers must be'],
+      [
+        'a destructive operation of another resource',
+        { ...newKind, revokedBy: 'deleteWorkspace' },
+        'revokedBy must be deleteVersion',
+      ],
+      [
+        'another observing operation',
+        { ...newKind, observableVia: 'getWorkspace' },
+        'observableVia must be getVersion',
+      ],
+      [
+        'another restoring operation',
+        { ...newKind, restorableVia: 'deleteProject' },
+        'restorableVia must be restoreVersion',
+      ],
+      ['an empty description', { ...newKind, description: '' }, 'description must be'],
       ['a huge description', { ...newKind, description: 'x'.repeat(2001) }, 'description must be'],
     ];
     for (const [label, entry, text] of bad) {
