@@ -59,7 +59,7 @@ The Hub team:
 
 Some alerts still ping `test-automation-medic` until the workflows are changed to ping `hub-medic`. The change is listed in [handover follow-ups](maintainers/handover-follow-ups.md).
 
-**Questions:** ask in `#ask-qa`. The enablement team answers there, but nothing here depends on a reply.
+**Questions or help:** ask in `#ask-qa` and tag `@test-automation-medic`. The enablement team answers there, but nothing here depends on a reply.
 
 ## Words used
 

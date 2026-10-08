@@ -12,6 +12,8 @@ malformed-request scenario kinds.
 > [a message in the nightly channel](docs/hub-nightly-cookbook.md) ·
 > [the weekly coverage report and the fix agent](docs/hub-response-coverage-report.md).
 >
+> Questions or help: ask in `#ask-qa` and tag `@test-automation-medic`.
+>
 > **Everything below is for people changing the generator itself.** You do not need it to run or read the Hub checks.
 
 ## Architecture
