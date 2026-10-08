@@ -42,20 +42,24 @@ a **re-enable check** (a Hub bug we had worked around was fixed, so a skipped te
 | Re-enable check | A Hub bug was fixed. Bring the test back, or decide on a bug closed as not planned |
 | Weekly report lists gaps | Read the "what to do" column. Some are Hub bugs, some are generator gaps |
 | A draft PR from the coverage-fix agent | Read its "In plain words" section first. Review it like any PR |
-| Not sure | Post the run link in `#camunda-hub-pr-e2e-results` |
+| Not sure | Post the run link in `#camunda-hub-pr-e2e-results` (for a question about how the generator works, `#ask-qa`) |
 
 ## Who owns what
 
-| Hub team | Test automation enablement team |
-|---|---|
-| Reading and acting on the alerts above | The generator itself: how tests are written from the spec |
-| Reviewing and merging coverage-fix PRs | Shared automation: workflow files, Vault and Slack access, the AI agents and their limits |
-| Fixing Hub bugs the tests find | Fixing generator gaps the Hub team reports |
-| The Hub settings in `configs/camunda-hub/` (skips, floors, resource setup) | Other products' settings (for example `camunda-oca`) |
-| Being the on-call group for alerts (`hub-medic`) | Being the on-call group for generator and pipeline faults (`test-automation-medic`) until the workflows are re-pointed |
+**After the handover the Hub team owns this project**: the alerts, the Hub settings, and the generator itself,
+including changing it when a new kind of coverage needs it. The test automation enablement team does not
+carry on-call or maintenance duties for it.
 
-If you are unsure which side a problem is on, ask in `#camunda-hub-pr-e2e-results`. We would rather
-answer a question than have a red check ignored.
+The Hub team:
+
+- reads and acts on every alert on this page, and is the on-call group (`hub-medic`), including for generator and pipeline problems;
+- reviews and merges coverage-fix PRs, and fixes the Hub bugs the tests find;
+- keeps the Hub settings in `configs/camunda-hub/`. Most coverage gaps are fixed there, and the coverage-fix agent handles many of them;
+- changes the generator when a gap needs new behaviour. The agent only reports those, and a person opens the change. The code is in `request-validation/`, `path-analyser/` and `materializer/`, and [AGENTS.md](../AGENTS.md) lists the rules a change must follow.
+
+Some alerts still ping `test-automation-medic` until the workflows are changed to ping `hub-medic`. That change is part of the handover.
+
+**Questions:** ask in `#ask-qa`. The enablement team answers there, but nothing here depends on a reply.
 
 ## Words used
 
