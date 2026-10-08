@@ -214,11 +214,17 @@ from GitHub. The Slack reply needs the weekly report run to have saved its Slack
 `hub-coverage-slack-ts`); a report from before that existed gets only the issue comment, and the run says so in a warning.
 A failed post never fails the run.
 
-**How it runs today.** By hand only: start the workflow
-[`hub-coverage-fix.yml`](../.github/workflows/hub-coverage-fix.yml) from the Actions tab. It is a **dry run by default**:
-it does everything except push and open the pull request, so you can read what it would do. Untick "dry run" to let it
-open real draft pull requests. It reads the latest weekly report, so run the weekly report first if you changed
-something.
+**How it runs.** Two ways.
+
+- **By hand:** start the workflow [`hub-coverage-fix.yml`](../.github/workflows/hub-coverage-fix.yml) from the Actions tab.
+  It is a **dry run by default**: it does everything except push and open the pull request, so you can read what it would
+  do. Untick "dry run" to let it open real draft pull requests. It reads the latest weekly report, so run the weekly
+  report first if you changed something.
+- **After the weekly report:** when the scheduled weekly report run finishes successfully, the coverage-fix starts by
+  itself, as a real run, on the report that run just produced. It only does so while the repository variable
+  `COVERAGE_FIX_AUTO` is `true` (Settings, Secrets and variables, Actions, Variables). To switch it off, delete the
+  variable or set it to anything else; no code change is needed. A manual run of the weekly report does not start it,
+  and neither does a weekly report that failed (a failed Slack post counts as a failed report).
 
 **Limits, checked by code, not by the agent.** At most one pull request per API area (an open or recently merged pull
 request holds its area; one that was closed without merging does not, so a gap can be tried again), and none for a

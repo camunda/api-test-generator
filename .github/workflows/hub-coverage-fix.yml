@@ -4,14 +4,22 @@
 #              a Claude Code agent that opens small draft PRs in api-test-generator, or writes a
 #              proposal when a gap needs more than a config entry. The limits (no weekly cap, one PR per
 #              API area) are enforced in code before the agent starts. camunda-hub is read
-#              only: no token for it is given to the agent. Manual trigger only, dry run by
-#              default, until the pilot is trusted (epic #678).
+#              only: no token for it is given to the agent. A manual run is a dry run unless you
+#              untick it. It also starts by itself after the scheduled weekly report, but only while
+#              the repository variable COVERAGE_FIX_AUTO is "true" (epic #678).
 # type: CI
 # owner: @camunda/test-automation-team
 ---
 name: Hub coverage fix agent
 
 on:
+  # After the scheduled weekly report, a real run. It only starts when the repository variable COVERAGE_FIX_AUTO is
+  # "true" (set it to turn it on, delete it or set anything else to turn it off, no code change needed), when the
+  # report run succeeded, was started by the schedule (not by hand) and ran on main. The workflow file used is the
+  # one on the default branch.
+  workflow_run:
+    workflows: ['Hub response coverage']
+    types: [completed]
   workflow_dispatch:
     inputs:
       coverage_run_id:
@@ -43,11 +51,19 @@ concurrency:
 env:
   CONFIG: camunda-hub
   REPORT_DIR: ${{ github.workspace }}/coverage-report
-  DRY_RUN: ${{ github.event.inputs.dry_run || 'true' }}
+  # A run after the weekly report is a real run; a manual run is a dry run unless the box is unticked.
+  DRY_RUN: ${{ github.event_name == 'workflow_run' && 'false' || github.event.inputs.dry_run || 'true' }}
 
 jobs:
   fix:
     name: Report → limits → workspace → Claude coverage-fix → result
+    # A manual run always goes ahead. A run after the weekly report needs the switch and a good report run.
+    if: >-
+      ${{ github.event_name != 'workflow_run' || (
+        vars.COVERAGE_FIX_AUTO == 'true'
+        && github.event.workflow_run.conclusion == 'success'
+        && github.event.workflow_run.event == 'schedule'
+        && github.event.workflow_run.head_branch == 'main') }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     # What the verify job needs, taken from steps that finished before the agent started.
@@ -73,7 +89,7 @@ jobs:
         id: report-run
         env:
           GH_TOKEN: ${{ github.token }}
-          INPUT_RUN_ID: ${{ github.event.inputs.coverage_run_id }}
+          INPUT_RUN_ID: ${{ github.event.inputs.coverage_run_id || github.event.workflow_run.id }}
         run: |
           set -euo pipefail
           run_id="$INPUT_RUN_ID"
