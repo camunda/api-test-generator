@@ -5,19 +5,16 @@
 > Messages about a single camunda-hub PR are in `#camunda-hub-pr-e2e-results` instead; see
 > [hub-pr-check-cookbook.md](hub-pr-check-cookbook.md).
 
-## Who owns what
-
-- **Generator owner:** the Hub team once the handover is done (until then, the test automation team). The generator owner
-  acts on the spec-bump, re-enable and weekly-report posts, and on the weekly coverage issues.
-- **Medic:** `hub-medic`. After the handover it also covers the generator and the pipeline. Until the workflows are
-  changed, alerts about the generator still ping `test-automation-medic`.
-- **The PR check is informational, not required:** a red check does not block merging.
-- **A normal night** has 0 failed tests. Known Hub bugs are either skipped (the test is left out) or only partly checked (the test runs without one assertion), so they do not count as failures. Any number above 0 is news. For scale, on 3 to 6 October the positive suite passed 99 to 146 tests and the negative suite 661, with 0 failures.
-
 ## Start here
 
 **What is this channel?** Every night the generated Hub API tests run against the latest Hub image (`camunda/hub:SNAPSHOT`).
 A set of automatic jobs then post what they found. Most nights the posts are green and need nothing from you.
+
+**A normal night has 0 failed tests.** Known Hub bugs do not count as failures: their tests are either skipped or run
+without the one assertion Hub cannot meet yet. So any number above 0 is news.
+
+The **generator owner** (the Hub team) acts on the spec-bump, re-enable and weekly-report posts. `hub-medic` is the on-call group.
+Until the workflows are changed, alerts about the generator itself still ping `test-automation-medic`.
 
 **What you will see, in the order it happens** (all times UTC):
 
