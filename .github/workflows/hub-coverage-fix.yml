@@ -5,18 +5,18 @@
 #              proposal when a gap needs more than a config entry. The limits (no weekly cap, one PR per
 #              API area) are enforced in code before the agent starts. camunda-hub is read
 #              only: no token for it is given to the agent. A manual run is a dry run unless you
-#              untick it. It also starts by itself after the scheduled weekly report, but only while
-#              the repository variable COVERAGE_FIX_AUTO is "true" (epic #678).
+#              untick it. It also starts by itself, as a real run, after the scheduled weekly report,
+#              unless the repository variable COVERAGE_FIX_AUTO is set to "false" (epic #678).
 # type: CI
 # owner: @camunda/test-automation-team
 ---
 name: Hub coverage fix agent
 
 on:
-  # After the scheduled weekly report, a real run. It only starts when the repository variable COVERAGE_FIX_AUTO is
-  # "true" (set it to turn it on, delete it or set anything else to turn it off, no code change needed), when the
-  # report run succeeded, was started by the schedule (not by hand) and ran on main. The workflow file used is the
-  # one on the default branch.
+  # After the scheduled weekly report, a real run, on by default. Set the repository variable COVERAGE_FIX_AUTO to
+  # "false" to turn it off without a code change (delete it or set it to anything else to turn it on again). It only
+  # starts when the report run succeeded, was started by the schedule (not by hand) and ran on main. The workflow
+  # file used is the one on the default branch.
   workflow_run:
     workflows: ['Hub response coverage']
     types: [completed]
@@ -57,10 +57,11 @@ env:
 jobs:
   fix:
     name: Report → limits → workspace → Claude coverage-fix → result
-    # A manual run always goes ahead. A run after the weekly report needs the switch and a good report run.
+    # A manual run always goes ahead. A run after the weekly report goes ahead unless it is switched off, and needs a
+    # good report run.
     if: >-
       ${{ github.event_name != 'workflow_run' || (
-        vars.COVERAGE_FIX_AUTO == 'true'
+        vars.COVERAGE_FIX_AUTO != 'false'
         && github.event.workflow_run.conclusion == 'success'
         && github.event.workflow_run.event == 'schedule'
         && github.event.workflow_run.head_branch == 'main') }}

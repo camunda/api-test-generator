@@ -24,10 +24,12 @@ describe('the coverage-fix trigger after the weekly report', () => {
     expect(isRec(weekly) ? weekly.name : '').toBe('Hub response coverage');
   });
 
-  it('only goes ahead on the switch, a successful scheduled run on main', () => {
+  it('is on by default, can be switched off, and needs a successful scheduled run on main', () => {
     const cond = String(fix.if).replace(/\s+/g, ' ');
     expect(cond).toContain("github.event_name != 'workflow_run'");
-    expect(cond).toContain("vars.COVERAGE_FIX_AUTO == 'true'");
+    // On unless the variable says "false": an unset variable must not stop it.
+    expect(cond).toContain("vars.COVERAGE_FIX_AUTO != 'false'");
+    expect(cond).not.toContain("vars.COVERAGE_FIX_AUTO == 'true'");
     expect(cond).toContain("github.event.workflow_run.conclusion == 'success'");
     expect(cond).toContain("github.event.workflow_run.event == 'schedule'");
     expect(cond).toContain("github.event.workflow_run.head_branch == 'main'");

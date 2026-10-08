@@ -221,10 +221,10 @@ A failed post never fails the run.
   do. Untick "dry run" to let it open real draft pull requests. It reads the latest weekly report, so run the weekly
   report first if you changed something.
 - **After the weekly report:** when the scheduled weekly report run finishes successfully, the coverage-fix starts by
-  itself, as a real run, on the report that run just produced. It only does so while the repository variable
-  `COVERAGE_FIX_AUTO` is `true` (Settings, Secrets and variables, Actions, Variables). To switch it off, delete the
-  variable or set it to anything else; no code change is needed. A manual run of the weekly report does not start it,
-  and neither does a weekly report that failed (a failed Slack post counts as a failed report).
+  itself, as a real run, on the report that run just produced. It is on by default. To switch it off, set the repository
+  variable `COVERAGE_FIX_AUTO` to `false` (Settings, Secrets and variables, Actions, Variables); delete the variable to
+  switch it on again. No code change is needed. A manual run of the weekly report does not start it, and neither does a
+  weekly report that failed (a failed Slack post counts as a failed report).
 
 **Limits, checked by code, not by the agent.** At most one pull request per API area (an open or recently merged pull
 request holds its area; one that was closed without merging does not, so a gap can be tried again), and none for a
