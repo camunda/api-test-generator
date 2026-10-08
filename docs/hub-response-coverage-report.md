@@ -194,6 +194,14 @@ happens instead depends on the kind of pull request.
 
 A pull request that sits unreviewed is closed by the same stale-PR clean-up as the nightly fix pull requests.
 
+**What it tells people.** After a real run, the `verify` job posts what the agent found, including the gaps that got no PR:
+one comment on the weekly tracking issue (the full record: each gap, what the agent did, its reason and proposal) and one
+reply in the weekly Slack message's thread (one line per gap, with links to the PRs). Nothing is posted for a dry run or
+for a run with no PR and no gap. The agent's text is untrusted: it is cleaned and cut before posting, and the PR links come
+from GitHub. The Slack reply needs the weekly report run to have saved its Slack message id (artifact
+`hub-coverage-slack-ts`); a report from before that existed gets only the issue comment, and the run says so in a warning.
+A failed post never fails the run.
+
 **How it runs today.** By hand only: start the workflow
 [`hub-coverage-fix.yml`](../.github/workflows/hub-coverage-fix.yml) from the Actions tab. It is a **dry run by default**:
 it does everything except push and open the pull request, so you can read what it would do. Untick "dry run" to let it
