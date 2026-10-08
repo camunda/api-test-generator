@@ -276,6 +276,28 @@ jobs:
               "mrkdwn": true
             }
 
+      # The coverage-fix agent's run reports in this message's thread. It starts later and elsewhere, so the message
+      # id is kept with this run as a small artifact of its own. Failing to save it only means no reply later.
+      - name: Save the Slack message id
+        id: slack-ts
+        if: always() && steps.slack-notify.outputs.ts != ''
+        continue-on-error: true
+        env:
+          TS: ${{ steps.slack-notify.outputs.ts }}
+        run: |
+          set -euo pipefail
+          mkdir -p slack-ts
+          printf '%s\n' "$TS" > slack-ts/slack-ts.txt
+
+      - name: Upload the Slack message id
+        if: always() && steps.slack-ts.outcome == 'success'
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: hub-coverage-slack-ts
+          path: slack-ts/
+          retention-days: 90
+
       - name: Fail the run if the Slack alert did not go out
         if: always()
         uses: ./.github/actions/fail-if-slack-failed

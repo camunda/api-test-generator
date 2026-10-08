@@ -54,6 +54,8 @@ jobs:
     outputs:
       count: ${{ steps.select.outputs.count }}
       baseline: ${{ steps.baseline.outputs.number }}
+      # The weekly report run this run read: its tracking issue and Slack message get the run's report.
+      report_run_id: ${{ steps.report-run.outputs.run_id }}
     steps:
       - name: Checkout api-test-generator
         uses: actions/checkout@v6
@@ -546,6 +548,10 @@ jobs:
       # Write: start the live Hub check (hub-ondemand-test.yml) on each verified PR and comment its link.
       actions: write
       pull-requests: write
+      # Write: one comment per run on the weekly tracking issue.
+      issues: write
+      # Vault login (OIDC) for the Slack bot token, to reply in the weekly Slack thread.
+      id-token: write
     steps:
       - name: Checkout api-test-generator
         uses: actions/checkout@v6
@@ -587,6 +593,7 @@ jobs:
       # automation touching its own PRs in the same minutes also fails the run, which is the safe direction. A
       # branch pushed without a PR is not covered.
       - name: Verify the PRs
+        id: verify
         env:
           GH_TOKEN: ${{ github.token }}
           BASELINE: ${{ needs.fix.outputs.baseline }}
@@ -594,7 +601,7 @@ jobs:
           set -euo pipefail
           limit=1000
           gh pr list --repo "$GITHUB_REPOSITORY" --state all --app qa-processes --limit "$limit" \
-            --json number,url,headRefName,baseRefName,isDraft,author,labels,state,headRefOid,body > "${RUNNER_TEMP}/run-prs.json"
+            --json number,url,title,headRefName,baseRefName,isDraft,author,labels,state,headRefOid,body > "${RUNNER_TEMP}/run-prs.json"
           # What each of this run's PRs changed, read from GitHub: the changed files, and the two JSON files
           # the playbook allows it to touch, on the PR's base commit and on its head. The verifier checks the
           # file list and the config and floor changes against the playbook's boundaries.
@@ -684,3 +691,131 @@ jobs:
           BASELINE: ${{ needs.fix.outputs.baseline }}
         run: |
           RUN_PRS="${RUNNER_TEMP}/run-prs.json" PR_CHANGES="${RUNNER_TEMP}/pr-changes.json" bash .github/scripts/hub-coverage-fix-live-check.sh
+
+      # What the run found, for people: one comment per run on the weekly tracking issue (the full record) and one
+      # reply in the weekly Slack message's thread (a line per gap). The agent's text in them is untrusted and is
+      # cleaned by the script; the PR links come from GitHub. Only real runs post, and only when there is something to
+      # say. None of these steps can fail the run: a missing note is a warning.
+      - name: Download the weekly report
+        id: weekly
+        if: ${{ always() && env.DRY_RUN != 'true' && needs.fix.outputs.report_run_id != '' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: hub-coverage-report
+          path: ${{ runner.temp }}/weekly
+          run-id: ${{ needs.fix.outputs.report_run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Write the run report
+        id: report
+        if: ${{ always() && env.DRY_RUN != 'true' }}
+        continue-on-error: true
+        env:
+          BASELINE: ${{ needs.fix.outputs.baseline }}
+          VERIFY_OUTCOME: ${{ steps.verify.outcome }}
+        run: |
+          set -uo pipefail
+          issue_url=""
+          if [ -s "${RUNNER_TEMP}/weekly/issue-url.txt" ]; then
+            candidate="$(tr -d '[:space:]' < "${RUNNER_TEMP}/weekly/issue-url.txt")"
+            if printf '%s' "$candidate" | grep -qE "^https://github.com/${GITHUB_REPOSITORY}/issues/[0-9]+$"; then
+              issue_url="$candidate"
+            fi
+          fi
+          echo "issue_url=${issue_url}" >> "$GITHUB_OUTPUT"
+          ISSUE_URL="$issue_url" bash .github/scripts/hub-coverage-fix-report.sh \
+            "${RUNNER_TEMP}/post/hub-coverage-fix.json" "${RUNNER_TEMP}/run-prs.json" \
+            "${RUNNER_TEMP}/issue-comment.md" "${RUNNER_TEMP}/slack.txt"
+          if [ "$VERIFY_OUTCOME" != "success" ]; then
+            for f in "${RUNNER_TEMP}/issue-comment.md" "${RUNNER_TEMP}/slack.txt"; do
+              if [ -s "$f" ]; then
+                printf ':warning: The verify job did not pass for this run, read it before trusting this note: %s/%s/actions/runs/%s\n\n%s\n' \
+                  "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID" "$(cat "$f")" > "$f.new" && mv "$f.new" "$f"
+              fi
+            done
+          fi
+
+      - name: Comment on the tracking issue
+        if: ${{ always() && env.DRY_RUN != 'true' && steps.report.outcome == 'success' && steps.report.outputs.issue_url != '' }}
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_URL: ${{ steps.report.outputs.issue_url }}
+        run: |
+          set -euo pipefail
+          [ -s "${RUNNER_TEMP}/issue-comment.md" ] || { echo "Nothing to report for the tracking issue."; exit 0; }
+          num="${ISSUE_URL##*/}"
+          marker="<!-- coverage-fix-run:${GITHUB_RUN_ID} -->"
+          # A re-run of this job updates its comment instead of adding a second one.
+          existing="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/issues/${num}/comments?per_page=100" \
+            --jq ".[] | select(.body | startswith(\"${marker}\")) | .id" | head -n 1)"
+          if [ -n "$existing" ]; then
+            gh api -X PATCH "repos/${GITHUB_REPOSITORY}/issues/comments/${existing}" -F body=@"${RUNNER_TEMP}/issue-comment.md" > /dev/null
+          else
+            gh api -X POST "repos/${GITHUB_REPOSITORY}/issues/${num}/comments" -F body=@"${RUNNER_TEMP}/issue-comment.md" > /dev/null
+          fi
+          echo "Commented on ${ISSUE_URL}"
+
+      # The weekly report run saved its Slack message id as a small artifact of its own. A report from before that
+      # existed, or a report run that did not post (a dry run), has none, and then no Slack reply is made.
+      - name: Download the weekly Slack message id
+        id: slack-ts-artifact
+        if: ${{ always() && env.DRY_RUN != 'true' && needs.fix.outputs.report_run_id != '' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: hub-coverage-slack-ts
+          path: ${{ runner.temp }}/slack-ts
+          run-id: ${{ needs.fix.outputs.report_run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Check the Slack reply can be made
+        id: slack-ready
+        if: ${{ always() && env.DRY_RUN != 'true' }}
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          ts=""
+          if [ -s "${RUNNER_TEMP}/slack-ts/slack-ts.txt" ]; then
+            candidate="$(tr -d '[:space:]' < "${RUNNER_TEMP}/slack-ts/slack-ts.txt")"
+            if printf '%s' "$candidate" | grep -qE '^[0-9]+\.[0-9]+$'; then ts="$candidate"; fi
+          fi
+          if [ ! -s "${RUNNER_TEMP}/slack.txt" ]; then
+            echo "Nothing to report to Slack."
+          elif [ -z "$ts" ]; then
+            echo "::warning::No Slack message id for the weekly report run: the weekly message predates this feature or was not posted. The note was not sent to Slack."
+          else
+            echo "ts=${ts}" >> "$GITHUB_OUTPUT"
+            {
+              echo 'text<<SLACK_TEXT_EOF'
+              cat "${RUNNER_TEMP}/slack.txt"
+              echo 'SLACK_TEXT_EOF'
+            } >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Fetch Slack bot token from Vault
+        id: slack-token
+        if: ${{ always() && env.DRY_RUN != 'true' && steps.slack-ready.outputs.ts != '' }}
+        continue-on-error: true
+        uses: ./.github/actions/slack-token
+        with:
+          vault-url: ${{ secrets.VAULT_ADDR }}
+          vault-jwt-path: ${{ secrets.VAULT_JWT_PATH }}
+          vault-jwt-role: ${{ secrets.VAULT_JWT_ROLE }}
+          vault-jwt-audience: ${{ secrets.VAULT_JWT_AUDIENCE }}
+
+      - name: Reply in the weekly Slack thread
+        if: ${{ always() && env.DRY_RUN != 'true' && steps.slack-ready.outputs.ts != '' && steps.slack-token.outputs.SLACK_BOT_TOKEN != '' }}
+        continue-on-error: true
+        uses: slackapi/slack-github-action@v2
+        with:
+          method: chat.postMessage
+          token: ${{ steps.slack-token.outputs.SLACK_BOT_TOKEN }}
+          payload: |
+            {
+              "channel": "#camunda-hub-nightly-test-results",
+              "thread_ts": ${{ toJSON(steps.slack-ready.outputs.ts) }},
+              "text": ${{ toJSON(steps.slack-ready.outputs.text) }},
+              "mrkdwn": true
+            }
