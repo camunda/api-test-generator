@@ -166,37 +166,33 @@ describe('hub-coverage-fix live check dispatch', () => {
     expect(stale.calls).toContain('its run could not be found');
   });
 
-  it('starts only PRs whose content is constrained: a lifecycle PR (ontology, invariants test) stays manual', () => {
+  it('starts only PRs whose content is constrained: anything with test code or other files stays manual', () => {
+    const RV = 'configs/camunda-hub/request-validation.json';
+    const FL = 'configs/camunda-hub/coverage-floors.json';
+    const EK = 'configs/camunda-hub/ontology/entity-kinds.json';
+    const INV = 'configs/camunda-hub/regression-invariants.test.ts';
     for (const files of [
-      [
-        'configs/camunda-hub/ontology/entity-kinds.json',
-        'configs/camunda-hub/coverage-floors.json',
-      ],
-      [
-        'configs/camunda-hub/regression-invariants.test.ts',
-        'configs/camunda-hub/coverage-floors.json',
-      ],
-      ['configs/camunda-hub/coverage-floors.json'],
-      [
-        'configs/camunda-hub/request-validation.json',
-        'request-validation/src/analysis/authDeny.ts',
-      ],
+      [EK, FL, INV],
+      [INV, FL],
+      [FL],
+      [RV, 'request-validation/src/analysis/authDeny.ts'],
+      [RV, EK],
+      [EK, 'scripts/e2e/run-hub.sh'],
     ]) {
       const r = run({ files });
       expect(r.status, files.join()).toBe(0);
-      expect(r.calls).not.toContain('workflow run');
+      expect(r.calls, files.join()).not.toContain('workflow run');
       expect(r.calls).not.toContain('git/refs');
       expect(r.calls).toContain('not started automatically');
     }
-    // The setup script is allowed next to the config, for a status PR.
-    const ok = run({
-      files: [
-        'configs/camunda-hub/request-validation.json',
-        'configs/camunda-hub/coverage-floors.json',
-        'scripts/e2e/run-hub.sh',
-      ],
-    });
-    expect(ok.calls).toContain('workflow run');
+    // A 403/404 PR (config, floors, setup block) and a lifecycle PR (plain-data entry, floors) are started.
+    for (const files of [
+      [RV, FL],
+      [RV, FL, 'scripts/e2e/run-hub.sh'],
+      [EK, FL],
+    ]) {
+      expect(run({ files }).calls, files.join()).toContain('workflow run');
+    }
   });
 
   it('looks runs up by the PR tag and the commit', () => {

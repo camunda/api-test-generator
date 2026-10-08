@@ -182,14 +182,15 @@ review"** that shows the check before and after. Read that section first.
 skips the agent's pull requests: it would run the agent's code with Hub access before anything had checked it. What
 happens instead depends on the kind of pull request.
 
-- **Lifecycle pull requests** change the ontology and the invariants test, which are not checked line by line, so the live
-  check is manual: read the diff, then run `hub-ondemand-test` on the branch, and only then mark the pull request ready.
-- **403/404 pull requests** have fully constrained content (one fixture entry, the floors, and the fixture block of the
-  setup script). Once the `verify` job has checked them from GitHub, it pins the commit it checked under a
-  `hub-live-check/*` tag, starts `hub-ondemand-test` on that tag (not on the branch, which could move afterwards) and
-  comments the run link on the pull request. The run covers exactly that commit; a later push is not tested. Its result is
-  that run's status, not a check on the pull request. Read the diff and that run, and only then mark the pull request
+- **Pull requests with constrained content** start by themselves. That is a 403/404 pull request (one fixture entry, the
+  floors, and the fixture block of the setup script) or a lifecycle pull request that changes only the floors and adds one
+  plain-data entry to `entity-kinds.json`. Once the `verify` job has checked them from GitHub, it pins the commit it checked
+  under a `hub-live-check/*` tag, starts `hub-ondemand-test` on that tag (not on the branch, which could move afterwards)
+  and comments the run link on the pull request. The run covers exactly that commit; a later push is not tested. Its result
+  is that run's status, not a check on the pull request. Read the diff and that run, and only then mark the pull request
   ready. If the verify job fails, no live check starts.
+- **A lifecycle pull request that also edits the invariants test file** (code, not data) stays manual: read the diff, then
+  run `hub-ondemand-test` on the branch, and only then mark the pull request ready.
 
 A pull request that sits unreviewed is closed by the same stale-PR clean-up as the nightly fix pull requests.
 

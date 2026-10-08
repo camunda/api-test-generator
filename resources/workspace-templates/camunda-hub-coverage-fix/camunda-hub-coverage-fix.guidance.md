@@ -145,14 +145,15 @@ You cannot run a live Hub here, and you must not start any live-Hub run yourself
 (`hub-pr-live-check.yml`) skips your PRs. What happens instead depends on the kind of PR, and the PR body must say the
 one that applies:
 
-- **Lifecycle PR** (it changes the ontology and the invariants test, which are not checked line by line): nothing
-  starts. Say in the body that a person must read the diff and then run `hub-ondemand-test.yml` on the branch.
-- **403/404 PR** (it may change only the fixture config, the floors and the fixture block of the setup script): the
-  verify job starts `hub-ondemand-test.yml` itself after it has checked your PR from GitHub, on a tag pinned at the
-  commit it inspected (not on the branch, which may move), and comments the run link on the PR. Say in the body that the
-  live check starts automatically after verification and that its result is on that run. Do not say a person must start it.
+- **Automatic (403/404 PR, or a lifecycle PR that changes only `entity-kinds.json` and the floors):** the verify job
+  checks the files, the config and, for a lifecycle PR, that the ontology change is exactly one plain entry for your
+  resource. If that passes, it starts `hub-ondemand-test.yml` itself, on a tag pinned at the commit it inspected (not on
+  the branch, which may move), and comments the run link on the PR. Say in the body that the live check starts
+  automatically after verification and that its result is on that run. Do not say a person must start it.
+- **Manual (a lifecycle PR that also edits the invariants test file):** that file is code, so nothing starts. Say in the
+  body that a person must read the diff and then run `hub-ondemand-test.yml` on the branch.
 
-Leave the PR in draft: a person decides, after reading the diff (and, for a 403/404 PR, that run), whether it is good.
+Leave the PR in draft: a person decides, after reading the diff (and that run, when it started), whether it is good.
 
 ## Fixing a 403 or 404 gap
 
@@ -255,9 +256,9 @@ Work in `{{.WorkspacePath}}/api-test-generator` (already on `main`).
    not first, or nearly empty). Write it for someone who has never seen this generator: 3 to 5 short sentences in
    everyday words. Say what was missing ("there was no test checking what happens when someone without permission
    tries to remove a member"), what this PR adds, why it is safe to look at (a draft, it changes only test setup and
-   a counter), whether the live check starts by itself (a 403/404 PR: yes, after verification, with the run linked in a
-   comment; a lifecycle PR: no, a person starts it), and what the reviewer should do next (read the diff, then the run,
-   or for a lifecycle PR run `hub-ondemand-test.yml` on the branch). Avoid jargon such as fixture, lifecycle, entity-kind or floor; if you need
+   a counter), whether the live check starts by itself (yes, after verification, with the run linked in a comment, unless a lifecycle PR also
+   edits the invariants test file: then a person starts it), and what the reviewer should do next (read the diff, then the run,
+   or, when it does not start by itself, run `hub-ondemand-test.yml` on the branch). Avoid jargon such as fixture, lifecycle, entity-kind or floor; if you need
    one, explain it in a few words. The technical sections come after it.
    Title: `test(coverage-fix): add <Resource> create-read-delete lifecycle`. The rest of the body has the gap, the
    numbers before and after, the commands you ran, the report run URL, a note that the standalone create, get and

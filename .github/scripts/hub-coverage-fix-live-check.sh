@@ -5,10 +5,11 @@
 # the exact commit the verify step inspected (headRefOid of the PR list snapshot), never on a branch name, which could
 # move to an unverified commit between the check and the dispatch.
 #
-# Only PRs whose whole content is constrained are started automatically: the 403/404 PRs, which may change just
-# request-validation.json (one fixture entry), coverage-floors.json and the fixture block of run-hub.sh, all of which the
-# verify step checks line by line. A lifecycle PR may change the ontology and the invariants test file, whose content is
-# not constrained that way, so it keeps the manual rule: a person reads the diff, then starts the run.
+# Only PRs whose whole content is constrained are started automatically, and the verify step has already checked each
+# of these files line by line: a 403/404 PR (request-validation.json with one fixture entry, coverage-floors.json and the
+# fixture block of run-hub.sh) or a lifecycle PR (coverage-floors.json and one plain-data entry in entity-kinds.json).
+# A lifecycle PR that also edits the invariants test file, which is arbitrary code, keeps the manual rule: a person
+# reads the diff, then starts the run.
 #
 # Inputs (environment): RUN_PRS (the PR list JSON the verifier used), PR_CHANGES (the changed files per PR, as the
 # verifier read them), BASELINE (PR number above which PRs are this
@@ -38,12 +39,15 @@ runs_of() {
   gh run list --repo "$GITHUB_REPOSITORY" --workflow=hub-ondemand-test.yml \
     --event workflow_dispatch --commit "$1" --branch "$2" --limit 30 --json databaseId --jq '.[].databaseId'
 }
-# A PR is constrained when it changes the request-validation file and nothing outside the three allowed files.
+# A PR is constrained when it changes request-validation.json (403/404) or entity-kinds.json (lifecycle) and nothing
+# outside that kind's allowed files. The invariants test file is in neither list.
 constrained() {
   jq -e --arg n "$1" '.[$n].files as $f
-    | ($f | index("configs/camunda-hub/request-validation.json")) != null
-      and ($f | all(. == "configs/camunda-hub/request-validation.json"
-        or . == "configs/camunda-hub/coverage-floors.json" or . == "scripts/e2e/run-hub.sh"))' \
+    | def only($ok): ($f | all(. as $x | $ok | index($x) != null));
+      (($f | index("configs/camunda-hub/request-validation.json")) != null
+        and only(["configs/camunda-hub/request-validation.json", "configs/camunda-hub/coverage-floors.json", "scripts/e2e/run-hub.sh"]))
+      or (($f | index("configs/camunda-hub/ontology/entity-kinds.json")) != null
+        and only(["configs/camunda-hub/ontology/entity-kinds.json", "configs/camunda-hub/coverage-floors.json"]))' \
     "$PR_CHANGES" > /dev/null 2>&1
 }
 pending=""
@@ -53,7 +57,7 @@ for n in $(jq -r --arg run "$GITHUB_RUN_ID" --argjson base "$BASELINE" \
   sha="$(jq -r --argjson n "$n" '.[] | select(.number == $n) | .headRefOid' "$RUN_PRS")"
   tag="$(tag_for "$n")"
   if ! constrained "$n"; then
-    note "$n" "The live Hub check was not started automatically: this PR changes files whose content is not checked line by line (ontology or test code). Read the diff, then run \`hub-ondemand-test.yml\` on the branch."
+    note "$n" "The live Hub check was not started automatically: this PR changes files whose content is not checked line by line (for example the invariants test code). Read the diff, then run \`hub-ondemand-test.yml\` on the branch."
     continue
   fi
   # Without the list of runs that already exist for this commit, a new run cannot be told from an old one: do not start.

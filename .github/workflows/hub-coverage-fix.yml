@@ -619,9 +619,9 @@ jobs:
             fi
             for side in base head; do
               sha="$base_sha"; [ "$side" = head ] && sha="$head_sha"
-              for f in request-validation coverage-floors; do
+              for f in request-validation coverage-floors ontology/entity-kinds; do
                 gh api -H "Accept: application/vnd.github.raw" \
-                  "repos/${GITHUB_REPOSITORY}/contents/configs/camunda-hub/${f}.json?ref=${sha}" > "${RUNNER_TEMP}/${side}-${f}-${n}.json"
+                  "repos/${GITHUB_REPOSITORY}/contents/configs/camunda-hub/${f}.json?ref=${sha}" > "${RUNNER_TEMP}/${side}-$(basename "$f")-${n}.json"
               done
               gh api -H "Accept: application/vnd.github.raw" \
                 "repos/${GITHUB_REPOSITORY}/contents/scripts/e2e/run-hub.sh?ref=${sha}" > "${RUNNER_TEMP}/${side}-run-hub-${n}.sh"
@@ -632,11 +632,13 @@ jobs:
               --slurpfile bfl "${RUNNER_TEMP}/base-coverage-floors-${n}.json" \
               --slurpfile hrv "${RUNNER_TEMP}/head-request-validation-${n}.json" \
               --slurpfile hfl "${RUNNER_TEMP}/head-coverage-floors-${n}.json" \
+              --slurpfile bek "${RUNNER_TEMP}/base-entity-kinds-${n}.json" \
+              --slurpfile hek "${RUNNER_TEMP}/head-entity-kinds-${n}.json" \
               --rawfile brh "${RUNNER_TEMP}/base-run-hub-${n}.sh" \
               --rawfile hrh "${RUNNER_TEMP}/head-run-hub-${n}.sh" \
               '. + {($n): {files: ($files | split("\n") | map(select(. != ""))),
-                           base: {rv: $brv[0], floors: $bfl[0], runHub: $brh},
-                           head: {rv: $hrv[0], floors: $hfl[0], runHub: $hrh}}}' \
+                           base: {rv: $brv[0], floors: $bfl[0], runHub: $brh, entityKinds: $bek[0]},
+                           head: {rv: $hrv[0], floors: $hfl[0], runHub: $hrh, entityKinds: $hek[0]}}}' \
               "${RUNNER_TEMP}/pr-changes.json" > "${RUNNER_TEMP}/pr-changes.new" && mv "${RUNNER_TEMP}/pr-changes.new" "${RUNNER_TEMP}/pr-changes.json"
           done
           # A PR whose head moved while it was being read was not what was verified: fail instead of guessing.

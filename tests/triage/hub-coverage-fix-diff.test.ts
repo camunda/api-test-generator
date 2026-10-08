@@ -291,11 +291,72 @@ describe('checkChange: a status PR', () => {
   });
 });
 
+const kindsBase = {
+  version: 1,
+  kinds: [{ '@type': 'EntityKind', name: 'Folder', shape: 'entity', identifiers: ['FolderKey'] }],
+};
+const newKind = {
+  '@type': 'EntityKind',
+  name: 'Version',
+  shape: 'entity',
+  identifiers: ['VersionKey'],
+  establishedBy: 'createVersion',
+  observableVia: 'getVersion',
+  revokedBy: 'deleteVersion',
+  description: 'A version entity.',
+};
+
 describe('checkChange: a lifecycle PR', () => {
-  const lc = (over: Partial<PrChange> & { headFloors?: unknown } = {}): PrChange => ({
+  const lc = (
+    over: Partial<PrChange> & { headFloors?: unknown; headKinds?: unknown } = {},
+  ): PrChange => ({
     files: over.files ?? [ENTITY_KINDS_FILE, FLOORS_FILE, INVARIANTS_FILE],
-    base: { rv, floors },
-    head: { rv, floors: over.headFloors ?? { ...floors, lifecycleCreateCovered: 6 } },
+    base: { rv, floors, entityKinds: kindsBase },
+    head: {
+      rv,
+      floors: over.headFloors ?? { ...floors, lifecycleCreateCovered: 6 },
+      entityKinds: over.headKinds ?? { ...kindsBase, kinds: [...kindsBase.kinds, newKind] },
+    },
+  });
+  const withKind = (entry: unknown) =>
+    lc({ headKinds: { ...kindsBase, kinds: [...kindsBase.kinds, entry] } });
+
+  it('rejects an ontology change that is not exactly one plain entry for the selected resource', () => {
+    const bad: [string, unknown, string][] = [
+      ['another resource', { ...newKind, name: 'Other' }, 'not Version'],
+      [
+        'another establishing operation',
+        { ...newKind, establishedBy: 'x' },
+        'establishedBy must be',
+      ],
+      ['an unknown key', { ...newKind, run: 'rm -rf /' }, 'unknown key'],
+      ['a non-entity shape', { ...newKind, shape: 'external-entity' }, 'shape must be'],
+      ['an odd operation name', { ...newKind, revokedBy: 'a b; c' }, 'revokedBy is missing or not'],
+      ['an odd identifier', { ...newKind, identifiers: ['a"b'] }, 'identifiers must be'],
+      ['a huge description', { ...newKind, description: 'x'.repeat(2001) }, 'description must be'],
+    ];
+    for (const [label, entry, text] of bad) {
+      expect(
+        check(lifecycle, withKind(entry)).some((m) => m.includes(text)),
+        label,
+      ).toBe(true);
+    }
+    const edited = lc({
+      headKinds: {
+        ...kindsBase,
+        kinds: [{ ...kindsBase.kinds[0], description: 'changed' }, newKind],
+      },
+    });
+    expect(check(lifecycle, edited).join()).toContain('an existing entry was changed');
+    const two = lc({ headKinds: { ...kindsBase, kinds: [...kindsBase.kinds, newKind, newKind] } });
+    expect(check(lifecycle, two).join()).toContain('exactly one entry');
+    const topLevel = lc({
+      headKinds: { ...kindsBase, version: 2, kinds: [...kindsBase.kinds, newKind] },
+    });
+    expect(check(lifecycle, topLevel).join()).toContain('"version" changed');
+    expect(check(lifecycle, { ...lc(), head: { rv, floors: lc().head.floors } }).join()).toContain(
+      'could not be read',
+    );
   });
 
   it('accepts the entry, the floor and the adapted invariant', () => {
