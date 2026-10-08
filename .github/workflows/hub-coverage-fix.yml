@@ -603,8 +603,11 @@ jobs:
             '.[] | select(.number > '"$BASELINE"' and (.headRefName | test("^fix/coverage-.+-" + $run + "$"))) | .number' \
             "${RUNNER_TEMP}/run-prs.json"); do
             base_sha="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${n}" --jq '.base.sha')"
-            head_sha="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${n}" --jq '.head.sha')"
-            gh api --paginate "repos/${GITHUB_REPOSITORY}/pulls/${n}/files?per_page=100" --jq '.[].filename' > "${RUNNER_TEMP}/files-${n}.txt"
+            # Every read below is pinned to the one head commit of the PR list snapshot (the same SHA the live
+            # check is later started on), never to the PR's current head, which may have moved.
+            head_sha="$(jq -r --argjson n "$n" '.[] | select(.number == $n) | .headRefOid' "${RUNNER_TEMP}/run-prs.json")"
+            gh api --paginate "repos/${GITHUB_REPOSITORY}/compare/${base_sha}...${head_sha}?per_page=100" \
+              --jq '.files[].filename' > "${RUNNER_TEMP}/files-${n}.txt"
             for side in base head; do
               sha="$base_sha"; [ "$side" = head ] && sha="$head_sha"
               for f in request-validation coverage-floors; do
@@ -621,6 +624,15 @@ jobs:
               '. + {($n): {files: ($files | split("\n") | map(select(. != ""))),
                            base: {rv: $brv[0], floors: $bfl[0]}, head: {rv: $hrv[0], floors: $hfl[0]}}}' \
               "${RUNNER_TEMP}/pr-changes.json" > "${RUNNER_TEMP}/pr-changes.new" && mv "${RUNNER_TEMP}/pr-changes.new" "${RUNNER_TEMP}/pr-changes.json"
+          done
+          # A PR whose head moved while it was being read was not what was verified: fail instead of guessing.
+          for n in $(jq -r 'keys[]' "${RUNNER_TEMP}/pr-changes.json"); do
+            snap="$(jq -r --argjson n "$n" '.[] | select(.number == $n) | .headRefOid' "${RUNNER_TEMP}/run-prs.json")"
+            now="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${n}" --jq '.head.sha')"
+            if [ "$snap" != "$now" ]; then
+              echo "::error::PR #$n got a new commit while it was being verified ($snap -> $now)"
+              exit 1
+            fi
           done
           # Which fixture variables setup provisions, read at `main` through the API, never from this checkout: a
           # manual run can check out any branch, and a modified branch must not be able to change the answer.
@@ -652,7 +664,7 @@ jobs:
             sha="$(jq -r --argjson n "$n" '.[] | select(.number == $n) | .headRefOid' "${RUNNER_TEMP}/run-prs.json")"
             # The commit the verify step inspected, pinned under a tag: a branch name could move to a newer,
             # unverified commit between the check and the dispatch, and the live run has Hub access.
-            tag="hub-live-check/${GITHUB_RUN_ID}-${n}"
+            tag="hub-live-check/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${n}"
             # Buffered by 30 seconds: the runner's and GitHub's clocks can differ slightly.
             since="$(date -u -d '30 seconds ago' +%Y-%m-%dT%H:%M:%SZ)"
             if ! gh api -X POST "repos/${GITHUB_REPOSITORY}/git/refs" -f ref="refs/tags/${tag}" -f sha="$sha" >/dev/null \
