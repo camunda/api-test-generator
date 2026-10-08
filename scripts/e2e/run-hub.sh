@@ -147,6 +147,8 @@ make_fixtures() {
   # content must be valid BPMN XML — createFile rejects a non-parseable body (400).
   local bpmn='<?xml version="1.0" encoding="UTF-8"?><bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" id="Definitions_1" targetNamespace="http://bpmn.io/schema/bpmn"><bpmn:process id="Process_1" isExecutable="false"/></bpmn:definitions>'
   export RV_FIXTURE_WORKSPACE_KEY; RV_FIXTURE_WORKSPACE_KEY="$(curl -s -X POST "$POS_URL/workspaces" "${h[@]}" -d '{"name":"rv-fixture-ws"}' | _jget workspaceKey)"
+  # removeClusterRegistration 403 auth-deny: clusterId is a plain path string that the permission check reads before any cluster lookup or feature-flag gate (see HubV2ClusterController.deleteCluster), so a made-up id reaches the 403. No cluster is created (none can exist without dynamic cluster management enabled) and the denied delete removes nothing.
+  export RV_FIXTURE_CLUSTER_ID; RV_FIXTURE_CLUSTER_ID="rv-fixture-nonexistent-cluster"
   export RV_FIXTURE_V2_PROJECT_KEY; RV_FIXTURE_V2_PROJECT_KEY="$(curl -s -X POST "$POS_URL/projects" "${h[@]}" -d "$(printf '{"name":"rv-fixture-proj-v2","workspaceKey":"%s"}' "$RV_FIXTURE_WORKSPACE_KEY")" | _jget projectKey)"
   export RV_FIXTURE_FOLDER_KEY;    RV_FIXTURE_FOLDER_KEY="$(curl -s -X POST "$POS_URL/folders" "${h[@]}" -d "$(printf '{"name":"rv-fixture-folder","projectKey":"%s"}' "$RV_FIXTURE_V2_PROJECT_KEY")" | _jget folderKey)"
   local file_body; file_body="$(BPMN="$bpmn" PK="$RV_FIXTURE_V2_PROJECT_KEY" python3 -c 'import json,os; print(json.dumps({"name":"rv-fixture-file","projectKey":os.environ["PK"],"content":os.environ["BPMN"],"type":"BPMN"}))')"
