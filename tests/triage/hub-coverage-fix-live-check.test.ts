@@ -21,8 +21,10 @@ interface Opts {
   tagFails?: boolean;
   dispatchFails?: boolean;
   commentFails?: boolean;
-  // The run list the fake `gh run list` returns, after jq is applied by the script itself.
-  runs?: { databaseId: number; createdAt: string; headSha: string }[];
+  // Run ids of the commit that exist before the dispatch, and the ones that appear once `workflow run` was called.
+  before?: number[];
+  after?: number[];
+  listFails?: boolean;
   attempt?: string;
 }
 
@@ -43,11 +45,8 @@ function run(o: Opts = {}) {
         { number: 11, state: 'OPEN', headRefName: 'fix/coverage-x-999', headRefOid: SHA },
       ];
   writeFileSync(join(dir, 'prs.json'), JSON.stringify(prs));
-  const future = new Date(Date.now() + 3600_000).toISOString();
-  writeFileSync(
-    join(dir, 'runs.json'),
-    JSON.stringify(o.runs ?? [{ databaseId: 42, createdAt: future, headSha: SHA }]),
-  );
+  writeFileSync(join(dir, 'before'), (o.before ?? []).join('\n'));
+  writeFileSync(join(dir, 'after'), (o.after ?? [42]).join('\n'));
   writeFileSync(
     join(dir, 'gh'),
     [
@@ -56,8 +55,8 @@ function run(o: Opts = {}) {
       'for LAST_ARG; do :; done',
       'case "$1 $2" in',
       '  "api -X") [ "$FAKE_TAG_FAILS" = 1 ] && exit 1; exit 0 ;;',
-      '  "workflow run") [ "$FAKE_DISPATCH_FAILS" = 1 ] && exit 1; exit 0 ;;',
-      '  "run list") jq -r "$LAST_ARG" "$FAKE_RUNS"; exit 0 ;;',
+      '  "workflow run") [ "$FAKE_DISPATCH_FAILS" = 1 ] && exit 1; touch "$FAKE_DIR/dispatched"; exit 0 ;;',
+      '  "run list") [ "$FAKE_LIST_FAILS" = 1 ] && exit 1; cat "$FAKE_DIR/before"; echo; [ -e "$FAKE_DIR/dispatched" ] && cat "$FAKE_DIR/after"; exit 0 ;;',
       '  "pr comment") [ "$FAKE_COMMENT_FAILS" = 1 ] && exit 1; exit 0 ;;',
       'esac',
       'exit 0',
@@ -80,7 +79,8 @@ function run(o: Opts = {}) {
       POLL_SECONDS: '0',
       POLL_TRIES: '2',
       FAKE_LOG: log,
-      FAKE_RUNS: join(dir, 'runs.json'),
+      FAKE_DIR: dir,
+      FAKE_LIST_FAILS: o.listFails ? '1' : '0',
       FAKE_TAG_FAILS: o.tagFails ? '1' : '0',
       FAKE_DISPATCH_FAILS: o.dispatchFails ? '1' : '0',
       FAKE_COMMENT_FAILS: o.commentFails ? '1' : '0',
@@ -140,14 +140,24 @@ describe('hub-coverage-fix live check dispatch', () => {
     expect(r.calls).not.toContain('workflow run');
   });
 
-  it('matches the run by the verified commit and the start time, not by a branch', () => {
-    const future = new Date(Date.now() + 3600_000).toISOString();
-    const other = run({ runs: [{ databaseId: 9, createdAt: future, headSha: 'b'.repeat(40) }] });
-    expect(other.status).toBe(1);
-    expect(other.calls).toContain('its run could not be found');
-    const old = run({ runs: [{ databaseId: 9, createdAt: '2020-01-01T00:00:00Z', headSha: SHA }] });
-    expect(old.status).toBe(1);
-    expect(old.calls).not.toContain('--branch');
+  it('links only a run that appeared after the dispatch, never one that already existed for the commit', () => {
+    // An earlier attempt's run (7) exists before the dispatch; the new one (42) appears after it.
+    const r = run({ before: [7], after: [42] });
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.calls).toContain('actions/runs/42');
+    expect(r.calls).not.toContain('actions/runs/7');
+    // Nothing new appeared: the old run must not be linked.
+    const stale = run({ before: [7], after: [] });
+    expect(stale.status).toBe(1);
+    expect(stale.calls).not.toContain('actions/runs/7');
+    expect(stale.calls).toContain('its run could not be found');
+  });
+
+  it('does not start a run when the existing runs of the commit cannot be listed', () => {
+    const r = run({ listFails: true });
+    expect(r.status).toBe(1);
+    expect(r.calls).not.toContain('workflow run');
+    expect(r.calls).toContain('could not be started automatically');
   });
 
   it('fails the step when the comment cannot be posted', () => {
