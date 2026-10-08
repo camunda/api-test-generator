@@ -827,7 +827,11 @@ name, so no branch name can be trusted), branches `fix/coverage-*` and
 `fix/nightly-triage-*`, and an empty branch or author. For those, a person
 reads the diff and then runs
 [hub-ondemand-test.yml](.github/workflows/hub-ondemand-test.yml) on the branch
-before merging. The `hub-invariants` job that runs automatically via `ci.yml`
+before merging. One exception: for `fix/coverage-*` PRs of the coverage-fix
+agent, the workflow's `verify` job starts that same on-demand run itself, on
+the exact commit it verified (pinned under a `hub-live-check/*` tag), and
+comments the run link on the PR. It starts only after verification passes.
+Every other `qa-processes` PR keeps the manual rule. The `hub-invariants` job that runs automatically via `ci.yml`
 only checks static invariants against the pinned spec, so it is not a substitute.
 
 Before filing a genuinely NEW (not already-known) product bug, #482 adds a
