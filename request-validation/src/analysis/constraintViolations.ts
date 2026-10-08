@@ -1,12 +1,36 @@
 import type { OperationModel, ValidationScenario } from '../model/types.js';
 import { buildBaselineBody } from '../schema/baseline.js';
 import { buildWalk, type WalkNode } from '../schema/walker.js';
+import { type CapabilityGateInfo, isBlankValue } from '../util/capabilityGate.js';
 import { buildGuaranteedPatternMismatch } from '../util/patternMismatch.js';
 import { makeId } from './common.js';
 
 interface Opts {
   onlyOperations?: Set<string>;
   capPerOperation?: number;
+  /**
+   * Field name -> capability-gate rejection detail, from
+   * `configs/<config>/ontology/global-context-seeds.json`'s
+   * `capabilityGate` entries (#404) — e.g. `tenantId` under single-tenant
+   * mode. Only applies to an OPTIONAL occurrence of the name
+   * (`node.requiredByParent` falsy); a required occurrence (e.g. the
+   * owning resource's own identifier) is never affected.
+   *
+   * Confirmed live behaviour for a gated, optional, FLAT field:
+   *  - a non-blank mutation value is always rejected, 400, with `detail`
+   *    containing the gate's `disabledDetailContains` — regardless of the
+   *    value's own shape (garbage length, bad pattern, …). Flip the
+   *    expectation to that instead of the field's own constraint.
+   *  - a blank/whitespace-only value is silently normalized to a default
+   *    and the request proceeds to whatever that operation's own outcome
+   *    is for a capability-omitted request — not a 400 for ANY operation,
+   *    and not generalizable to a single alternate expectation either, so
+   *    this mutation is skipped rather than asserting a guess.
+   * A NESTED occurrence (e.g. a search filter field) is a different,
+   * separately-confirmed case: never validated regardless of value, always
+   * 200 with empty results.
+   */
+  capabilityGates?: ReadonlyMap<string, CapabilityGateInfo>;
 }
 
 function isObject(v: unknown): v is Record<string, unknown> {
@@ -18,6 +42,7 @@ export function generateConstraintViolations(
   opts: Opts,
 ): ValidationScenario[] {
   const out: ValidationScenario[] = [];
+  const capabilityGates = opts.capabilityGates ?? new Map();
   for (const op of ops) {
     if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId)) continue;
     const walk = buildWalk(op);
@@ -31,26 +56,63 @@ export function generateConstraintViolations(
       if (!node.constraints || !t) continue;
       const path = findPathFromRoot(root, node);
       if (!path) continue;
+      const gate =
+        node.key && node.requiredByParent !== true ? capabilityGates.get(node.key) : undefined;
+      const isNested = path.length > 1;
+      // Confirmed live ONLY for a search/list operation's `filter` object
+      // (e.g. `filter.tenantId`): a malformed-but-correctly-typed value
+      // inside it is never validated, always a non-matching predicate. A
+      // gated field nested under some OTHER root (not yet observed in the
+      // bundled spec) is NOT assumed to behave the same way — leave it
+      // ungated rather than guess.
+      const isFilterNested = isNested && path[0] === 'filter';
       const mutations = planConstraintMutations(node.constraints, t);
       for (const mut of mutations) {
         if (opts.capPerOperation && produced >= opts.capPerOperation) break;
+        // #404 — a gated, optional, FLAT field's blank/whitespace-only
+        // mutation is silently normalized and the request proceeds to
+        // whatever that operation's own outcome is; not a 400 for any
+        // operation, and not generalizable to one alternate expectation,
+        // so skip it rather than assert a guess.
+        if (gate && !isNested && isBlankValue(mut.value)) continue;
+        // A gated field nested under some root OTHER than `filter` has no
+        // confirmed behaviour either way — skip it rather than assert the
+        // filter-specific 200/empty-items outcome or the flat rejection,
+        // neither of which is verified for this shape (see isFilterNested
+        // comment above).
+        if (gate && isNested && !isFilterNested) continue;
         const body = structuredClone(baseline);
         if (!applyAtPath(body, path, mut.value)) continue;
-        out.push({
+        const target = path.join('.');
+        const scenario: ValidationScenario = {
           id: makeId([op.operationId, 'constraint', path.join('_'), mut.kind]),
           operationId: op.operationId,
           method: op.method,
           path: op.path,
           type: 'constraint-violation',
-          target: path.join('.'),
+          target,
           requestBody: body,
           params: buildParams(op.path),
           expectedStatus: 400,
-          description: `Constraint violation ${mut.kind} on ${path.join('.')}`,
+          description: `Constraint violation ${mut.kind} on ${target}`,
           headersAuth: true,
           constraintKind: mut.kind,
           constraintOrigin: 'body',
-        });
+        };
+        if (gate && isFilterNested) {
+          // Confirmed: a search/filter field is never validated regardless
+          // of value — always 200 with empty results.
+          scenario.expectedStatus = 200;
+          scenario.expectEmptyItems = true;
+          scenario.description = `Malformed ${target} is accepted as a non-matching search filter, not a constraint violation (#404)`;
+        } else if (gate) {
+          // Confirmed: any non-blank value is rejected while the
+          // capability is off, independent of the value's own shape.
+          if (gate.disabledStatus) scenario.expectedStatus = Number(gate.disabledStatus);
+          scenario.expectDetailContains = gate.disabledDetailContains;
+          scenario.description = `${target} is rejected because the capability is disabled, not for its ${mut.kind} violation (#404)`;
+        }
+        out.push(scenario);
         produced++;
       }
       if (opts.capPerOperation && produced >= opts.capPerOperation) break;

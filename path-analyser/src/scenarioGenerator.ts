@@ -2,6 +2,7 @@ import { bindSemanticInput } from './bindSemanticInput.js';
 import { deterministicSuffix } from './deterministicSuffix.js';
 import { buildBpmnModelSpec, buildModelSpec, findModelSpec } from './modelSpecBuilders.js';
 import { getModelKindForSemantic } from './ontology/artifactModelKinds.js';
+import { capabilityGateFor } from './ontology/explicitValueGate.js';
 import {
   findDeploymentGatewayOpId,
   findJobActivatorOpId,
@@ -2307,6 +2308,22 @@ export function generateOptionalSubShapeVariants(
         leafPaths: [leaf.fieldPath],
         leafSemantics: [leaf.semantic],
       };
+      // #404 — a FLAT leaf whose field represents a capability the target
+      // environment may have disabled (e.g. tenantId under single-tenant
+      // mode): populating it with this well-formed synthetic value is
+      // confirmed to always be rejected while the capability is off,
+      // regardless of the value itself. Flip the expectation to that
+      // rejection instead of silently dropping the variant — a nested leaf
+      // (a search filter field) is a different, unaffected case and
+      // `capabilityGateFor` never matches one.
+      const gate = capabilityGateFor(graph.domain, leaf.fieldPath);
+      if (gate) {
+        scenario.expectedResult = {
+          kind: 'error',
+          code: gate.disabledStatus ?? '400',
+          detailContains: gate.disabledDetailContains,
+        };
+      }
       collectionScenarios.push(scenario);
     }
   }

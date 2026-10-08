@@ -1359,3 +1359,122 @@ describe('planner contracts: required request-body semantic chained from produce
     expect(opIdsOf(coll.scenarios[0])).toEqual(['createTenantLike']);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Capability-gated optional leaf flips to an expected rejection, not a skip (#404).
+//
+// A FLAT optional leaf whose field name a config's globalContextSeeds ABox
+// marks `capabilityGate` must still emit a variant — with
+// `expectedResult: { kind: 'error', code: '400', detailContains: <gate> }` —
+// instead of being dropped. A NESTED leaf of the same field name (e.g. a
+// search filter) is a different, unaffected case and must be planned
+// completely normally (no flip, no skip). A sibling optional leaf of an
+// un-gated field is unaffected either way.
+// ---------------------------------------------------------------------------
+const fixtureCapabilityGatedVariant: OperationGraph = {
+  ...makeGraph([
+    makeOp('createWidget', { produces: ['WidgetKey'], providerMap: { WidgetKey: true } }),
+    makeOp('deployResource', {
+      optionalSubShapes: [
+        {
+          rootPath: '',
+          leaves: [
+            { fieldPath: 'tenantId', semantic: 'TenantId' },
+            { fieldPath: 'widgetKey', semantic: 'WidgetKey' },
+          ],
+        },
+      ],
+    }),
+    makeOp('searchWidgets', {
+      optionalSubShapes: [
+        {
+          rootPath: 'filter',
+          leaves: [{ fieldPath: 'filter.tenantId', semantic: 'TenantId' }],
+        },
+      ],
+    }),
+  ]),
+  domain: {
+    version: 1,
+    globalContextSeeds: [
+      {
+        binding: 'tenantIdVar',
+        fieldName: 'tenantId',
+        seedRule: 'tenantIdVar',
+        capabilityGate: { disabledDetailContains: 'multi-tenancy is disabled' },
+      },
+    ],
+  },
+};
+
+describe('planner contracts: capability-gated optional leaf flips to expected rejection (#404)', () => {
+  it('flips a FLAT gated leaf to an error expectation instead of dropping it', () => {
+    const variants = generateOptionalSubShapeVariants(
+      fixtureCapabilityGatedVariant,
+      'deployResource',
+      {
+        maxVariantsPerEndpoint: 10,
+      },
+    );
+    const tenantVariant = variants.scenarios.find((s) =>
+      s.populatesSubShape?.leafSemantics?.includes('TenantId'),
+    );
+    expect(tenantVariant).toBeDefined();
+    expect(tenantVariant?.expectedResult).toEqual({
+      kind: 'error',
+      code: '400',
+      detailContains: 'multi-tenancy is disabled',
+    });
+    // The sibling optional leaf of an un-gated field is unaffected — no flip.
+    const widgetVariant = variants.scenarios.find((s) =>
+      s.populatesSubShape?.leafSemantics?.includes('WidgetKey'),
+    );
+    expect(widgetVariant?.expectedResult).toBeUndefined();
+  });
+
+  it('does NOT flip a NESTED occurrence of the same gated field name', () => {
+    const variants = generateOptionalSubShapeVariants(
+      fixtureCapabilityGatedVariant,
+      'searchWidgets',
+      {
+        maxVariantsPerEndpoint: 10,
+      },
+    );
+    const filterVariant = variants.scenarios.find((s) =>
+      s.populatesSubShape?.leafPaths?.includes('filter.tenantId'),
+    );
+    expect(filterVariant).toBeDefined();
+    expect(filterVariant?.expectedResult).toBeUndefined();
+  });
+
+  it('honors a gate-declared disabledStatus instead of the 400 default', () => {
+    const fixtureWithCustomStatus: OperationGraph = {
+      ...fixtureCapabilityGatedVariant,
+      domain: {
+        version: 1,
+        globalContextSeeds: [
+          {
+            binding: 'tenantIdVar',
+            fieldName: 'tenantId',
+            seedRule: 'tenantIdVar',
+            capabilityGate: {
+              disabledDetailContains: 'tenant scoping is unavailable',
+              disabledStatus: '403',
+            },
+          },
+        ],
+      },
+    };
+    const variants = generateOptionalSubShapeVariants(fixtureWithCustomStatus, 'deployResource', {
+      maxVariantsPerEndpoint: 10,
+    });
+    const tenantVariant = variants.scenarios.find((s) =>
+      s.populatesSubShape?.leafSemantics?.includes('TenantId'),
+    );
+    expect(tenantVariant?.expectedResult).toEqual({
+      kind: 'error',
+      code: '403',
+      detailContains: 'tenant scoping is unavailable',
+    });
+  });
+});

@@ -103,6 +103,7 @@ function validateProblemDetailShape(
   body: unknown,
   expectedStatus: number,
   parseError: string | undefined,
+  expectDetailContains?: string,
 ): string[] {
   if (parseError) return [`response body is not valid JSON: ${parseError}`];
   if (body === undefined) return ['response body is empty; expected a ProblemDetail object'];
@@ -123,7 +124,47 @@ function validateProblemDetailShape(
   } else if (body.status !== expectedStatus) {
     errors.push(`ProblemDetail.status (${body.status}) does not match the HTTP status (${expectedStatus})`);
   }
+  // #404 — pin WHY the request was rejected, not just that it was (e.g. a
+  // capability-gated field's rejection must actually say "multi-tenancy is
+  // disabled", not just happen to be a 400 for an unrelated reason).
+  if (expectDetailContains && typeof body.detail === 'string' && !body.detail.includes(expectDetailContains)) {
+    errors.push(
+      `ProblemDetail.detail (${JSON.stringify(body.detail)}) does not contain ${JSON.stringify(expectDetailContains)}`,
+    );
+  }
   return errors;
+}
+
+/**
+ * Check only that `body.detail` contains `expectDetailContains` — used when
+ * the broader ProblemDetail shape check is suppressed
+ * (`opts.skipProblemDetailShape`, a known systemic shape gap) but the
+ * scenario still needs WHY the rejection happened pinned (#404). Without
+ * this, a gated scenario that also needed `skipProblemDetailShape` would
+ * silently lose the detail-pinning guarantee entirely, since
+ * `validateProblemDetailShape` (which normally does this check) never runs
+ * for it.
+ */
+function validateDetailContains(
+  body: unknown,
+  parseError: string | undefined,
+  expectDetailContains: string,
+): string[] {
+  if (parseError) return [`response body is not valid JSON: ${parseError}`];
+  if (body === undefined) return ['response body is empty; expected a ProblemDetail object'];
+  if (!isRecord(body)) {
+    const got = body === null ? 'null' : Array.isArray(body) ? 'array' : typeof body;
+    return [`response body is not a JSON object (got ${got})`];
+  }
+  if (typeof body.detail !== 'string') {
+    return [`ProblemDetail.detail missing or not a string (got ${JSON.stringify(body.detail)})`];
+  }
+  if (!body.detail.includes(expectDetailContains)) {
+    return [
+      `ProblemDetail.detail (${JSON.stringify(body.detail)}) does not contain ${JSON.stringify(expectDetailContains)}`,
+    ];
+  }
+  return [];
 }
 
 /**
@@ -185,6 +226,12 @@ export async function assertResponseStatus(
      * `expected` is not itself 2xx.
      */
     expectEmptyItems?: boolean;
+    /**
+     * Also assert the error body's `detail` contains this substring
+     * (ignored when `expected` is not itself an error status). Pins WHY a
+     * request was rejected, not just that it was — see #404.
+     */
+    expectDetailContains?: string;
   },
 ): Promise<void> {
   const actual = res.status();
@@ -202,8 +249,17 @@ export async function assertResponseStatus(
   // original "no body read on a plain match" behavior is preserved for that
   // case.
   const shouldCheckShape = !statusMismatch && expected >= 400 && !opts?.skipProblemDetailShape;
+  const expectDetailContains = opts?.expectDetailContains;
+  // When the broader shape check is suppressed (a known shape gap) but this
+  // scenario still needs WHY it was rejected pinned, check just that — see
+  // `validateDetailContains`. Only reachable when `shouldCheckShape` is
+  // false: when it's true, that check already covers the detail substring.
+  const shouldCheckDetailOnly =
+    !statusMismatch && expected >= 400 && !!opts?.skipProblemDetailShape && !!expectDetailContains;
   const shouldCheckEmptyItems = !statusMismatch && expected < 400 && !!opts?.expectEmptyItems;
-  if (!statusMismatch && !shouldCheckShape && !shouldCheckEmptyItems) return;
+  if (!statusMismatch && !shouldCheckShape && !shouldCheckDetailOnly && !shouldCheckEmptyItems) {
+    return;
+  }
 
   let bodyText = '';
   try {
@@ -214,7 +270,7 @@ export async function assertResponseStatus(
   }
 
   let shapeErrors: string[] = [];
-  if (shouldCheckShape || shouldCheckEmptyItems) {
+  if (shouldCheckShape || shouldCheckDetailOnly || shouldCheckEmptyItems) {
     let bodyJson: unknown;
     let parseError: string | undefined;
     if (bodyText) {
@@ -225,8 +281,10 @@ export async function assertResponseStatus(
       }
     }
     shapeErrors = shouldCheckShape
-      ? validateProblemDetailShape(bodyJson, expected, parseError)
-      : validateEmptyItemsShape(bodyJson, parseError);
+      ? validateProblemDetailShape(bodyJson, expected, parseError, expectDetailContains)
+      : shouldCheckDetailOnly && expectDetailContains
+        ? validateDetailContains(bodyJson, parseError, expectDetailContains)
+        : validateEmptyItemsShape(bodyJson, parseError);
   }
 
   if (!statusMismatch && shapeErrors.length === 0) return;

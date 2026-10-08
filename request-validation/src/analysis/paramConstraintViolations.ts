@@ -1,4 +1,5 @@
 import type { OperationModel, ParameterModel, ValidationScenario } from '../model/types.js';
+import { type CapabilityGateInfo, isBlankValue } from '../util/capabilityGate.js';
 import {
   buildValidValue,
   isUrlCollapsingPathSegment,
@@ -11,6 +12,16 @@ import { makeId } from './common.js';
 interface Opts {
   onlyOperations?: Set<string>;
   capPerOperation?: number;
+  /**
+   * Field name -> capability-gate rejection detail (#404), the same map
+   * `constraintViolations.ts` consumes. A path/query parameter is always a
+   * flat, scalar occurrence (never nested), so only the two flat cases
+   * apply here: an optional gated parameter's blank/whitespace mutation is
+   * excluded (silently normalized, outcome not generalizable), and its
+   * non-blank mutation is flipped to expect the capability rejection
+   * instead of the parameter's own constraint violation.
+   */
+  capabilityGates?: ReadonlyMap<string, CapabilityGateInfo>;
 }
 
 function buildViolations(
@@ -60,6 +71,28 @@ function buildViolations(
 }
 
 /**
+ * Violations {@link buildViolations} produced for `p`, minus any a
+ * capability gate (#404) would exclude: a gated, OPTIONAL parameter's
+ * blank/whitespace-only mutation is silently normalized and the request
+ * proceeds to whatever that operation's own outcome is — not a 400 for any
+ * operation — so it's dropped rather than asserted. Shared by the generator
+ * and {@link isParamConstraintEligible} so the two can't drift apart: a
+ * parameter whose only violation is blank-and-gated must be reported
+ * ineligible by both, not look applicable to the coverage script while the
+ * generator itself produces nothing for it.
+ */
+function eligibleViolations(
+  p: ParameterModel,
+  r: ResolvedParamSchema,
+  capabilityGates: ReadonlyMap<string, CapabilityGateInfo> | undefined,
+): { kind: string; invalid: string }[] {
+  const violations = buildViolations(p, r);
+  const gate = !p.required ? capabilityGates?.get(p.name) : undefined;
+  if (!gate) return violations;
+  return violations.filter((v) => !isBlankValue(v.invalid));
+}
+
+/**
  * Is `op` eligible for a param-constraint-violation scenario? Calls
  * {@link buildViolations} itself (via `resolveParamSchema`, which merges the
  * top-level `allOf` chain — Camunda key types carry pattern/maxLength inside
@@ -71,12 +104,15 @@ function buildViolations(
  * an overly-permissive pattern produces nothing, and a naive presence check
  * would wrongly mark the kind applicable there.
  */
-export function isParamConstraintEligible(op: OperationModel): boolean {
+export function isParamConstraintEligible(
+  op: OperationModel,
+  capabilityGates?: ReadonlyMap<string, CapabilityGateInfo>,
+): boolean {
   return op.parameters.some((p) => {
     if (p.in !== 'path' && p.in !== 'query') return false;
     const r = resolveParamSchema(p);
     if (!r) return false;
-    return buildViolations(p, r).length > 0;
+    return eligibleViolations(p, r, capabilityGates).length > 0;
   });
 }
 
@@ -84,12 +120,16 @@ function buildParams(
   path: string,
   overrides: Record<string, string>,
 ): Record<string, string> | undefined {
+  // A path with no `{...}` tokens (e.g. GET /system/usage-metrics) used to
+  // make this return undefined unconditionally, discarding every query-param
+  // override along with it — so a query-only operation's param-constraint
+  // test never actually sent its malformed value. Build from `overrides`
+  // regardless of whether the path itself carries any path params.
   const m = path.match(/\{([^}]+)}/g);
-  if (!m) return undefined;
   const params: Record<string, string> = {};
-  for (const token of m) params[token.slice(1, -1)] = 'x';
+  if (m) for (const token of m) params[token.slice(1, -1)] = 'x';
   for (const [k, v] of Object.entries(overrides)) params[k] = v;
-  return params;
+  return Object.keys(params).length > 0 ? params : undefined;
 }
 
 export function generateParamConstraintViolations(
@@ -104,8 +144,9 @@ export function generateParamConstraintViolations(
       if (p.in !== 'path' && p.in !== 'query') continue; // focus path+query first
       const resolved = resolveParamSchema(p);
       if (!resolved) continue;
-      const violations = buildViolations(p, resolved);
+      const violations = eligibleViolations(p, resolved, opts.capabilityGates);
       if (!violations.length) continue;
+      const gate = !p.required ? opts.capabilityGates?.get(p.name) : undefined;
       // Use valid placeholders for all params first
       const validMap: Record<string, string> = {};
       for (const pp of op.parameters.filter((pp) => pp.in === p.in)) {
@@ -123,10 +164,13 @@ export function generateParamConstraintViolations(
           type: 'param-constraint-violation',
           target: `${p.in}.${p.name}`,
           params,
-          expectedStatus: 400,
-          description: `${p.in === 'path' ? 'Path' : 'Query'} parameter ${p.name} ${v.kind} constraint violation`,
+          expectedStatus: gate?.disabledStatus ? Number(gate.disabledStatus) : 400,
+          description: gate
+            ? `${p.in === 'path' ? 'Path' : 'Query'} parameter ${p.name} is rejected because the capability is disabled, not for its ${v.kind} violation (#404)`
+            : `${p.in === 'path' ? 'Path' : 'Query'} parameter ${p.name} ${v.kind} constraint violation`,
           headersAuth: true,
           source: p.in,
+          expectDetailContains: gate?.disabledDetailContains,
           // Additional metadata for emitter/title building
           constraintKind: v.kind,
           constraintOrigin: 'param',

@@ -565,6 +565,7 @@ function renderPythonRequestStep(
   const responseVar = `response_${stepNum}`;
   const methodName = step.method.toLowerCase();
   const responseDataVar = `response_data_${stepNum}`;
+  const detailVar = `detail_${stepNum}`;
   const payloadTemplate =
     step.bodyKind === 'multipart'
       ? (step.multipartTemplate ?? step.bodyTemplate)
@@ -640,13 +641,28 @@ function renderPythonRequestStep(
   lines.push(`    assert ${responseVar}.status_code == ${step.expect.status}`);
 
   const needsResponseData =
-    (step.extract && step.extract.length > 0) || (responseShapeFields?.length ?? 0) > 0;
+    (step.extract && step.extract.length > 0) ||
+    (responseShapeFields?.length ?? 0) > 0 ||
+    !!step.expect.detailContains;
   if (needsResponseData) {
     lines.push(`    ${responseDataVar}: Any = None`);
     lines.push('    try:');
     lines.push(`        ${responseDataVar} = ${responseVar}.json()`);
     lines.push('    except ValueError:');
     lines.push('        pass');
+    if (step.expect.detailContains) {
+      // #404 — pin WHY the request was rejected, not just that it was.
+      // `.get('detail', '')`'s default only applies when the key is ABSENT:
+      // a present `"detail": null` still returns None, and `in None` raises
+      // TypeError; a list-valued detail would do list membership instead of
+      // substring matching. isinstance(..., str) first rules out both.
+      lines.push(
+        `    ${detailVar} = ${responseDataVar}.get('detail') if isinstance(${responseDataVar}, dict) else None`,
+      );
+      lines.push(
+        `    assert isinstance(${detailVar}, str) and ${renderPythonValue(step.expect.detailContains)} in ${detailVar}, f"expected detail to contain {${renderPythonValue(step.expect.detailContains)}!r}, got: {${detailVar}!r}"`,
+      );
+    }
     if (step.extract) {
       for (const [extractIdx, extract] of step.extract.entries()) {
         // Use the _MISSING sentinel (not None) so an absent field doesn't
