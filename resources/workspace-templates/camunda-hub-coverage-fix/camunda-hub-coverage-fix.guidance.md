@@ -169,6 +169,16 @@ response, is not held by an exclusion, and has no scoped exclusion. Work out **w
      `request-validation/src/analysis/authDeny.ts` (it needs a request that reaches the authority check, so every key
      and body field needs a valid, fixture-backed value); for **404**, `isNotFoundEligible` in
      `request-validation/src/analysis/notFoundFakeId.ts` (it needs an ID it can make up).
+   - **Check the order Hub does things in before you say a real record is needed.** Open the operation's controller in
+     the camunda-hub clone (search for the operation's route, for example `@DeleteMapping("/clusters/{clusterId}")`, or
+     for its `@PreAuthorize`). If the permission check (`@PreAuthorize`) runs first and the path key is a plain `String`
+     that is not looked up before it (no entity parameter that Spring resolves on its own), then a made-up value for that
+     key still reaches the 403, and the test needs no real record, no created fixture and no feature flag. Do not
+     copy the answer from another operation: `removeMember` looks the member up first, `removeClusterRegistration` does
+     not. When a made-up value is enough, the fix is outcome B with a plain fixed value
+     (`export RV_FIXTURE_X; RV_FIXTURE_X="<made-up value>"`), and the PR says in "What the live run must show" what else
+     could produce the same status. For example, if a disabled feature flag also answers 403, the test would pass for that
+     reason too, and a reviewer should know.
 2. **Decide which of three outcomes it is.** This applies to any operation, not to one endpoint: the question is
    always "what is the one thing missing, and may I add it?".
    - **A. Config only (you may fix it).** The only thing missing is an entry in `resourceFixtures` or
