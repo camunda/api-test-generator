@@ -33,6 +33,9 @@
     "pagination-offset-past-total": 14,
     "type-mismatch": 32
   },
+  "requestScenarioTypes": {
+    "body-top-type-mismatch": 32
+  },
   "zeroTestOperations": [
     {
       "operationId": "getClusterUsageMetrics",

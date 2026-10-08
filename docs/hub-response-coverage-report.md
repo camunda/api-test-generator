@@ -151,6 +151,13 @@ generates, how many endpoints have at least one test of that kind. The report na
 generator can build it, so a generator that quietly stops producing a kind would not appear there; this floor makes
 that fail the build instead.
 
+A second floor, `requestScenarioTypes`, does the same for a type of test that the coverage data counts under another
+kind's name (a top-level wrong-type body test, `body-top-type-mismatch`, is counted as `type-mismatch`). It keeps the
+raw number of tests of that type, so that generator cannot disappear while the kind it is counted under keeps the same
+endpoints. Raise either floor in the same PR that makes more endpoints or tests get that kind; if a type counted under
+another kind appears without a floor, the build fails until one is added. The script needs `MANIFEST.json` (written
+with `COVERAGE.json` by the request-validation generator) and stops with an error if it is missing.
+
 ## The coverage-fix agent
 
 Some gaps are small and safe to fix, so an AI agent can fix them and open a pull request for a person to review.

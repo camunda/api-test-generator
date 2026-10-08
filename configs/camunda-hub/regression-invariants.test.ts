@@ -1045,6 +1045,26 @@ describeForThisConfig('camunda-hub bundled-spec invariants (#128)', () => {
           );
         }
       }
+      // A scenario type that COVERAGE.json counts under another kind's name (body-top-type-mismatch as type-mismatch)
+      // is invisible to the endpoint counts above. Its raw scenario count has its own floor, so that generator cannot
+      // vanish while the kind it is counted under keeps the same endpoints.
+      const typeFloors = isRecord(floors.requestScenarioTypes) ? floors.requestScenarioTypes : {};
+      const typeActual = isRecord(summary.requestScenarioTypes) ? summary.requestScenarioTypes : {};
+      expect(
+        Object.keys(typeActual)
+          .filter((t) => !(t in kindActual) && !(t in typeFloors))
+          .sort(),
+        'scenario types counted under another kind but with no floor in requestScenarioTypes (add one)',
+      ).toEqual([]);
+      for (const [type, floor] of Object.entries(typeFloors)) {
+        const actual = typeof typeActual[type] === 'number' ? typeActual[type] : 0;
+        if (!isFloor(floor)) regressed.push(`requestScenarioTypes.${type}: floor is not a count`);
+        else if (actual < floor) {
+          regressed.push(
+            `scenario type ${type}: ${actual} scenarios, floor ${floor} (a generator stopped producing it?)`,
+          );
+        }
+      }
       expect(regressed, 'response coverage dropped below its floor').toEqual([]);
 
       const allowed = new Set(

@@ -327,7 +327,7 @@ def request_kind_endpoints(rv_ops):
 def build(args):
     gen = os.path.join(ROOT, 'generated', CONFIG)
     pw_dir, rv_dir = f'{gen}/playwright', f'{gen}/request-validation'
-    for needed in (f'{pw_dir}/coverage.json', f'{rv_dir}/COVERAGE.json'):
+    for needed in (f'{pw_dir}/coverage.json', f'{rv_dir}/COVERAGE.json', f'{rv_dir}/MANIFEST.json'):
         if not os.path.exists(needed):
             fail(f'{needed} not found - run testsuite:generate and generate:request-validation first')
 
@@ -336,6 +336,7 @@ def build(args):
     ops = load_spec_operations(spec)
     pos_cov = json.load(open(f'{pw_dir}/coverage.json'))
     rv_cov = json.load(open(f'{rv_dir}/COVERAGE.json'))
+    rv_manifest = json.load(open(f'{rv_dir}/MANIFEST.json'))
     rv_cfg = json.load(open(os.path.join(ROOT, 'configs', CONFIG, 'request-validation.json')))
 
     pos_asserted, pos_validated, pos_sent = scan_positive(pw_dir, ops)
@@ -453,6 +454,11 @@ def build(args):
         # The floors file keeps a minimum per kind, so a generator that silently stops producing a kind fails CI
         # even though the report no longer lists that kind as missing (it only lists kinds a generator can build).
         'requestKindEndpoints': request_kind_endpoints(rv_ops),
+        # The scenario count per RAW type, from MANIFEST.json. COVERAGE.json counts an aliased type under another
+        # kind's name (body-top-type-mismatch as type-mismatch), so a floor on the endpoint counts above cannot see
+        # that generator disappear while the other one keeps the same endpoints. The floors file keeps a minimum for
+        # each raw type that is aliased away.
+        'requestScenarioTypes': rv_manifest['counts'],
         'requestNoTests': sorted(r['operationId'] for r in rows if r['requestChecks'] == 'gap' and not r['requestPresent']),
         'shapeUnvalidated': sorted(r['operationId'] for r in rows if r['shape'] == 'gap'),
         'lifecycle': lifecycle,
