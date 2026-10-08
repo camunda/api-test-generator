@@ -39,20 +39,20 @@ So a night with no spec-bump or re-enable post is normal. A night with no nightl
 1. Open the thread under the digest. There is one line per failed test.
 2. Find your line below, by the icon at its start and the link at its end, and do what the last column says.
 
-| The line shows | What happened | What you do |
-|---|---|---|
-| 🎫 known issue | Hub already has an issue for it | Nothing. The linked issue is the work |
-| 📦 product, with a 📝 link | Hub is wrong, and the agent filed a **new** Hub issue (`hub-medic` was pinged) | Open the issue and take it, or hand it to the owning team |
-| 📦 product, **no link** | Hub is probably wrong, but no issue was filed and **nobody was pinged** | Open the triage run and read the finding. Then file the Hub issue yourself |
-| 🧪 test-generation, with a 🛠️ link | The generated test is wrong; the agent opened a fix PR | Open the PR, read the diff, and merge it if it is right |
-| 🧪 test-generation, with a ⛔ link | A **suppress PR**: it switches the test off until a Hub bug is fixed. It carries the same labels as a fix PR; the ⛔ link and the branch name `fix/nightly-triage-suppress-…` tell them apart | Open the PR. Merge it only if the linked Hub issue is real |
-| 🧪 test-generation, with a ♻️ link | An open PR already covers it | Open that PR and review it |
-| 🧪 test-generation, **no link** | The agent could not fix it safely, so it only reported | Open the triage run, read the finding, and fix the test yourself. If you are stuck, ask in `#ask-qa` |
-| 🔧 infrastructure | The run broke (Hub start, network, registry), not Hub or the tests | Open the failed step in the nightly run and read the error. Say so in the channel with the run link. Re-run only once the outside cause is fixed |
-| 🎲 flakiness | A test passes sometimes and fails sometimes | Open the test in the nightly report and compare the passed and failed attempts. If Hub caused it, file a Hub issue. If the test did, fix the test. Do not just re-run |
-| ⏳ or 🔗 on a line | A hint that a recent Hub change may explain it. It is a guess | Investigate by hand. It does not mean a PR exists |
-| 🚫 unmapped, or the 🚫 *Coverage gap* line in the digest | An operation has no generated test at all. It is not a failing test | Review the 🛠️ fix PR on the line if there is one. With none, it is only reported: see [the coverage report guide](hub-response-coverage-report.md) |
-| ⚠️ on a line | The agent tried to open an issue or PR and failed | Do it by hand |
+| The line shows | What happened | PR opened automatically? | What you do |
+|---|---|---|---|
+| 🎫 known issue | Hub already has an issue for it | **No** | Nothing. The linked issue is the work |
+| 📦 product, with 📝 and ⛔ links | Hub is wrong. The agent filed a **new** Hub issue (`hub-medic` was pinged) and opened a **suppress PR** that switches the test off until Hub fixes it | **Yes**, a suppress PR | Open the Hub issue and take it, or hand it to the owning team. Review the suppress PR: merge it only if the linked Hub issue is real |
+| 📦 product, with a 📝 link, **no** ⛔ link | A Hub issue was filed, but no suppress PR: the test was already suppressed, an open PR already covers it, or opening it failed (the line shows ⚠️) | **No** | Open the Hub issue and take it. If the line shows ⚠️, add the suppress entry yourself |
+| 📦 product, **no link** | Hub is probably wrong, but no issue was filed and **nobody was pinged** | **No** | Open the triage run and read the finding. Then file the Hub issue yourself |
+| 🧪 test-generation, with a 🛠️ link | The generated test is wrong; the agent opened a **fix PR** | **Yes**, a fix PR | Open the PR, read the diff, and merge it if it is right |
+| 🧪 test-generation, with a ♻️ link | An open PR already covers it | **No** (one exists) | Open that PR and review it |
+| 🧪 test-generation, **no link** | The agent could not fix it safely, so it only reported | **No** | Open the triage run, read the finding, and fix the test yourself. If you are stuck, ask in `#ask-qa` |
+| 🔧 infrastructure | The run broke (Hub start, network, registry), not Hub or the tests | **No** | Open the failed step in the nightly run and read the error. Say so in the channel with the run link. Re-run only once the outside cause is fixed |
+| 🎲 flakiness | A test passes sometimes and fails sometimes | **No** | Open the test in the nightly report and compare the passed and failed attempts. If Hub caused it, file a Hub issue. If the test did, fix the test. Do not just re-run |
+| ⏳ or 🔗 on a line | A hint that a recent Hub change may explain it. It is a guess | **No**. It does not mean a PR exists | Investigate by hand |
+| 🚫 unmapped, or the 🚫 *Coverage gap* line in the digest | An operation has no generated test at all. It is not a failing test | **Sometimes**: a 🛠️ fix PR on the line | Review the PR if there is one. With none, it is only reported: see [the coverage report guide](hub-response-coverage-report.md) |
+| ⚠️ on a line | The agent tried to open an issue or PR and failed | **No** | Do it by hand |
 
 **When may I re-run?** Only to see whether it still fails after you fixed an outside cause (🔧 infrastructure). A re-run
 never fixes a flaky test (🎲): it only hides it.
@@ -151,10 +151,10 @@ Hub's latest spec. The headline says what changed:
 
 The last line says what to do:
 
-- **➡️ Adopt via bump PR #N**: the new spec is safe, and the bot has already opened the bump PR for you. The generator owner reviews and merges it, which moves the pin. While it stays open, later checks update the same PR; once it is merged, the next change gets a new one.
-- **📋 Blocked — see tracking issue #N**: the new spec breaks something, or needs a test the generator does not have. Read
+- **➡️ Adopt via bump PR #N** (PR opened automatically: **yes**): the new spec is safe, and the bot has already opened the bump PR for you. The generator owner reviews and merges it, which moves the pin. While it stays open, later checks update the same PR; once it is merged, the next change gets a new one.
+- **📋 Blocked — see tracking issue #N** (PR opened automatically: **no**, only an issue): the new spec breaks something, or needs a test the generator does not have. Read
   the issue. The pin does not move until it is fixed.
-- **⚠️ Spec-bump check failed for X**: a step of the job itself failed, so the drift result may be missing. Open the run
+- **⚠️ Spec-bump check failed for X** (PR opened automatically: **no**): a step of the job itself failed, so the drift result may be missing. Open the run
   before trusting that there is no drift.
 
 Nightlies are **not** blocked by a pending bump: they run against Hub's latest spec regardless. The pin only affects the
@@ -166,13 +166,13 @@ Nobody is pinged for this post, and the draft PR it opens has no reviewer. It is
 
 Skipped tests point to a Hub bug. This job watches those bugs. When one closes, it tries to bring the tests back.
 
-| Message | Meaning | Do this |
-|---|---|---|
-| 🎉 *issue* is closed — re-enabled: `ops` → draft PR | The skip was removed in a draft PR | Review the draft PR and run the suite on its branch (see "Run it by hand"; the automatic live check skips PRs from the automation account). Merge if it is green **and** the Hub issue was closed as fixed. If Hub closed it as not planned, close the PR: the skip must stay |
-| 🎉 … already has an open unskip PR | A PR for it exists already | Review that PR |
-| ⚠️ … breaks local generate/tests, no generator token was available, or opening the unskip PR failed | The job could not bring the test back this time | Open the workflow run and read the error. A missing token fixes itself on the next run |
-| 📋 … is closed as **fixed**, no specific operation(s) to auto-unskip | A suite-wide skip whose Hub bug is fixed. Nothing can be done automatically | Remove its entry from `knownIssues` in `configs/camunda-hub/request-validation.json` and, if the same operation is also skipped in `positive-suppress.json` (key `suppress`) or excluded in `request-validation.json` (key `excludeOperations`), that entry too. Then run the suite on your branch (see "Run it by hand") |
-| 📋 … is closed as **not planned** | Hub will not fix it, so the skip must stay | Set `"acknowledgedNotPlanned": true` on its `knownIssues` entry in `configs/camunda-hub/request-validation.json`. The alert then stops. Until you do, it repeats every day |
+| Message | Meaning | PR opened automatically? | Do this |
+|---|---|---|---|
+| 🎉 *issue* is closed — re-enabled: `ops` → draft PR | The skip was removed in a draft PR | **Yes**, a draft unskip PR | Review the draft PR and run the suite on its branch (see "Run it by hand"; the automatic live check skips PRs from the automation account). Merge if it is green **and** the Hub issue was closed as fixed. If Hub closed it as not planned, close the PR: the skip must stay |
+| 🎉 … already has an open unskip PR | A PR for it exists already | **No** (one exists) | Review that PR |
+| ⚠️ … breaks local generate/tests, no generator token was available, or opening the unskip PR failed | The job could not bring the test back this time | **No** | Open the workflow run and read the error. A missing token fixes itself on the next run |
+| 📋 … is closed as **fixed**, no specific operation(s) to auto-unskip | A suite-wide skip whose Hub bug is fixed. Nothing can be done automatically | **No** | Remove its entry from `knownIssues` in `configs/camunda-hub/request-validation.json` and, if the same operation is also skipped in `positive-suppress.json` (key `suppress`) or excluded in `request-validation.json` (key `excludeOperations`), that entry too. Then run the suite on your branch (see "Run it by hand") |
+| 📋 … is closed as **not planned** | Hub will not fix it, so the skip must stay | **No** | Set `"acknowledgedNotPlanned": true` on its `knownIssues` entry in `configs/camunda-hub/request-validation.json`. The alert then stops. Until you do, it repeats every day |
 
 **Not watched:** the "partly checked" items in the negative thread (`knownProblemDetailShapeGaps` in
 `request-validation.json`) are not covered by this check, so nothing tells you when their Hub issue closes. Look at the
@@ -206,7 +206,7 @@ More terms (medic, ontology, fingerprint, op-surface drift, auto-adopt, lifecycl
 [glossary](maintainers/glossary.md) and in the glossary of [hub-pr-check-cookbook.md](hub-pr-check-cookbook.md).
 
 - **Operation:** one API endpoint, as the spec names it (for example `getWorkspace`). The guide says "endpoint" and "operation" for the same thing.
-- **Fix PR / suppress PR:** a draft PR the triage agent opens in this repo. A fix PR corrects a wrong generated test. A suppress PR switches a test off until a Hub bug is fixed.
+- **Fix PR / suppress PR:** a draft PR the triage agent opens in this repo. A fix PR corrects a wrong generated test. A suppress PR switches a test off until a Hub bug is fixed. It carries the same labels as a fix PR; its branch is named `fix/nightly-triage-suppress-…`.
 - **Pin:** the camunda-hub commit the invariant tests are checked against.
 - **Skip:** a test left out on purpose because of a tracked Hub limitation, with an issue link. It can stay after the issue closes, when Hub will not fix it. A **suite-wide skip** is not tied to one endpoint.
 - **Partly checked:** the test runs, but one assertion (the error-body shape) is not made.
