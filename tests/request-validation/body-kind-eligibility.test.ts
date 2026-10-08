@@ -169,6 +169,24 @@ describe('body kind eligibility matches what the generators build', () => {
     expect([...produced(op(searchBody))]).toEqual([]);
   });
 
+  it('keeps a buildable root allOf eligible, and its generators build the scenarios', () => {
+    // Two object constituents: both list a required field, and `id` has two different types.
+    const o = op({
+      allOf: [
+        obj({ id: { type: 'string' }, n: { type: 'string' } }, ['id']),
+        obj({ id: { type: 'integer' }, m: { type: 'string' } }, ['m']),
+      ],
+    });
+    expect([...eligible(o)].sort()).toEqual(['allof-conflict', 'allof-missing-required']);
+    expect([...produced(o)].sort()).toEqual(['allof-conflict', 'allof-missing-required']);
+    // Only the conflict kind: the types differ but no constituent lists a required field that the baseline has.
+    const noRequired = op({
+      allOf: [obj({ id: { type: 'string' } }), obj({ id: { type: 'integer' } })],
+    });
+    expect([...eligible(noRequired)]).toEqual(['allof-conflict']);
+    expect([...produced(noRequired)]).toEqual(['allof-conflict']);
+  });
+
   it('keeps the kinds that are generated: a root oneOf and a root allOf stay eligible', () => {
     const o = op({ oneOf: [a, b, c] });
     expect([...eligible(o)].sort()).toEqual(
