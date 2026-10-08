@@ -25,11 +25,30 @@ poll_tries="${POLL_TRIES:-12}"
 seen_dir="$(mktemp -d)"
 
 tag_for() { echo "hub-live-check/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-$1"; }
+# Every outcome is written twice: as a comment (it notifies people) and as a block in the PR description, so the
+# description always says whether a live check ran and where to read it. The block sits between two markers and is
+# replaced, not repeated, when the script runs again for the same PR.
+BODY_START='<!-- live-check:start -->'
+BODY_END='<!-- live-check:end -->'
 note() {
   gh pr comment "$1" --repo "$GITHUB_REPOSITORY" --body "$2" || {
     echo "::warning::Could not comment on PR #$1"
     failed=1
   }
+  local current kept
+  if ! current="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/$1" --jq '.body // ""')"; then
+    echo "::warning::Could not read the description of PR #$1"
+    failed=1
+    return
+  fi
+  kept="$(printf '%s\n' "$current" | awk -v s="$BODY_START" -v e="$BODY_END" '{ line = $0; sub(/\r$/, "", line) } line == s {skip = 1; next} line == e {skip = 0; next} !skip')"
+  # GitHub keeps CRLF line endings when a description was written in the web editor: the markers are compared without
+  # the carriage return, and every other line is kept as it was."
+  if ! gh api -X PATCH "repos/${GITHUB_REPOSITORY}/pulls/$1" \
+    -f body="$(printf '%s\n\n%s\n### Live Hub check\n\n%s\n%s' "$kept" "$BODY_START" "$2" "$BODY_END")" > /dev/null; then
+    echo "::warning::Could not update the description of PR #$1"
+    failed=1
+  fi
 }
 
 # First start every run, then look for all of them together: the lookup wait is paid once, not once per PR, because

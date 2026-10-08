@@ -26,6 +26,8 @@ interface Opts {
   after?: number[];
   listFails?: boolean;
   files?: string[];
+  bodyFails?: boolean;
+  body?: string;
   attempt?: string;
 }
 
@@ -66,7 +68,8 @@ function run(o: Opts = {}) {
       'echo "$*" >> "$FAKE_LOG"',
       'for LAST_ARG; do :; done',
       'case "$1 $2" in',
-      '  "api -X") [ "$FAKE_TAG_FAILS" = 1 ] && exit 1; exit 0 ;;',
+      '  "api -X") case "$*" in *git/refs*) [ "$FAKE_TAG_FAILS" = 1 ] && exit 1 ;; *PATCH*) [ "$FAKE_BODY_FAILS" = 1 ] && exit 1 ;; esac; exit 0 ;;',
+      '  "api repos/camunda/api-test-generator/pulls/10") printf "%s\\n" "$FAKE_BODY"; exit 0 ;;',
       '  "workflow run") [ "$FAKE_DISPATCH_FAILS" = 1 ] && exit 1; touch "$FAKE_DIR/dispatched"; exit 0 ;;',
       '  "run list") [ "$FAKE_LIST_FAILS" = 1 ] && exit 1; cat "$FAKE_DIR/before"; echo; [ -e "$FAKE_DIR/dispatched" ] && cat "$FAKE_DIR/after"; exit 0 ;;',
       '  "pr comment") [ "$FAKE_COMMENT_FAILS" = 1 ] && exit 1; exit 0 ;;',
@@ -95,6 +98,10 @@ function run(o: Opts = {}) {
       FAKE_DIR: dir,
       FAKE_LIST_FAILS: o.listFails ? '1' : '0',
       FAKE_TAG_FAILS: o.tagFails ? '1' : '0',
+      FAKE_BODY_FAILS: o.bodyFails ? '1' : '0',
+      FAKE_BODY:
+        o.body ??
+        '## In plain words\n\nSomething.\n\n<!-- live-check:start -->\n### Live Hub check\n\nold text\n<!-- live-check:end -->',
       FAKE_DISPATCH_FAILS: o.dispatchFails ? '1' : '0',
       FAKE_COMMENT_FAILS: o.commentFails ? '1' : '0',
     },
@@ -225,5 +232,44 @@ describe('hub-coverage-fix live check dispatch', () => {
     const start = names.indexOf('Start the live Hub check on each verified PR');
     expect(start).toBeGreaterThan(names.indexOf('Verify the PRs'));
     expect(String(steps[start]?.if)).toContain("DRY_RUN != 'true'");
+  });
+
+  it('writes the outcome into the PR description too, replacing an earlier block instead of repeating it', () => {
+    const r = run();
+    expect(r.status, r.stderr).toBe(0);
+    const at = r.calls.indexOf('-X PATCH');
+    const patch = at >= 0 ? r.calls.slice(at) : undefined;
+    expect(patch).toBeDefined();
+    expect(patch).toContain('<!-- live-check:start -->');
+    expect(patch).toContain('actions/runs/42');
+    expect(patch).toContain('## In plain words');
+    expect(patch).not.toContain('old text');
+    expect(patch?.match(/live-check:start/g)?.length).toBe(1);
+    expect(patch?.match(/old text/g)).toBeNull();
+  });
+
+  it('also says in the description when the check was not started or could not be started', () => {
+    const manual = run({ files: ['configs/camunda-hub/regression-invariants.test.ts'] });
+    expect(manual.calls).toMatch(/-X PATCH[\s\S]*not started automatically/);
+    const failed = run({ dispatchFails: true });
+    expect(failed.calls).toMatch(/-X PATCH[\s\S]*could not be started automatically/);
+  });
+
+  it('fails the step when the description cannot be updated', () => {
+    expect(run({ bodyFails: true }).status).toBe(1);
+  });
+
+  it('replaces the block even when the description uses CRLF line endings', () => {
+    const body =
+      '## In plain words\r\n\r\nSomething.\r\n\r\n<!-- live-check:start -->\r\n### Live Hub check\r\n\r\nold text\r\n<!-- live-check:end -->';
+    const r = run({ body });
+    expect(r.status, r.stderr).toBe(0);
+    const at = r.calls.indexOf('-X PATCH');
+    expect(at).toBeGreaterThanOrEqual(0);
+    const patch = r.calls.slice(at);
+    expect(patch).toContain('Something.');
+    expect(patch).not.toContain('old text');
+    expect(patch.match(/live-check:start/g)?.length).toBe(1);
+    expect(patch).toContain('actions/runs/42');
   });
 });
