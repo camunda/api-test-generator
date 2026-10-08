@@ -41,16 +41,17 @@ While Slack is down you can still read the night's result: open the nightly run,
 
 To run the generated suite by hand for any branch: [hub-ondemand-test](https://github.com/camunda/api-test-generator/actions/workflows/hub-ondemand-test.yml) (Run workflow).
 
-**Is it my problem?**
+**What to do with a failure.** Open the thread under the triage digest. Each failure has a category:
 
-| The message shows | Whose problem | Do this |
+| Triage says | What it means | What you do |
 |---|---|---|
-| ❌ failed above 0, triage says **product** | Probably Hub's | Open the issue linked in the thread. If there is none, **nobody was pinged** (filing failed or the finding is marked *report only*): read the finding in the triage run. `hub-medic` is pinged only for a newly filed Hub issue, not for one that is already tracked |
-| Triage says **test-generation** | The generator's, not a Hub bug | Nothing, unless asked. When a fix PR or suppress PR was opened it is linked in the thread and `test-automation-medic` is pinged. When none was (the fix was not safe, or opening it failed) the finding is *report only*: read it in the triage run |
-| Triage says **infrastructure** | Neither: the run itself had a problem | Open the failed step in the nightly run and read the error. Raise it in the channel the first time, with the run link; do not wait for it to repeat |
-| Triage says **flakiness** | A real defect that comes and goes: a test defect (race, bad wait) or a Hub defect (race, missed signal) | Do not wait. Look at it the same day: read the finding in the triage thread, then hand it to the generator owner if the test is at fault or to `hub-medic` if Hub is |
-| Triage says **known issue** | Already tracked | Nothing. The linked Hub issue is the work item |
-| A spec-bump or re-enable post | The generator owner's | See the sections below |
+| 🎫 **known issue** | Already tracked | Nothing. The linked Hub issue is the work item |
+| 📦 **product** | Hub answers differently from its spec | Open the linked issue. **No link means nobody was pinged**: read the finding in the triage run |
+| 🧪 **test-generation** | The generated test is wrong or missing. Not a Hub bug | Review the fix or suppress PR linked in the thread. No PR means it is report only: read the finding in the triage run |
+| 🔧 **infrastructure** | The run itself broke, not Hub or the tests | Open the failed step, read the error, and say so in the channel with the run link. Do not wait for a repeat |
+| 🎲 **flakiness** | A real defect that comes and goes (a race in the test or in Hub) | Look at it the same day. Do not just re-run |
+
+The spec-bump and re-enable posts are explained in their own sections below. What each icon and link in the thread means is in "The triage digest".
 
 ## The nightly posts (02:00)
 
