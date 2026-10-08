@@ -649,10 +649,14 @@ The **Hub PR live check**
 ([hub-pr-live-check.yml](.github/workflows/hub-pr-live-check.yml), #513) closes
 the gap `ci.yml`'s `hub-invariants` leaves: that job only checks the **pinned**
 hub spec, never a live Hub. This workflow fires on every `pull_request`
-targeting `main` (a guard job skips real forks, Dependabot, and any PR whose
+targeting `main` (a guard job skips real forks, Dependabot, any PR whose
 diff touches `.github/**` — the same "don't let a PR's own modified workflow
 code execute with production secrets" concern the triage workflow's dispatch
-guard has) and calls `_hub-suite-run.yml` (the same reusable
+guard has — and any PR from the `qa-processes` automation account, where the AI
+agents and the deterministic scripts share one token: also a PR on a `fix/coverage-*`
+or `fix/nightly-triage-*` branch, an event that account triggered, or a branch
+with an earlier run it triggered. For those, a person reads the diff and runs
+`hub-ondemand-test.yml` on the branch) and calls `_hub-suite-run.yml` (the same reusable
 `hub-ondemand-test.yml` wraps) directly, so the result is a real **native**
 GitHub Actions check on the PR — no polling, no comment-posting, unlike the
 dispatch→poll→comment pattern used elsewhere for a workflow that can't be
