@@ -23,7 +23,7 @@ does not yet understand a new endpoint, or that the test run itself had a proble
 | Green (`success`) | The generated tests passed | Nothing |
 | Green, with `coverage gap: ...` in the description | Tests passed, but some endpoints have no generated test yet | Nothing is blocked. Someone should add tests later (see "Things that look wrong but are not" below) |
 | Red (`failure`) | Something failed | Follow the steps below |
-| No status at all | Usually skipped on purpose (draft PR, fork, docs-only change). Rarely the status could not be posted | Open the "Trigger api-test-generator hub suite" job on your PR: it says whether the check ran or was skipped. If it ran, ask in `#camunda-hub-pr-e2e-results` |
+| No status at all | Usually skipped on purpose (draft PR, fork, docs-only change). Rarely the status could not be posted | Open the "Trigger api-test-generator hub suite" job on your PR and read its summary. **Skipped:** nothing is wrong. If the PR is a draft, mark it ready to run the check. **Ran:** the status should have appeared, so post your PR link in `#camunda-hub-pr-e2e-results` |
 
 **How long it takes.** The check starts after Hub's image for your PR is built, and a run takes about 5 minutes. The status and the Slack alert appear when it finishes, not when it starts.
 
