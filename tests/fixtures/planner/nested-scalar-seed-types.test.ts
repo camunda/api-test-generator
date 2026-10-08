@@ -54,3 +54,73 @@ describe('synthesizeObjectFromPrefix: type-aware scalar seeds (Gap B)', () => {
     expect(obj.name).toBe('placeholder');
   });
 });
+
+/**
+ * Nested enum leaves must be seeded with a declared enum value.
+ *
+ * `scalarSeedLiteral` resolved format → declared type → `'placeholder'`, but
+ * never consulted `node.enum`, so a required nested enum leaf was seeded with a
+ * value the schema does not permit. The reported instance is
+ * `createAgentInstance`'s `history[].role` (an `allOf` `$ref` to
+ * `AgentInstanceHistoryRoleEnum`): the synthesizer emitted `"role":"placeholder"`
+ * and the broker rejected the whole body with
+ * `400 Unexpected value 'placeholder' for enum field 'role'` — 28 live Python
+ * failures across `createAgentInstance` / `updateAgentInstance` and their variants.
+ *
+ * Class-scoped: asserts the fix for string enums AND for non-string enums, where
+ * the type-correct default is enum-invalid rather than merely schema-invalid
+ * (`integer` seeded `1` is not a member of `[3, 4]`). Also pins the precedence
+ * when a leaf declares both `format` and `enum` (the closed enum set wins), and
+ * asserts that a leaf with no enum keeps the existing behaviour.
+ */
+describe('synthesizeObjectFromPrefix: enum-aware scalar seeds', () => {
+  it('seeds a required nested string enum leaf with its first declared value, not "placeholder"', () => {
+    const obj = synthesizeObjectFromPrefix('history[].', [
+      {
+        path: 'history[].role',
+        type: 'string',
+        required: true,
+        enum: ['USER', 'ASSISTANT', 'TOOL_RESULT', 'CONFIGURATION'],
+      },
+      { path: 'history[].loopIteration', type: 'integer', required: true },
+    ]);
+    expect(obj.role).toBe('USER');
+    // a sibling leaf with no enum keeps its type-correct default
+    expect(obj.loopIteration).toBe(1);
+  });
+
+  it('seeds a non-string enum leaf with a declared member, not the type default', () => {
+    // `1` is type-correct for `integer` but is NOT a member of this enum,
+    // so a type-only seed would still be rejected by the server.
+    const obj = synthesizeObjectFromPrefix('quota.', [
+      { path: 'quota.level', type: 'integer', required: true, enum: [3, 4] },
+    ]);
+    expect(obj.level).toBe(3);
+    expect([3, 4]).toContain(obj.level);
+  });
+
+  it('prefers the declared enum over the format literal when a leaf declares both', () => {
+    // An `enum` is a closed value set: a format-valid literal that is not a
+    // member is rejected outright, whereas enum members are authored to be
+    // valid values. So the enum constraint wins. (No schema in the pinned
+    // camunda-oca spec declares both — all 48 enum-bearing component schemas
+    // have no `format` — so this pins the semantics rather than a live case.)
+    const obj = synthesizeObjectFromPrefix('meta.', [
+      {
+        path: 'meta.correlationKey',
+        type: 'string',
+        required: true,
+        format: 'uuid',
+        enum: ['not-a-uuid'],
+      },
+    ]);
+    expect(obj.correlationKey).toBe('not-a-uuid');
+  });
+
+  it('still emits "placeholder" for a string leaf with an empty enum array', () => {
+    const obj = synthesizeObjectFromPrefix('meta.', [
+      { path: 'meta.name', type: 'string', required: true, enum: [] },
+    ]);
+    expect(obj.name).toBe('placeholder');
+  });
+});
