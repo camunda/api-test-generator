@@ -88,9 +88,9 @@ describe('hub-coverage-fix-report', () => {
       'https://github.com/camunda/api-test-generator/issues/684',
     );
     expect(r.slack).toContain('1 PR opened, 1 gap left for a person');
-    expect(r.slack).toContain('pull/999|#999 test(coverage-fix): add removeMember 403 test');
+    expect(r.slack).toContain('pull/999|#999> `test(coverage-fix): add removeMember 403 test`');
     expect(r.slack).toContain(
-      '`removeClusterRegistration` (status-403): report-only — Needs cluster management switched on.',
+      '`removeClusterRegistration` (`status-403`): `report-only` — `Needs cluster management switched on.`',
     );
     expect(r.slack).toContain(
       '<https://github.com/camunda/api-test-generator/issues/684|tracking issue>',
@@ -98,8 +98,8 @@ describe('hub-coverage-fix-report', () => {
     expect(r.slack).not.toContain('evil.example');
     expect(r.issue).toContain('<!-- coverage-fix-run:555 -->');
     expect(r.issue).toContain('- https://github.com/camunda/api-test-generator/pull/999');
-    expect(r.issue).toContain('Reason: Needs cluster management switched on.');
-    expect(r.issue).toContain('Proposal: Add clusterId to resourceFixtures.');
+    expect(r.issue).toContain('Reason: `Needs cluster management switched on.`');
+    expect(r.issue).toContain('Proposal: `Add clusterId to resourceFixtures.`');
     expect(r.issue).not.toContain('evil.example');
   });
 
@@ -140,28 +140,65 @@ describe('hub-coverage-fix-report', () => {
     expect(readFileSync(join(dir, 's.txt'), 'utf8')).toBe('');
   });
 
-  it('treats the agent text as untrusted: markup, mentions, control characters and length', () => {
+  it('treats the agent text as untrusted: mentions, control characters, length, and everything in a code span', () => {
     const r = build([
       {
         ...left,
         resource: 'a<b>&c',
-        reason: `<!channel> @here <https://evil.example|click> \`rm\` \u0007\nsecond line ${'x'.repeat(400)}`,
+        reason: `<!channel> @here <https://evil.example|click> \`rm\` \u0007\nsecond line ${'x'.repeat(1000)}`,
         proposal: `@team ${'y'.repeat(3000)}`,
       },
     ]);
     for (const text of [r.slack, r.issue]) {
-      expect(text).not.toContain('<!channel>');
-      expect(text).not.toContain('<https://evil.example');
-      expect(text).not.toContain('@here');
       expect(text).not.toContain('\u0007');
-      expect(text).toContain('&lt;!channel&gt;');
-      expect(text).toContain('@​here');
+      expect(text).toContain('…');
     }
+    // Slack: neutralised and in a code span. GitHub: the text is in a code span, which shows it literally and
+    // never mentions anyone.
+    expect(r.slack).not.toContain('@here');
+    expect(r.slack).toContain('@\u200bhere');
+    expect(r.issue).toContain('Reason: `<!channel> @here');
+    expect(r.slack).not.toContain('<!channel>');
+    expect(r.slack).toContain('&lt;!channel&gt;');
     expect(r.slack).toContain('a&lt;b&gt;&amp;c');
-    expect(r.slack).toContain('…');
     expect(r.slack.length).toBeLessThan(900);
-    expect(r.issue.length).toBeLessThan(4500);
+    expect(r.issue.length).toBeLessThan(2500);
     expect(r.slack).not.toContain('\n  ');
+  });
+
+  it('shows Markdown links and images as plain text, not as clickable content', () => {
+    const text =
+      '[review fix](https://evil.example) ![i](https://evil.example/i.png) **bold** # head';
+    const r = build([{ ...left, reason: text, proposal: text }], []);
+    // Every agent text sits inside one code span, which GitHub and Slack show literally.
+    expect(r.issue).toContain(`Reason: \`${text}\``);
+    expect(r.issue).toContain(`Proposal: \`${text}\``);
+    expect(r.slack).toContain(`\`${text}\``);
+    // A backtick in the text cannot close the span early.
+    const tick = build([{ ...left, reason: 'a` [x](https://evil.example) `b' }], []);
+    expect(tick.issue).toContain("Reason: `a' [x](https://evil.example) 'b`");
+  });
+
+  it("keeps the whole issue comment below GitHub's size limit, whatever the agent wrote", () => {
+    const big = 'z'.repeat(5000);
+    const gaps = Array.from({ length: 40 }, (_, i) => ({
+      kind: big,
+      resource: big,
+      action: big,
+      reason: big,
+      proposal: big,
+      file_error: big,
+      pr_url: `https://x/${i}`,
+    }));
+    const prs = Array.from({ length: 40 }, (_, i) => ({
+      ...openedPr,
+      number: 1000 + i,
+      title: big,
+    }));
+    const r = build(gaps, prs);
+    expect(r.issue.length).toBeLessThan(60000);
+    expect(r.slack.length).toBeLessThan(4000);
+    expect(r.issue).toContain('<!-- coverage-fix-run:555 -->');
   });
 
   it('caps the number of gaps shown and says how many more there are', () => {
@@ -176,7 +213,7 @@ describe('hub-coverage-fix-report', () => {
 
   it('shows an error written by the agent for a gap, and leaves out an empty proposal', () => {
     const r = build([{ ...left, proposal: null, file_error: 'push failed' }], []);
-    expect(r.issue).toContain('Error: push failed');
+    expect(r.issue).toContain('Error: `push failed`');
     expect(r.issue).not.toContain('Proposal:');
   });
 });
@@ -207,6 +244,10 @@ describe('the workflows that carry the report', () => {
     const names = steps.map((s) => String(s.name));
     const first = names.indexOf('Download the weekly report');
     expect(first).toBeGreaterThan(names.indexOf('Start the live Hub check on each verified PR'));
+    const comment = steps.find((s) => s.name === 'Comment on the tracking issue');
+    // The marker is looked for anywhere in the body: a verification warning is put in front of it.
+    expect(String(isRec(comment) ? comment.run : '')).toContain('contains(');
+    expect(String(isRec(comment) ? comment.run : '')).not.toContain('startswith(');
     for (const s of steps.slice(first)) {
       expect(String(s.if), String(s.name)).toContain("DRY_RUN != 'true'");
       expect(s['continue-on-error'], String(s.name)).toBe(true);

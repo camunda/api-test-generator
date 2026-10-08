@@ -747,9 +747,10 @@ jobs:
           [ -s "${RUNNER_TEMP}/issue-comment.md" ] || { echo "Nothing to report for the tracking issue."; exit 0; }
           num="${ISSUE_URL##*/}"
           marker="<!-- coverage-fix-run:${GITHUB_RUN_ID} -->"
-          # A re-run of this job updates its comment instead of adding a second one.
+          # A re-run of this job updates its comment instead of adding a second one. The marker is looked for anywhere in the
+          # body: a warning about a failed verification is put in front of it.
           existing="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/issues/${num}/comments?per_page=100" \
-            --jq ".[] | select(.body | startswith(\"${marker}\")) | .id" | head -n 1)"
+            --jq ".[] | select(.body | contains(\"${marker}\")) | .id" | head -n 1)"
           if [ -n "$existing" ]; then
             gh api -X PATCH "repos/${GITHUB_REPOSITORY}/issues/comments/${existing}" -F body=@"${RUNNER_TEMP}/issue-comment.md" > /dev/null
           else

@@ -8,8 +8,10 @@
 # GITHUB_REPOSITORY. Optional: ISSUE_URL (the tracking issue, linked from the Slack text).
 #
 # The agent's result file is text the agent wrote, so it is untrusted: control characters are removed, long texts are
-# cut, the number of gaps is capped, and `&`, `<`, `>`, `@` and backticks are neutralised so a reason cannot add a link,
-# a mention or markup. The PR links come from GitHub (run-prs.json), never from the agent's file.
+# cut, the number of gaps and PRs is capped, `&`, `<`, `>`, `@` and backticks are neutralised, and each agent text is put in
+# a code span, which GitHub and Slack show literally: a reason cannot add a link, an image, a mention or formatting.
+# The whole comment is also cut to a fixed size, below GitHub's comment limit. The PR links come from GitHub
+# (run-prs.json), never from the agent's file.
 #
 # Both output files are empty when the run opened no PR and left no gap, so nothing is posted for a quiet run.
 set -uo pipefail
@@ -34,8 +36,12 @@ fi
 common='
   def clean($n): tostring | gsub("[[:cntrl:]]"; " ") | gsub("\\s+"; " ") | ltrimstr(" ") | rtrimstr(" ")
     | if length > $n then .[0:$n] + "…" else . end;
-  def neutral: gsub("&"; "&amp;") | gsub("<"; "&lt;") | gsub(">"; "&gt;") | gsub("@"; "@​") | gsub("`"; "'"'"'");
-  def text($n): (. // "") | clean($n) | neutral;
+  def neutral: gsub("&"; "&amp;") | gsub("<"; "&lt;") | gsub(">"; "&gt;") | gsub("@"; "@\u200b") | gsub("`"; "'"'"'");
+  # A code span shows its text as it is: no link, image, mention or formatting. Backticks are replaced first, so
+  # the text cannot close the span.
+  def code($n): (. // "") | clean($n) | gsub("`"; "'"'"'") | if . == "" then "-" else "`" + . + "`" end;
+  def slackcode($n): (. // "") | clean($n) | neutral | if . == "" then "-" else "`" + . + "`" end;
+  def cap($n): if length > $n then .[0:$n] + "\n\n…cut here, see the run for the rest." else . end;
 '
 
 jq -r --arg run "$run_id" --argjson base "$base" --arg runurl "$run_url" --arg issue "${ISSUE_URL:-}" \
@@ -43,11 +49,11 @@ jq -r --arg run "$run_id" --argjson base "$base" --arg runurl "$run_url" --arg i
   ([ $prs[0][] | select(.number > $base and .state == "OPEN" and (.headRefName | test("^fix/coverage-.+-" + $run + "$"))) ]) as $opened
   | ([ .gaps[]? | select(.action != "fix-pr") ]) as $left
   | if ($opened | length) == 0 and ($left | length) == 0 then empty else
-      ":robot_face: *Coverage-fix agent run* <\($runurl)|\($run)>: \($opened | length) PR\(if ($opened | length) == 1 then "" else "s" end) opened, \($left | length) gap\(if ($left | length) == 1 then "" else "s" end) left for a person."
-      + (if ($opened | length) > 0 then "\n" + ($opened | map("• PR <\(.url)|#\(.number) \(.title | text(120))>") | join("\n")) else "" end)
-      + (if ($left | length) > 0 then "\n" + ($left[:20] | map("• `\(.resource | text(60))` (\(.kind | text(20))): \(.action | text(20)) — \(.reason | text(220))") | join("\n")) else "" end)
+      (":robot_face: *Coverage-fix agent run* <\($runurl)|\($run)>: \($opened | length) PR\(if ($opened | length) == 1 then "" else "s" end) opened, \($left | length) gap\(if ($left | length) == 1 then "" else "s" end) left for a person."
+      + (if ($opened | length) > 0 then "\n" + ($opened[:20] | map("• PR <\(.url)|#\(.number)> \(.title | slackcode(120))") | join("\n")) else "" end)
+      + (if ($left | length) > 0 then "\n" + ($left[:20] | map("• \(.resource | slackcode(60)) (\(.kind | slackcode(20))): \(.action | slackcode(20)) — \(.reason | slackcode(220))") | join("\n")) else "" end)
       + (if ($left | length) > 20 then "\n…and \($left | length - 20) more, see the tracking issue." else "" end)
-      + (if $issue != "" then "\nDetails: <\($issue)|tracking issue>" else "" end)
+      + (if $issue != "" then "\nDetails: <\($issue)|tracking issue>" else "" end)) | cap(3000)
     end' "$result" > "$slack_out"
 
 jq -r --arg run "$run_id" --argjson base "$base" --arg runurl "$run_url" \
@@ -55,16 +61,16 @@ jq -r --arg run "$run_id" --argjson base "$base" --arg runurl "$run_url" \
   ([ $prs[0][] | select(.number > $base and .state == "OPEN" and (.headRefName | test("^fix/coverage-.+-" + $run + "$"))) ]) as $opened
   | ([ .gaps[]? | select(.action != "fix-pr") ]) as $left
   | if ($opened | length) == 0 and ($left | length) == 0 then empty else
-      "<!-- coverage-fix-run:\($run) -->\n### Coverage-fix agent run [\($run)](\($runurl))\n\n"
+      ("<!-- coverage-fix-run:\($run) -->\n### Coverage-fix agent run [\($run)](\($runurl))\n\n"
       + "\($opened | length) PR\(if ($opened | length) == 1 then "" else "s" end) opened, \($left | length) gap\(if ($left | length) == 1 then "" else "s" end) left for a person.\n"
-      + (if ($opened | length) > 0 then "\n**Opened**\n\n" + ($opened | map("- \(.url) — \(.title | text(120))") | join("\n")) + "\n" else "" end)
+      + (if ($opened | length) > 0 then "\n**Opened**\n\n" + ($opened[:20] | map("- \(.url) — \(.title | code(120))") | join("\n")) + (if ($opened | length) > 20 then "\n- …and \($opened | length - 20) more" else "" end) + "\n" else "" end)
       + (if ($left | length) > 0 then "\n**Not opened**\n\n" + ($left[:20] | map(
-          "- `\(.resource | text(60))` (\(.kind | text(20))): **\(.action | text(20))**\n  - Reason: \(.reason | text(1500))"
-          + (if (.proposal // "") != "" then "\n  - Proposal: \(.proposal | text(2000))" else "" end)
-          + (if (.file_error // "") != "" then "\n  - Error: \(.file_error | text(300))" else "" end)
+          "- \(.resource | code(60)) (\(.kind | code(20))): **\(.action | code(20))**\n  - Reason: \(.reason | code(800))"
+          + (if (.proposal // "") != "" then "\n  - Proposal: \(.proposal | code(1200))" else "" end)
+          + (if (.file_error // "") != "" then "\n  - Error: \(.file_error | code(200))" else "" end)
         ) | join("\n")) + "\n" else "" end)
       + (if ($left | length) > 20 then "\n…and \($left | length - 20) more not shown.\n" else "" end)
-      + "\n_Text written by the agent; check it against the code before acting on it._"
+      + "\n_Text written by the agent, shown as code; check it against the code before acting on it._") | cap(50000)
     end' "$result" > "$issue_out"
 
 echo "Report: issue comment $([ -s "$issue_out" ] && echo written || echo none), Slack text $([ -s "$slack_out" ] && echo written || echo none)"
