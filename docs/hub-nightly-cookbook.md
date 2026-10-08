@@ -13,7 +13,7 @@ A set of automatic jobs then post what they found. Most nights the posts are gre
 **A normal night has 0 failed tests.** Known Hub bugs do not count as failures: their tests are either skipped or run
 without the one assertion Hub cannot meet yet. So any number above 0 is news.
 
-The **generator owner** (the Hub team) acts on the spec-bump, re-enable and weekly-report posts. `hub-medic` is the on-call group.
+The **generator owner** (the Hub team) acts on the spec-bump, re-enable and weekly-report posts. **Nobody is pinged for these three**: they are plain posts in the channel, and the PRs and issues they open have no assignee or reviewer. Someone on the Hub team has to read the channel (or check these posts on a schedule). `hub-medic` is the on-call group for failures.
 Until the workflows are changed, alerts about the generator itself still ping `test-automation-medic`. The change is listed in [handover follow-ups](maintainers/handover-follow-ups.md).
 
 **What you will see, in the order it happens** (all times UTC):
@@ -137,6 +137,8 @@ Nightlies are **not** blocked by a pending bump: they run against Hub's latest s
 invariant tests.
 
 ## The re-enable check (04:00)
+
+Nobody is pinged for this post, and the draft PR it opens has no reviewer. It is only a message in the channel at about 04:00 UTC, and it is silent on most days.
 
 Skipped tests point to a Hub bug. This job watches those bugs. When one closes, it tries to bring the tests back.
 

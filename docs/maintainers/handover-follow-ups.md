@@ -31,3 +31,14 @@ the generator and pipeline"); this page lists what has to change in code before 
 - `AGENTS.md`: the line about the failure counter (search for `test-automation-medic`)
 
 Delete this section when it is done.
+
+## Ping `hub-medic` from the three owner posts
+
+**Why.** The spec-bump alert, the re-enable check and the weekly coverage report are plain Slack posts. They mention no
+group, and the PRs and issues they open (`spec-bump-open-pr.sh`, `hub-reenable-check.sh`, the coverage issue scripts)
+have no assignee or reviewer. This worked while the owners read the channel; a new owner may not.
+
+**Change.** Add a `hub-medic` mention to those three Slack messages, and consider a default reviewer on the PRs they open.
+Keep each post silent when there is nothing to report. Update "Nobody is pinged for these three" in
+`docs/hub-nightly-cookbook.md` in the same PR.
+
