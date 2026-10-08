@@ -129,7 +129,7 @@ const SETUP_SHAPES: { name: string; re: RegExp }[] = [
   {
     // curl -s -X POST "$POS_URL/workspaces/$RV_FIXTURE_WORKSPACE_KEY/members" "${h[@]}" -d '{"email":"x"}' >/dev/null
     name: 'call the Hub API to prepare a fixture',
-    re: new RegExp(`^${SETUP_CURL}(?: >/dev/null(?: 2>&1)?)?$`),
+    re: new RegExp(`^${SETUP_CURL} >/dev/null(?: 2>&1)?$`),
   },
 ];
 

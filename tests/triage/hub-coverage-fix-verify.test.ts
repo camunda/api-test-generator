@@ -95,6 +95,8 @@ describe('verify', () => {
       '',
       '## Gap\n\nNo plain section.',
       '## In plain words\n\nToo short.\n\n## Gap',
+      '## In plain wordsXYZ\n\nOne test was missing, so the report showed a gap. This adds it. Nothing else changes.',
+      '## In plain words and more\n\nOne test was missing, so the report showed a gap. This adds it. Nothing else changes.',
       'Intro first.\n\n## In plain words\n\nOne test was missing, so the report showed a gap. This adds it.',
     ]) {
       expect(

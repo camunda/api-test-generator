@@ -364,6 +364,8 @@ describe('run-hub.sh additions for a status PR', () => {
     ]) {
       expect(isAllowedSetupLine(l), l).toBe(true);
     }
+    // A prepare call must end in /dev/null: without it, the response would go to the setup script's output.
+    expect(isAllowedSetupLine(`curl -s -X POST "$POS_URL/things" ${H} -d '{"a":1}'`)).toBe(false);
   });
 
   it('allows the create lines that already exist in the real setup script, the ones of the same shape', () => {

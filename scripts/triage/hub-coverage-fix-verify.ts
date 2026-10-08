@@ -103,10 +103,15 @@ export function parseRunPrs(prs: unknown): RunPr[] {
 export const PLAIN_WORDS_HEADING = '## In plain words';
 export function hasPlainWords(body: string | undefined): boolean {
   if (typeof body !== 'string') return false;
-  const text = body.replace(/\r\n/g, '\n').trim();
-  if (!text.startsWith(PLAIN_WORDS_HEADING)) return false;
-  const rest = text.slice(PLAIN_WORDS_HEADING.length).split(/\n## /)[0] ?? '';
-  return rest.replace(/\s+/g, ' ').trim().length >= 40;
+  const lines = body.replace(/\r\n/g, '\n').trim().split('\n');
+  // The first line must be exactly the heading, not a longer one that merely starts with it.
+  if (lines[0]?.trim() !== PLAIN_WORDS_HEADING) return false;
+  const section: string[] = [];
+  for (const line of lines.slice(1)) {
+    if (line.startsWith('## ')) break;
+    section.push(line);
+  }
+  return section.join(' ').replace(/\s+/g, ' ').trim().length >= 40;
 }
 
 export function parsePreRun(prs: unknown): PreRunPr[] {
