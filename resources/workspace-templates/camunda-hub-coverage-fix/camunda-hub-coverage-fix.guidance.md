@@ -272,9 +272,16 @@ Work in `{{.WorkspacePath}}/api-test-generator` (already on `main`).
    **Right after it, add a section `## The test this adds`** so a reviewer can find the test in the live run without
    searching. For every test your change makes appear, give: its full title as the report shows it (for example
    `Workspaces Validation API Tests › removeMember - Denied (no permission)`), the generated file and line it lands in,
-   and the suite it runs in. Find the new tests by listing the test titles in `generated/camunda-hub/` before your
-   change and again after regenerating, and taking the titles that are new (there should be only the ones you expect;
-   if there are others, say so). The suite is: a 403 deny test runs in the `rbac` profile
+   and the suite it runs in. A fresh workspace has no `generated/camunda-hub/` folder (it is not in git), so the
+   "before" list must be made on purpose: **before you edit anything** (before the entity-kinds entry, the fixture
+   entry or the setup line), run the generate commands of the measuring step once on the untouched checkout and save the
+   test titles, for example
+   `grep -rhoE "test\(\s*['\"\`][^'\"\`]+" generated/camunda-hub --include='*.ts' | sort -u > /tmp/titles-before.txt`
+   (if that finds nothing, look at how a generated spec writes its test titles and adapt the pattern). After you
+   regenerate with your change, save the same list to `/tmp/titles-after.txt` and run `diff /tmp/titles-before.txt
+   /tmp/titles-after.txt`: the lines only in the "after" file are the new tests (there should be only the ones you
+   expect; if there are others, say so). This baseline run is also where the "before" numbers of the measuring step come
+   from. The suite is: a 403 deny test runs in the `rbac` profile
    (`generated/camunda-hub/request-validation/rbac/<area>-validation-api-tests.spec.ts`); a 404 test and the
    missing-authentication tests run in the `secured` profile (`.../request-validation/secured/...`); a lifecycle test runs in the positive
    suite (`generated/camunda-hub/playwright/templates/EntityLifecycle/<Resource>.lifecycle.spec.ts`). End the section
