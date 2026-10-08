@@ -20,8 +20,8 @@ the generator and pipeline"); this page lists what has to change in code before 
 - Some alerts already ping both groups (startup failure, high-confidence product failure). After the switch, drop the
   duplicate so `hub-medic` is pinged once.
 - Tests may assert the exact Slack text. Run the triage and PR-check tests after the change.
-- Decide whether `test-automation-medic` stays for faults only the enablement team can fix (Vault, Slack bot). The
-  nightly guide currently sends these to `#ask-qa` instead of pinging anyone.
+- Decided: `test-automation-medic` stays, for faults only the enablement team can fix (the Vault, the Slack bot). Every
+  generator and Hub alert goes to `hub-medic`. The nightly guide already describes it this way.
 
 **Docs to change in the same PR**, so they agree with the code:
 - `docs/how-it-works.md`: the line "Some alerts still ping `test-automation-medic`..."

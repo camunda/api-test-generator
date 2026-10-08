@@ -100,9 +100,13 @@ label `nightly-api-fix`.
 
 Pings:
 
-- **`hub-medic`** is pinged when a **new** Hub issue was filed that night. Never for a failure that is already known.
-- **`test-automation-medic`** is pinged when a generator fix PR or a suppress PR was opened (it needs review), or when the
-  triage could not classify a failure.
+- **`hub-medic`** is pinged when a **new** Hub issue was filed that night (never for a failure that is already known),
+  when a generator fix PR or a suppress PR was opened (it needs review), and when the triage could not classify a failure.
+- **`test-automation-medic`** is pinged only for faults in the shared pipeline that the Hub team cannot fix, such as the
+  Vault or the Slack bot.
+
+Until the workflows are changed, the generator pings (fix PR, suppress PR, unclassified failure) still go to
+`test-automation-medic`; see [handover follow-ups](maintainers/handover-follow-ups.md).
 
 Three warnings replace the normal digest. Treat each as "do not trust a green night":
 
@@ -168,7 +172,7 @@ How to read the message, how to close a gap, and what the agent does and never d
 ## Who to ask
 
 - Anything in this channel you cannot place: write in the channel.
-- The generator itself (new endpoint, wrong test, skip): `test-automation-medic` today, `hub-medic` after the handover.
+- The generator itself (new endpoint, wrong test, skip): `hub-medic`.
 - A Hub behaviour question: `hub-medic`.
 - Adding a generator PR next to a Hub change (labels, feature flags): see "Adding or changing an endpoint in Hub" in [hub-pr-check-cookbook.md](hub-pr-check-cookbook.md).
 
