@@ -11,6 +11,8 @@ import {
 } from '../../scripts/triage/hub-coverage-fix-verify.ts';
 
 const RUN = '777';
+const PLAIN =
+  '## In plain words\n\nOne test was missing, so the report showed a gap. This adds it. Nothing else changes.\n\n## Gap\n\nDetails.';
 const BOT = ['app/qa-processes', 'qa-processes[bot]'];
 const URL = (n: number) => `https://github.com/camunda/api-test-generator/pull/${n}`;
 
@@ -48,6 +50,7 @@ function pr(n: number, over: Partial<RunPr> = {}): RunPr {
     labels: ['nightly-api-fix', 'auto-generated', 'hub'],
     state: 'OPEN',
     headRefOid: 'aaaaaaa1111111',
+    body: PLAIN,
     ...over,
   };
 }
@@ -81,6 +84,24 @@ describe('verify', () => {
     ]);
     const v = verify([ok], selection, [URL(1)], RUN, false, BOT, 0, [], bad);
     expect(v.some((m) => m.includes('authDeny.ts'))).toBe(true);
+  });
+
+  it('requires the description to open with a plain-words section that has real text', () => {
+    const run = (body: string | undefined) =>
+      verify([pr(1, { body })], selection, [URL(1)], RUN, false, BOT, 0, []);
+    expect(run(PLAIN)).toEqual([]);
+    for (const bad of [
+      undefined,
+      '',
+      '## Gap\n\nNo plain section.',
+      '## In plain words\n\nToo short.\n\n## Gap',
+      'Intro first.\n\n## In plain words\n\nOne test was missing, so the report showed a gap. This adds it.',
+    ]) {
+      expect(
+        run(bad).some((m) => m.includes('In plain words')),
+        String(bad),
+      ).toBe(true);
+    }
   });
 
   it('accepts a run that opened nothing', () => {

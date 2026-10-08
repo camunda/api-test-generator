@@ -4,10 +4,13 @@
 //
 //   - A lifecycle PR may touch entity-kinds.json, coverage-floors.json and the invariants test file. Its only
 //     floor change is lifecycleCreateCovered going up.
-//   - A status (403 or 404) PR may touch request-validation.json and coverage-floors.json, nothing else: no
-//     generator or setup code, no test. In request-validation.json it may only ADD entries to resourceFixtures or
-//     pathResourceFixtures, and it must not change excludeOperations or any other key. Its only floor change is
-//     assertedByStatus[code] going up.
+//   - A status (403 or 404) PR may touch request-validation.json and coverage-floors.json and, when the missing piece
+//     is a test fixture that setup does not create yet, scripts/e2e/run-hub.sh. No generator code, no test. In
+//     request-validation.json it may only ADD one entry to resourceFixtures or pathResourceFixtures, and it must not
+//     change excludeOperations or any other key. In run-hub.sh it may only ADD a few lines, each one of a small set
+//     of fixture-creating shapes (see isAllowedSetupLine); a line of any other shape fails. Its only floor change is
+//     assertedByStatus[code] going up. What the added lines DO (which call, which body) is judged by a person: no
+//     automatic live run starts on an agent PR, so nothing executes until someone has read the diff.
 //   - Neither may lower a floor, or add a zeroTestOperations entry.
 //
 // Runs under plain `node` (type stripping): no enums, no parameter properties.
@@ -18,10 +21,13 @@ export const FLOORS_FILE = 'configs/camunda-hub/coverage-floors.json';
 export const RV_FILE = 'configs/camunda-hub/request-validation.json';
 export const ENTITY_KINDS_FILE = 'configs/camunda-hub/ontology/entity-kinds.json';
 export const INVARIANTS_FILE = 'configs/camunda-hub/regression-invariants.test.ts';
+export const RUN_HUB_FILE = 'scripts/e2e/run-hub.sh';
 
 export interface FileState {
   rv: unknown;
   floors: unknown;
+  // The text of scripts/e2e/run-hub.sh on this side. Only needed when a PR changes that file.
+  runHub?: string;
 }
 
 // What the verify job gathers for one PR.
@@ -89,14 +95,91 @@ function checkFloors(base: unknown, head: unknown, candidate: Candidate): string
   return out;
 }
 
-function escapeRegExp(text: string): string {
-  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+// The fixture variables a setup script exports: only real `export RV_FIXTURE_*` statements count, never a comment or
+// text inside another command.
+export function exportedFixtures(script: string): Set<string> {
+  const names = new Set<string>();
+  for (const line of script.split('\n')) {
+    const m = /^\s*export\s+(RV_FIXTURE_[A-Z0-9_]+)\b/.exec(line);
+    if (m?.[1]) names.add(m[1]);
+  }
+  return names;
+}
+
+// --- scripts/e2e/run-hub.sh: an added line must have one of a few narrow shapes, modelled on the lines already there.
+// Anything else (another command, a pipe, a redirect, a variable it did not create, a URL) fails. A denylist of bad
+// patterns would miss something, so only what is listed is allowed.
+const SETUP_PATH = '"\\$POS_URL(?:/[A-Za-z0-9_-]+|/\\$RV_FIXTURE_[A-Z0-9_]+)+"';
+const SETUP_PAYLOAD =
+  "(?:'[^'$`\\\\]*'|\"\\$\\(printf '[^'$`\\\\]*'(?: \"\\$RV_FIXTURE_[A-Z0-9_]+\")*\\)\")";
+const SETUP_CURL = `curl -s -X (?:POST|PUT|PATCH) ${SETUP_PATH} "\\$\\{h\\[@\\]\\}" -d ${SETUP_PAYLOAD}`;
+const SETUP_SHAPES: { name: string; re: RegExp }[] = [
+  {
+    // export RV_FIXTURE_X; RV_FIXTURE_X="$(curl -s -X POST "$POS_URL/things" "${h[@]}" -d '{"name":"x"}' | _jget thingKey)"
+    name: 'create a fixture and export its key',
+    re: new RegExp(
+      `^export (RV_FIXTURE_[A-Z0-9_]+);\\s+\\1="\\$\\(${SETUP_CURL} \\| _jget [A-Za-z]+\\)"$`,
+    ),
+  },
+  {
+    // export RV_FIXTURE_X; RV_FIXTURE_X="rv-member@example.com"
+    name: 'export a fixed value',
+    re: /^export (RV_FIXTURE_[A-Z0-9_]+);\s+\1="[A-Za-z0-9@._-]+"$/,
+  },
+  {
+    // curl -s -X POST "$POS_URL/workspaces/$RV_FIXTURE_WORKSPACE_KEY/members" "${h[@]}" -d '{"email":"x"}' >/dev/null
+    name: 'call the Hub API to prepare a fixture',
+    re: new RegExp(`^${SETUP_CURL}(?: >/dev/null(?: 2>&1)?)?$`),
+  },
+];
+
+export function isAllowedSetupLine(line: string): boolean {
+  const t = line.trim();
+  if (t === '' || t.startsWith('#')) return true;
+  return SETUP_SHAPES.some((shape) => shape.re.test(t));
+}
+
+const MAX_ADDED_SETUP_LINES = 8;
+
+// run-hub.sh: additions only, few, each of an allowed shape, at least one of them exporting a fixture variable.
+export function checkRunHub(base: unknown, head: unknown): string[] {
+  if (typeof base !== 'string' || typeof head !== 'string') {
+    return ['run-hub.sh: its text could not be read on both sides'];
+  }
+  const out: string[] = [];
+  const was = base.split('\n');
+  const added: string[] = [];
+  let i = 0;
+  for (const line of head.split('\n')) {
+    if (i < was.length && line === was[i]) i++;
+    else added.push(line);
+  }
+  if (i < was.length) {
+    out.push('run-hub.sh: existing lines were changed or removed (only additions are allowed)');
+  }
+  const code = added.filter((l) => l.trim() !== '' && !l.trim().startsWith('#'));
+  if (code.length > MAX_ADDED_SETUP_LINES) {
+    out.push(
+      `run-hub.sh: ${code.length} lines were added, at most ${MAX_ADDED_SETUP_LINES} are allowed`,
+    );
+  }
+  for (const line of code) {
+    if (!isAllowedSetupLine(line)) {
+      out.push(
+        `run-hub.sh: an added line is not one of the allowed fixture shapes: ${line.trim()}`,
+      );
+    }
+  }
+  if (exportedFixtures(added.join('\n')).size === 0) {
+    out.push('run-hub.sh: the added lines export no RV_FIXTURE_* variable');
+  }
+  return out;
 }
 
 // request-validation.json: exactly one new fixture entry, naming an environment variable that setup provisions.
-// `provisioned` is the text of the script that sets the RV_FIXTURE_* variables, read from the default branch on the
-// verify runner (the agent cannot change it, and its PR may not touch it).
-function checkRv(base: unknown, head: unknown, provisioned: string): string[] {
+// `provisioned` is the set of RV_FIXTURE_* variables the setup script exports: those on the default branch, plus those
+// the PR's own additions export once they have passed the checks.
+function checkRv(base: unknown, head: unknown, provisioned: Set<string>): string[] {
   if (!isRecord(base) || !isRecord(head)) return ['request-validation.json is not an object'];
   const out: string[] = [];
   for (const key of new Set([...Object.keys(base), ...Object.keys(head)])) {
@@ -124,7 +207,7 @@ function checkRv(base: unknown, head: unknown, provisioned: string): string[] {
         out.push(
           `request-validation.json: ${key}.${name} is not an RV_FIXTURE_* environment variable name`,
         );
-      } else if (!new RegExp(`\\bexport\\s+${escapeRegExp(value)}\\b`).test(provisioned)) {
+      } else if (!provisioned.has(value)) {
         out.push(
           `request-validation.json: ${key}.${name} names ${value}, which setup does not provision`,
         );
@@ -143,7 +226,7 @@ export function checkChange(candidate: Candidate, change: PrChange, provisioned:
   const out: string[] = [];
   const allowedFiles =
     candidate.kind === 'status'
-      ? [RV_FILE, FLOORS_FILE]
+      ? [RV_FILE, FLOORS_FILE, RUN_HUB_FILE]
       : [ENTITY_KINDS_FILE, FLOORS_FILE, INVARIANTS_FILE];
   for (const f of change.files) {
     if (!allowedFiles.includes(f))
@@ -152,8 +235,17 @@ export function checkChange(candidate: Candidate, change: PrChange, provisioned:
   if (!change.files.includes(FLOORS_FILE))
     out.push('does not raise a floor in coverage-floors.json');
   out.push(...checkFloors(change.base.floors, change.head.floors, candidate));
-  if (candidate.kind === 'status')
-    out.push(...checkRv(change.base.rv, change.head.rv, provisioned));
+  if (candidate.kind === 'status') {
+    const exported = exportedFixtures(provisioned);
+    if (change.files.includes(RUN_HUB_FILE)) {
+      const errors = checkRunHub(change.base.runHub, change.head.runHub);
+      out.push(...errors);
+      if (errors.length === 0 && typeof change.head.runHub === 'string') {
+        for (const name of exportedFixtures(change.head.runHub)) exported.add(name);
+      }
+    }
+    out.push(...checkRv(change.base.rv, change.head.rv, exported));
+  }
   return out;
 }
 
@@ -165,7 +257,9 @@ export function parseChanges(v: unknown): Map<number, PrChange> {
       if (!isRecord(s) || !('rv' in s) || !('floors' in s)) {
         throw new Error(`PR #${n} changes: ${where} has no rv and floors`);
       }
-      return { rv: s.rv, floors: s.floors };
+      return typeof s.runHub === 'string'
+        ? { rv: s.rv, floors: s.floors, runHub: s.runHub }
+        : { rv: s.rv, floors: s.floors };
     };
     if (
       !isRecord(c) ||

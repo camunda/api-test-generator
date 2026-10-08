@@ -1,11 +1,18 @@
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import {
   checkChange,
+  checkRunHub,
   ENTITY_KINDS_FILE,
+  exportedFixtures,
   FLOORS_FILE,
   INVARIANTS_FILE,
+  isAllowedSetupLine,
   type PrChange,
   parseChanges,
+  RUN_HUB_FILE,
   RV_FILE,
 } from '../../scripts/triage/hub-coverage-fix-diff.ts';
 import type { Candidate } from '../../scripts/triage/hub-coverage-fix-select.ts';
@@ -69,8 +76,12 @@ describe('checkChange: a status PR', () => {
     expect(check(status, change())).toEqual([]);
   });
 
-  it('rejects the setup script and any other file the live check would run', () => {
-    for (const f of ['scripts/e2e/run-hub.sh', '.github/workflows/hub-pr-live-check.yml']) {
+  it('still rejects workflows, templates and generator code for a status PR', () => {
+    for (const f of [
+      '.github/workflows/hub-pr-live-check.yml',
+      'request-validation/templates/support/global-setup.ts',
+      'request-validation/src/analysis/authDeny.ts',
+    ]) {
       const v = check(status, change({ files: [RV_FILE, FLOORS_FILE, f] }));
       expect(v).toEqual([`touches ${f}, which a status PR may not change`]);
     }
@@ -327,5 +338,134 @@ describe('parseChanges', () => {
     expect(() => parseChanges({ '7': { files: [], base: {}, head: {} } })).toThrow(
       'no rv and floors',
     );
+  });
+});
+
+describe('run-hub.sh additions for a status PR', () => {
+  const H = ['"$', '{h[@]}"'].join('');
+  const baseSh = [
+    `  export RV_FIXTURE_WORKSPACE_KEY; RV_FIXTURE_WORKSPACE_KEY="$(curl -s -X POST "$POS_URL/workspaces" ${H} -d '{"name":"x"}' | _jget workspaceKey)"`,
+    '  echo done',
+  ].join('\n');
+  const addEmail = '  export RV_FIXTURE_NEW_EMAIL; RV_FIXTURE_NEW_EMAIL="rv-member@example.com"';
+  const addMember = `  curl -s -X POST "$POS_URL/workspaces/$RV_FIXTURE_WORKSPACE_KEY/members" ${H} -d "$(printf '{"email":"%s"}' "$RV_FIXTURE_NEW_EMAIL")" >/dev/null`;
+  const withLines = (...lines: string[]) =>
+    baseSh.replace('  echo done', `${lines.join('\n')}\n  echo done`);
+  const good = withLines('  # a member for removeMember', addEmail, addMember);
+
+  it('allows the shapes that create, export or prepare a fixture, and comments', () => {
+    for (const l of [
+      '# a comment',
+      '',
+      addEmail,
+      addMember,
+      `export RV_FIXTURE_NEW_KEY;   RV_FIXTURE_NEW_KEY="$(curl -s -X POST "$POS_URL/things" ${H} -d '{"name":"x"}' | _jget thingKey)"`,
+      `curl -s -X PUT "$POS_URL/things/$RV_FIXTURE_THING_KEY" ${H} -d '{"a":1}' >/dev/null 2>&1`,
+    ]) {
+      expect(isAllowedSetupLine(l), l).toBe(true);
+    }
+  });
+
+  it('allows the create lines that already exist in the real setup script, the ones of the same shape', () => {
+    const real = readFileSync(
+      join(dirname(fileURLToPath(import.meta.url)), '../../scripts/e2e/run-hub.sh'),
+      'utf8',
+    );
+    const creates = real
+      .split('\n')
+      .filter((l) => /^\s*export RV_FIXTURE_\w+;\s+RV_FIXTURE_\w+="\$\(curl -s -X POST/.test(l));
+    expect(creates.length).toBeGreaterThan(3);
+    const allowed = creates.filter((l) => isAllowedSetupLine(l));
+    expect(allowed.length).toBeGreaterThanOrEqual(4);
+  });
+
+  it('rejects anything else: other commands, pipes, redirects, URLs, other variables', () => {
+    for (const l of [
+      'export RV_FIXTURE_X=x; python3 -c pass',
+      'python3 -c "import os"',
+      `curl -s "$POS_URL/things" ${H} -d '{"a":1}'`,
+      `curl -s -X DELETE "$POS_URL/things" ${H} -d '{"a":1}'`,
+      `curl -s -X POST "https://example.com/x" ${H} -d '{"a":1}'`,
+      `curl -s -X POST "$OTHER/x" ${H} -d '{"a":1}'`,
+      `curl -s -X POST "$POS_URL/things" ${H} -d '{"a":1}' > /tmp/out`,
+      `curl -s -X POST "$POS_URL/things" ${H} -d '{"a":1}' | sh`,
+      `curl -s -X POST "$POS_URL/things" ${H} -d '$(whoami)'`,
+      `curl -s -X POST "$POS_URL/things" ${H} -d "$(whoami)"`,
+      'export PATH=/x',
+      'export RV_FIXTURE_X; RV_FIXTURE_X="$(whoami)"',
+      'echo "$GITHUB_TOKEN"',
+      'eval "$x"',
+      'RV_FIXTURE_X=$(curl -s https://example.com)',
+    ]) {
+      expect(isAllowedSetupLine(l), l).toBe(false);
+    }
+  });
+
+  it('accepts additions only, and rejects changed or removed lines, too many lines, or no fixture export', () => {
+    expect(checkRunHub(baseSh, good)).toEqual([]);
+    expect(checkRunHub(baseSh, good.replace('echo done', 'echo changed')).join()).toContain(
+      'existing lines',
+    );
+    expect(
+      checkRunHub(
+        baseSh,
+        withLines(...Array.from({ length: 9 }, () => addMember, addEmail)),
+      ).join(),
+    ).toContain('at most 8');
+    expect(checkRunHub(baseSh, withLines(addMember)).join()).toContain('export no RV_FIXTURE_');
+    expect(checkRunHub(undefined, good)).toHaveLength(1);
+  });
+
+  it('reads only real export statements, never a comment or text in another command', () => {
+    const script = [
+      '  export RV_FIXTURE_A; RV_FIXTURE_A="1"',
+      '  # export RV_FIXTURE_B; RV_FIXTURE_B="2"',
+      '  echo "export RV_FIXTURE_C"',
+    ].join('\n');
+    expect([...exportedFixtures(script)]).toEqual(['RV_FIXTURE_A']);
+  });
+
+  const withSetup = (runHubHead: string, value = 'RV_FIXTURE_NEW_EMAIL'): PrChange => ({
+    files: [RV_FILE, FLOORS_FILE, RUN_HUB_FILE],
+    base: { rv, floors, runHub: baseSh },
+    head: {
+      rv: { ...rv, resourceFixtures: { ...rv.resourceFixtures, memberEmail: value } },
+      floors: { ...floors, assertedByStatus: { ...floors.assertedByStatus, '403': 62 } },
+      runHub: runHubHead,
+    },
+  });
+
+  it('accepts the setup fixture when the variable it names is exported by the accepted added lines', () => {
+    expect(check(status, withSetup(good))).toEqual([]);
+  });
+
+  it('does not count a variable as provisioned when it is only in a comment, the additions fail, or the name differs', () => {
+    const commentOnly = withLines(
+      '  # export RV_FIXTURE_NEW_EMAIL; RV_FIXTURE_NEW_EMAIL="x@y.z"',
+      addEmail.replace('NEW_EMAIL', 'ELSE'),
+    );
+    const v1 = check(status, withSetup(commentOnly));
+    expect(
+      v1.some((m) => m.includes('names RV_FIXTURE_NEW_EMAIL, which setup does not provision')),
+    ).toBe(true);
+    expect(check(status, withSetup(`${good}\n  echo "$GITHUB_TOKEN"`)).length).toBeGreaterThan(0);
+    expect(
+      check(status, withSetup(good, 'RV_FIXTURE_OTHER_NAME')).some((m) =>
+        m.includes('names RV_FIXTURE_OTHER_NAME, which setup does not provision'),
+      ),
+    ).toBe(true);
+  });
+
+  it('still rejects run-hub.sh for a lifecycle PR', () => {
+    const lc: PrChange = {
+      files: [ENTITY_KINDS_FILE, FLOORS_FILE, RUN_HUB_FILE],
+      base: { rv, floors },
+      head: { rv, floors: { ...floors, lifecycleCreateCovered: 6 } },
+    };
+    expect(
+      check(lifecycle, lc).some((m) =>
+        m.includes('scripts/e2e/run-hub.sh, which a lifecycle PR may not change'),
+      ),
+    ).toBe(true);
   });
 });

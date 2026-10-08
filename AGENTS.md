@@ -930,9 +930,11 @@ The Slack message links to the run (matrix), that issue, and the per-area issues
 [`camunda-hub-coverage-fix.guidance.md`](resources/workspace-templates/camunda-hub-coverage-fix/camunda-hub-coverage-fix.guidance.md)):
 a manual-trigger workflow, dry run by default, that reads the weekly report and runs a Claude Code agent for the gaps the
 playbook allows: a resource with no create-read-delete test (an `entity-kinds.json` entry plus a floor), and a missing 403 or 404
-test whose cause is config alone (a fixture entry whose environment variable setup already provisions). Anything that needs
-generator or setup code, or touches an exclusion, is report-only with a `proposal` in the result. The agent opens **draft
-PRs** only (labels `nightly-api-fix`, `auto-generated`, `hub`; branch `fix/coverage-<resource or operation>[-<code>]-<run id>`), one per
+test whose cause is config alone (a fixture entry whose environment variable setup already provisions), or a test
+fixture setup does not create yet (at most 8 added lines in `scripts/e2e/run-hub.sh`, each of a fixed fixture-creating
+shape that the verify job checks, plus the one fixture entry and the floor). Anything that needs generator code or a
+product setting, or touches an exclusion, is report-only with a `proposal` in the result. The agent opens **draft
+PRs** only, each opening with a plain-language "In plain words" section that the verify job checks (labels `nightly-api-fix`, `auto-generated`, `hub`; branch `fix/coverage-<resource or operation>[-<code>]-<run id>`), one per
 API area, with no weekly cap. camunda-hub is read-only for it, and it runs with a scrubbed environment. The limits are enforced in
 code, not by the prompt: the selector (`scripts/triage/hub-coverage-fix-select.ts`) decides what it may work on, and a separate
 `verify` job on a fresh runner (`hub-coverage-fix-verify.ts`, `hub-coverage-fix-diff.ts`) checks from GitHub that it opened only
