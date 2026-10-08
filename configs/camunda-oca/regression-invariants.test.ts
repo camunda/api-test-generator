@@ -10451,13 +10451,32 @@ describeForThisConfig('bundled-spec invariants: emitted Python SDK suite (#133)'
     // since a `witness_response_N = await client...` eventual-wait poll call
     // also matches a bare `await client\.\w+\(` scan and would let an
     // aggregate count mask a genuinely missing step N call.
+    //
+    // P3 (eventual-consistency polling) intentionally changed the shape of
+    // eventually-consistent steps: the emitter now lowers them to
+    // `response_N = await await_eventually(` wrapping `lambda: client.<method>(`
+    // instead of a bare `response_N = await client.<method>(`. Both shapes are
+    // accepted here, and both still require the real `client.<method>(` call,
+    // so a step lowered to a comment only is still caught.
     const offenders: string[] = [];
+    let wrappedSteps = 0;
     for (const file of files) {
       const src = readFileSync(join(PYTHON_SDK_DIR, file), 'utf8');
       const stepNumbers = Array.from(src.matchAll(/# Step (\d+):/g)).map((m) => Number(m[1]));
-      const missingSteps = stepNumbers.filter(
-        (n) => !new RegExp(`response_${n} = await client\\.\\w+\\(`).test(src),
-      );
+      const missingSteps: number[] = [];
+      for (const n of stepNumbers) {
+        if (
+          new RegExp(`response_${n} = await await_eventually\\(\\s*lambda: client\\.\\w+\\(`).test(
+            src,
+          )
+        ) {
+          wrappedSteps += 1;
+          continue;
+        }
+        if (!new RegExp(`response_${n} = await client\\.\\w+\\(`).test(src)) {
+          missingSteps.push(n);
+        }
+      }
       if (missingSteps.length > 0) {
         offenders.push(`${file} (missing client call for step(s): ${missingSteps.join(', ')})`);
       }
@@ -10466,6 +10485,14 @@ describeForThisConfig('bundled-spec invariants: emitted Python SDK suite (#133)'
       offenders,
       'Emitted Python SDK test file(s) have step comments with no corresponding client call.',
     ).toEqual([]);
+    // Non-vacuity: the wrapped shape must actually be exercised. Without this,
+    // an emitter rename (or a regex drift) would silently drop every wrapped
+    // step into `missingSteps`... or, worse, a future relaxation could make the
+    // wrapper branch match nothing while the suite still passed on direct calls.
+    expect(
+      wrappedSteps,
+      'Expected at least 100 await_eventually-wrapped Python steps; the wrapper regex may have drifted from the emitter.',
+    ).toBeGreaterThanOrEqual(100);
   });
 
   it('every planned scenario has a materialized Python SDK test file (#133)', () => {
