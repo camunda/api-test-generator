@@ -5,7 +5,13 @@
 # the exact commit the verify step inspected (headRefOid of the PR list snapshot), never on a branch name, which could
 # move to an unverified commit between the check and the dispatch.
 #
-# Inputs (environment): RUN_PRS (the PR list JSON the verifier used), BASELINE (PR number above which PRs are this
+# Only PRs whose whole content is constrained are started automatically: the 403/404 PRs, which may change just
+# request-validation.json (one fixture entry), coverage-floors.json and the fixture block of run-hub.sh, all of which the
+# verify step checks line by line. A lifecycle PR may change the ontology and the invariants test file, whose content is
+# not constrained that way, so it keeps the manual rule: a person reads the diff, then starts the run.
+#
+# Inputs (environment): RUN_PRS (the PR list JSON the verifier used), PR_CHANGES (the changed files per PR, as the
+# verifier read them), BASELINE (PR number above which PRs are this
 # run's), GITHUB_RUN_ID, GITHUB_RUN_ATTEMPT, GITHUB_REPOSITORY, GITHUB_SERVER_URL, GH_TOKEN.
 # Optional: POLL_SECONDS (default 10), POLL_TRIES (default 12).
 #
@@ -27,9 +33,18 @@ note() {
 
 # First start every run, then look for all of them together: the lookup wait is paid once, not once per PR, because
 # the number of PRs per run is not capped.
+# Runs of this commit on this PR's own tag: the tag tells this dispatch from any other run of the same commit.
 runs_of() {
   gh run list --repo "$GITHUB_REPOSITORY" --workflow=hub-ondemand-test.yml \
-    --event workflow_dispatch --commit "$1" --limit 30 --json databaseId --jq '.[].databaseId'
+    --event workflow_dispatch --commit "$1" --branch "$2" --limit 30 --json databaseId --jq '.[].databaseId'
+}
+# A PR is constrained when it changes the request-validation file and nothing outside the three allowed files.
+constrained() {
+  jq -e --arg n "$1" '.[$n].files as $f
+    | ($f | index("configs/camunda-hub/request-validation.json")) != null
+      and ($f | all(. == "configs/camunda-hub/request-validation.json"
+        or . == "configs/camunda-hub/coverage-floors.json" or . == "scripts/e2e/run-hub.sh"))' \
+    "$PR_CHANGES" > /dev/null 2>&1
 }
 pending=""
 for n in $(jq -r --arg run "$GITHUB_RUN_ID" --argjson base "$BASELINE" \
@@ -37,8 +52,12 @@ for n in $(jq -r --arg run "$GITHUB_RUN_ID" --argjson base "$BASELINE" \
   "$RUN_PRS"); do
   sha="$(jq -r --argjson n "$n" '.[] | select(.number == $n) | .headRefOid' "$RUN_PRS")"
   tag="$(tag_for "$n")"
+  if ! constrained "$n"; then
+    note "$n" "The live Hub check was not started automatically: this PR changes files whose content is not checked line by line (ontology or test code). Read the diff, then run \`hub-ondemand-test.yml\` on the branch."
+    continue
+  fi
   # Without the list of runs that already exist for this commit, a new run cannot be told from an old one: do not start.
-  if [ -z "$sha" ] || [ "$sha" = null ] || ! runs_of "$sha" > "$seen_dir/$n" 2>/dev/null \
+  if [ -z "$sha" ] || [ "$sha" = null ] || ! runs_of "$sha" "$tag" > "$seen_dir/$n" 2>/dev/null \
     || ! gh api -X POST "repos/${GITHUB_REPOSITORY}/git/refs" -f ref="refs/tags/${tag}" -f sha="$sha" >/dev/null \
     || ! gh workflow run hub-ondemand-test.yml --repo "$GITHUB_REPOSITORY" --ref "$tag"; then
     echo "::warning::Could not start the live Hub check for PR #$n"
@@ -49,7 +68,7 @@ for n in $(jq -r --arg run "$GITHUB_RUN_ID" --argjson base "$BASELINE" \
   pending="$pending $n:$sha"
 done
 
-# A run started on a tag is matched by the commit it runs and by being new: its id was not among the runs of that commit
+# A run started on a tag is matched by the tag, the commit it runs, and by being new: its id was not among the runs of that commit
 # before this script dispatched it. That keeps an earlier attempt's run, or any earlier dispatch of the same commit,
 # from being linked by mistake. No clock is involved.
 for _ in $(seq 1 "$poll_tries"); do
@@ -59,7 +78,7 @@ for _ in $(seq 1 "$poll_tries"); do
   for item in $pending; do
     n="${item%%:*}"
     sha="${item#*:}"
-    id="$(runs_of "$sha" 2>/dev/null | grep -vxFf "$seen_dir/$n" | head -n 1)"
+    id="$(runs_of "$sha" "$(tag_for "$n")" 2>/dev/null | grep -vxFf "$seen_dir/$n" | head -n 1)"
     if [ -n "$id" ]; then
       note "$n" "The live Hub check was started automatically on the verified commit ${sha:0:7} after the verify job passed: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${id}"
     else

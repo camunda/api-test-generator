@@ -656,4 +656,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           BASELINE: ${{ needs.fix.outputs.baseline }}
         run: |
-          RUN_PRS="${RUNNER_TEMP}/run-prs.json" bash .github/scripts/hub-coverage-fix-live-check.sh
+          RUN_PRS="${RUNNER_TEMP}/run-prs.json" PR_CHANGES="${RUNNER_TEMP}/pr-changes.json" bash .github/scripts/hub-coverage-fix-live-check.sh

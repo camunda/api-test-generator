@@ -178,7 +178,7 @@ review"** that shows the check before and after. Read that section first.
 agent's pull requests: it would run the agent's code with Hub access before anything had checked it. Instead, once the
 `verify` job has checked the pull requests from GitHub (files, config, floors), it pins the commit it checked under a
 `hub-live-check/*` tag, starts `hub-ondemand-test` on that tag (not on the branch, which could move afterwards) and
-comments the run link on the pull request. The run covers exactly that commit; a later push is not tested. That is the same live check, started automatically but
+comments the run link on the pull request. The run covers exactly that commit; a later push is not tested. This is done for the 403/404 pull requests, whose content is fully constrained (one fixture entry, the floors, and the fixture block of the setup script). A lifecycle pull request also changes the ontology and the invariants test, which are not checked line by line, so it stays manual: read the diff, then run `hub-ondemand-test` on its branch. That is the same live check, started automatically but
 only after verification; its result is that run's status, not a check on the pull request. Read the diff and that run,
 and only then mark the pull request ready. If the verify job fails, no live check starts. A pull request that sits unreviewed is closed by the
 same stale-PR clean-up as the nightly fix pull requests.

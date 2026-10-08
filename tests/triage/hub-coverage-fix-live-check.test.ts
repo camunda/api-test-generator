@@ -25,6 +25,7 @@ interface Opts {
   before?: number[];
   after?: number[];
   listFails?: boolean;
+  files?: string[];
   attempt?: string;
 }
 
@@ -45,6 +46,17 @@ function run(o: Opts = {}) {
         { number: 11, state: 'OPEN', headRefName: 'fix/coverage-x-999', headRefOid: SHA },
       ];
   writeFileSync(join(dir, 'prs.json'), JSON.stringify(prs));
+  writeFileSync(
+    join(dir, 'changes.json'),
+    JSON.stringify({
+      '10': {
+        files: o.files ?? [
+          'configs/camunda-hub/request-validation.json',
+          'configs/camunda-hub/coverage-floors.json',
+        ],
+      },
+    }),
+  );
   writeFileSync(join(dir, 'before'), (o.before ?? []).join('\n'));
   writeFileSync(join(dir, 'after'), (o.after ?? [42]).join('\n'));
   writeFileSync(
@@ -70,6 +82,7 @@ function run(o: Opts = {}) {
       ...process.env,
       PATH: `${dir}:${process.env.PATH}`,
       RUN_PRS: join(dir, 'prs.json'),
+      PR_CHANGES: join(dir, 'changes.json'),
       BASELINE: '7',
       GITHUB_RUN_ID: RUN,
       GITHUB_RUN_ATTEMPT: o.attempt ?? '1',
@@ -151,6 +164,45 @@ describe('hub-coverage-fix live check dispatch', () => {
     expect(stale.status).toBe(1);
     expect(stale.calls).not.toContain('actions/runs/7');
     expect(stale.calls).toContain('its run could not be found');
+  });
+
+  it('starts only PRs whose content is constrained: a lifecycle PR (ontology, invariants test) stays manual', () => {
+    for (const files of [
+      [
+        'configs/camunda-hub/ontology/entity-kinds.json',
+        'configs/camunda-hub/coverage-floors.json',
+      ],
+      [
+        'configs/camunda-hub/regression-invariants.test.ts',
+        'configs/camunda-hub/coverage-floors.json',
+      ],
+      ['configs/camunda-hub/coverage-floors.json'],
+      [
+        'configs/camunda-hub/request-validation.json',
+        'request-validation/src/analysis/authDeny.ts',
+      ],
+    ]) {
+      const r = run({ files });
+      expect(r.status, files.join()).toBe(0);
+      expect(r.calls).not.toContain('workflow run');
+      expect(r.calls).not.toContain('git/refs');
+      expect(r.calls).toContain('not started automatically');
+    }
+    // The setup script is allowed next to the config, for a status PR.
+    const ok = run({
+      files: [
+        'configs/camunda-hub/request-validation.json',
+        'configs/camunda-hub/coverage-floors.json',
+        'scripts/e2e/run-hub.sh',
+      ],
+    });
+    expect(ok.calls).toContain('workflow run');
+  });
+
+  it('looks runs up by the PR tag and the commit', () => {
+    const r = run();
+    expect(r.calls).toContain(`--commit ${SHA}`);
+    expect(r.calls).toContain(`--branch hub-live-check/${RUN}-1-10`);
   });
 
   it('does not start a run when the existing runs of the commit cannot be listed', () => {
