@@ -57,4 +57,35 @@ request's changed files from GitHub: a lifecycle fix may only touch the entity l
 403 or 404 fix may only add fixture entries to the request-validation config and raise one floor. Any other file, a
 changed exclusion, a lowered floor or a new "no test at all" entry fails the run.
 
+## How the numbers are counted
 
+More on what the lines in the Slack message count.
+
+- A "resource" is something the API lets you create, read by key and delete (files, folders, projects, and so on; one nested under a parent key counts too); it needs a
+  restore flow too if a delete is soft: the key path has a `.../restoration` endpoint and the collection has a
+  `.../recently-deleted/search` endpoint. A restoration endpoint alone does not count (restoring a version or a snapshot does not undelete anything). A lifecycle test is the generated test for it
+  (`generated/camunda-hub/playwright/templates/EntityLifecycle/<Resource>.lifecycle.spec.ts`, and `RestoreLifecycle/` for restore).
+  A resource with no such test is listed as missing. The lifecycle lines count whole journeys, so they do not show up in the per-endpoint issues.
+  A new resource needs an entry in `configs/camunda-hub/ontology/entity-kinds.json` to get its lifecycle tests.
+- An "add-and-remove link" is a POST on a nested path whose sub-path has a DELETE but cannot be read by key (workspace members:
+  `POST /workspaces/{key}/members`, `DELETE /workspaces/{key}/members/{email}`). It counts as covered when an edge in
+  `configs/camunda-hub/ontology/edges.json` names both operations (`establishedBy`, `revokedBy`) and its
+  `EdgeLifecycle/<Edge>.lifecycle.spec.ts` was generated. A new link is listed by its add operation until the edge is added.
+- The report's "Negative tests" section also counts 409 (a request that is wrong for the current state), although the generated 409 tests live in the positive suite, because they need setup calls first.
+- 500 responses are not counted. 403 is counted but not part of the "missing a test" roll-up (it is tracked separately).
+- "Every kind of bad request" counts kinds with at least one test (missing required field, wrong type, bad enum, and so on), not how many tests each kind has. A kind skipped on purpose is not counted as missing and does not count as tested; it only leaves the endpoint's list of needed kinds.
+  It is only as complete as the generator's own rules for when a kind applies, so for body-schema kinds treat it as an upper bound: the headline can overstate real coverage.
+
+## The two generator floors
+
+One floor guards the generator itself: `requestKindEndpoints` keeps, for each kind of bad-request test the suite
+generates, how many endpoints have at least one test of that kind. The report names a kind as missing only when the
+generator can build it, so a generator that quietly stops producing a kind would not appear there; this floor makes
+that fail the build instead.
+
+A second floor, `requestScenarioTypes`, does the same for a type of test that the coverage data counts under another
+kind's name (a top-level wrong-type body test, `body-top-type-mismatch`, is counted as `type-mismatch`). It keeps the
+raw number of tests of that type, so that generator cannot disappear while the kind it is counted under keeps the same
+endpoints. Raise either floor in the same PR that makes more endpoints or tests get that kind; if a type counted under
+another kind appears without a floor, the build fails until one is added. The script needs `MANIFEST.json` (written
+with `COVERAGE.json` by the request-validation generator) and stops with an error if it is missing.

@@ -47,25 +47,14 @@ Across positive and negative tests
 Tracking issue · Area issues: ...
 ```
 
-When the coverage-fix agent has pull requests waiting for review, a reply appears **in the thread** of this message:
+When the coverage-fix agent has pull requests waiting for review, a reply appears **in the thread** of this message (a week without any such pull requests has no reply):
 
 ```
 🤖 Coverage-fix agent: 1 PR waiting for review. These were opened by the agent, not a person; please review before merging: #690 ...
 ```
 
 - "x of y" means: y endpoints document that response, x of them have a test that asserts it. Not every line counts endpoints: "Optional request fields" counts **fields** (63 of 68 fields), and the lifecycle lines count **resources** or **links**.
-- The thread reply, starting with the robot, appears only when the coverage-fix agent (see "The coverage-fix agent" below) has pull requests waiting for review. It says how many and links each one. A week without such PRs has no reply, and the main message never changes.
 - A number in brackets is the change since the previous scheduled report. Nothing is shown when it is unchanged or there is no previous report.
-- A "resource" is something the API lets you create, read by key and delete (files, folders, projects, and so on; one nested under a parent key counts too); it needs a
-  restore flow too if a delete is soft: the key path has a `.../restoration` endpoint and the collection has a
-  `.../recently-deleted/search` endpoint. A restoration endpoint alone does not count (restoring a version or a snapshot does not undelete anything). A lifecycle test is the generated test for it
-  (`generated/camunda-hub/playwright/templates/EntityLifecycle/<Resource>.lifecycle.spec.ts`, and `RestoreLifecycle/` for restore).
-  A resource with no such test is listed as missing. The lifecycle lines count whole journeys, so they do not show up in the per-endpoint issues.
-  A new resource needs an entry in `configs/camunda-hub/ontology/entity-kinds.json` to get its lifecycle tests.
-- An "add-and-remove link" is a POST on a nested path whose sub-path has a DELETE but cannot be read by key (workspace members:
-  `POST /workspaces/{key}/members`, `DELETE /workspaces/{key}/members/{email}`). It counts as covered when an edge in
-  `configs/camunda-hub/ontology/edges.json` names both operations (`establishedBy`, `revokedBy`) and its
-  `EdgeLifecycle/<Edge>.lifecycle.spec.ts` was generated. A new link is listed by its add operation until the edge is added.
 - "Endpoints with no test at all" are listed with the issue that explains each one, taken from the `knownIssue` URL on the endpoint's
   entry in `positive-suppress.json` or `request-validation.json`. An endpoint with no such entry is listed bare, which means nobody has explained it yet.
 - **What counts as covered.** A test that exists in the generated files and asserts that response. A test left out by a suppression or exclusion in the config (usually for a
@@ -73,10 +62,6 @@ When the coverage-fix agent has pull requests waiting for review, a reply appear
   the "Every kind of bad request" line, which treats a skip in two ways. A **kind** excluded in the config is
   taken out of what that endpoint needs, so the endpoint can still count as fully covered by its other kinds. An endpoint whose
   bad-request tests are **all** skipped or excluded is left out of both numbers.
-- The report's "Negative tests" section also counts 409 (a request that is wrong for the current state), although the generated 409 tests live in the positive suite, because they need setup calls first.
-- 500 responses are not counted. 403 is counted but not part of the "missing a test" roll-up (it is tracked separately).
-- "Every kind of bad request" counts kinds with at least one test (missing required field, wrong type, bad enum, and so on), not how many tests each kind has. A kind skipped on purpose is not counted as missing and does not count as tested; it only leaves the endpoint's list of needed kinds.
-  It is only as complete as the generator's own rules for when a kind applies, so for body-schema kinds treat it as an upper bound: the headline can overstate real coverage.
 
 ## Closing a gap
 
@@ -99,7 +84,7 @@ After the fix:
 4. If the fix needed a flag or a new resource, see "Adding or changing an endpoint in Hub" in the PR-check cookbook for the labels.
 
 `AGENTS.md` has more on each config file, but it is written for AI agents and is long. If a step here is unclear, ask in
-`#camunda-hub-pr-e2e-results`.
+`#ask-qa`.
 
 ### Floors
 
@@ -107,17 +92,7 @@ After the fix:
 runs the same script and fails a PR if a number drops below its floor, or if an endpoint has no test at all
 and is not listed in `zeroTestOperations` with a reason. A floor only goes up. Never lower one to make CI pass; add the missing test.
 
-One floor guards the generator itself: `requestKindEndpoints` keeps, for each kind of bad-request test the suite
-generates, how many endpoints have at least one test of that kind. The report names a kind as missing only when the
-generator can build it, so a generator that quietly stops producing a kind would not appear there; this floor makes
-that fail the build instead.
-
-A second floor, `requestScenarioTypes`, does the same for a type of test that the coverage data counts under another
-kind's name (a top-level wrong-type body test, `body-top-type-mismatch`, is counted as `type-mismatch`). It keeps the
-raw number of tests of that type, so that generator cannot disappear while the kind it is counted under keeps the same
-endpoints. Raise either floor in the same PR that makes more endpoints or tests get that kind; if a type counted under
-another kind appears without a floor, the build fails until one is added. The script needs `MANIFEST.json` (written
-with `COVERAGE.json` by the request-validation generator) and stops with an error if it is missing.
+Two more floors guard the generator itself, so that it cannot quietly stop producing a kind of test. How they work is in the [internals page](maintainers/hub-coverage-report-internals.md).
 
 ## The coverage-fix agent
 
