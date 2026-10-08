@@ -68,12 +68,31 @@ value-for-effort ranking, in the order the next session should implement them:
 
 Two cross-cutting facts the ranking depends on:
 
-- **Items 4, 6a and 5A are the entire unblocked set** (~12-24 python tests, no owner input).
+- **Items 4, 6a and 5A are the entire unblocked set** (~19-24 python tests: Item 4's bucket is
+  still 17 at HEAD, Item 5A is worth 2, Item 6a 0-5; no owner input needed for any of them).
   Everything else is sign-off-gated.
 - **Items 4 and 8 are not python-specific.** The same invalid bodies are emitted identically by
   playwright, js-sdk and python-sdk (Item 8: 31 occurrences / 8 files in each of the three;
   csharp-sdk emits no agent-instance operations at all), so a shared planner fix repairs all
   targets at once.
+
+**CI gates replicated locally at HEAD** (full all-target pipeline, `TEST_SEED=snapshot-baseline`,
+in CI's order): `check:no-bom` OK; `npm run lint` clean (258 files, **zero warnings**); all six
+`tsc --noEmit` gates OK (extractor, path-analyser, emitter-sdk, materializer,
+request-validation, tests) with `build:analyser` + `build -w @camunda8/emitter-sdk` run first as
+CI does; spec pin **untouched** and the bundled `specHash` matches `expectedSpecHash` exactly, so
+the `spec-pin.setup.ts` guard passes; `lint:generated` clean (726 files); `npm test` =
+**8 failed | 1250 passed | 25 skipped (1283)**. The 8 failures are the known environmental
+baseline — all in `tests/request-validation/hub-gap-issue.test.ts`, all `jq: command not found`.
+Passed count rose 1239 → 1250 (+11) from the new Item 2 and Item 3 fixtures. The `hub invariants`
+leg is **not runnable locally** (needs the private `../camunda-hub` sibling clone); the
+`Spec freshness` leg is advisory and ignored by instruction.
+
+`configs/camunda-oca/request-defaults.json` was **never touched** anywhere on this branch. The
+three commits in the table above, plus the `docs:` commits that added and extended this status
+section, touch only `configs/camunda-oca/regression-invariants.test.ts`,
+`docs/handoff/python-sdk-tasks.md`, `path-analyser/src/index.ts` and the two
+`tests/fixtures/planner/` fixture files.
 
 ## Environment notes (this execution)
 
