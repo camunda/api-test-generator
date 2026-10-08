@@ -280,6 +280,13 @@ Work in `{{.WorkspacePath}}/api-test-generator` (already on `main`).
    suite (`generated/camunda-hub/playwright/templates/EntityLifecycle/<Resource>.lifecycle.spec.ts`). End the section
    with how to see it: "In the live run's `hub-suite-reports` artifact, open the <profile> report and search for
    `<operationId>`."
+   **Then write the steps the test takes**, as a short numbered list in plain words, under the heading
+   `### What the test does`. Read them from the generated test code you just found, not from what you expect it to do:
+   (1) what exists before it starts (the fixtures it uses, and any setup line you added); (2) the one request it
+   sends: method, path with the fixture values filled in, who sends it (for a 403: the user with no permission) and
+   the body if any; (3) what it checks: the status it expects, and any other check the code makes. For a lifecycle test,
+   list its create, read and delete steps in the order the code runs them. Keep each step to one line. If the code does
+   something you did not expect, say so in a last line.
    Title: `test(coverage-fix): add <Resource> create-read-delete lifecycle`. The rest of the body has the gap, the
    numbers before and after, the commands you ran, the report run URL, a note that the standalone create, get and
    delete feature specs of the resource are replaced by the lifecycle test, and the line
