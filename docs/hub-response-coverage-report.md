@@ -159,8 +159,8 @@ It is a helper: it never merges anything.
 2. **An endpoint with no 403 (forbidden) or 404 (not found) test.** The agent reads the cause first. If the only thing
    missing is a small config entry that the test setup already supports, it adds it. If the only thing missing is a test
    record that the setup could create through a Hub call the API spec describes (for example a workspace member), it may
-   also add a few lines to `scripts/e2e/run-hub.sh` that create it. Those lines are additions only, at most eight, and
-   each must be one of a few fixed shapes (the verify job rejects anything else). Its pull request then has a section
+   also add a few lines to `scripts/e2e/run-hub.sh` that create it. Those lines are additions only, at most eight, in one
+   block right after an existing fixture line, and each must be one of a few fixed shapes (the verify job rejects anything else). Its pull request then has a section
    called **"Setup change: needs careful review"**. Everything else (generator code, a product setting, an exclusion that
    was decided on purpose) gets **no pull request**: the agent writes down the change it would make and why a person
    should decide, and that text appears in the run summary of the workflow run.

@@ -416,6 +416,66 @@ describe('run-hub.sh additions for a status PR', () => {
     expect(checkRunHub(undefined, good)).toHaveLength(1);
   });
 
+  it('rejects a comment that the shell would still expand, and counts comments and blank lines in the limit', () => {
+    for (const c of ['# $(whoami)', '# `whoami`', '# "quoted"', '# a \\ b', '#$HOME']) {
+      expect(isAllowedSetupLine(c), c).toBe(false);
+    }
+    expect(isAllowedSetupLine('# plain words, numbers 1 2 3 (and) a/b_c-d')).toBe(true);
+    const many = Array.from({ length: 9 }, () => '');
+    expect(checkRunHub(baseSh, withLines(addEmail, ...many)).join()).toContain('at most 8');
+  });
+
+  it('only accepts one block placed directly after an existing fixture statement', () => {
+    // Inside a multi-line double-quoted string, text is still expanded by the shell: an allowed line there is not safe.
+    const withString = [
+      baseSh.split('\n')[0],
+      '  note="first line of a string',
+      'second line of the string"',
+      '  echo done',
+    ].join('\n');
+    const inString = withString.replace(
+      'second line of the string"',
+      `${addEmail}\nsecond line of the string"`,
+    );
+    expect(checkRunHub(withString, inString).join()).toContain(
+      'directly after an existing fixture statement',
+    );
+    // Not after a statement at all.
+    const afterEcho = baseSh.replace('  echo done', `  echo done\n${addEmail}`);
+    expect(checkRunHub(baseSh, afterEcho).join()).toContain(
+      'directly after an existing fixture statement',
+    );
+    // At the very start of the file.
+    expect(checkRunHub(baseSh, `${addEmail}\n${baseSh}`).join()).toContain(
+      'directly after an existing fixture statement',
+    );
+    // Two separate blocks.
+    const base3 = [baseSh.split('\n')[0], '  echo mid', '  echo done'].join('\n');
+    const two = [baseSh.split('\n')[0], addEmail, '  echo mid', addMember, '  echo done'].join(
+      '\n',
+    );
+    expect(checkRunHub(base3, two).join()).toContain('more than one place');
+    // Nothing added.
+    expect(checkRunHub(baseSh, baseSh).join()).toContain('no lines were added');
+  });
+
+  it('accepts a block after a real fixture statement of the real setup script, and rejects it inside its multi-line text', () => {
+    const real = readFileSync(
+      join(dirname(fileURLToPath(import.meta.url)), '../../scripts/e2e/run-hub.sh'),
+      'utf8',
+    );
+    const lines = real.split('\n');
+    const anchorIdx = lines.findIndex((l) => /^\s*export RV_FIXTURE_VERSION_KEY;/.test(l));
+    expect(anchorIdx).toBeGreaterThan(0);
+    const insert = (at: number) => [...lines.slice(0, at), addEmail, ...lines.slice(at)].join('\n');
+    expect(checkRunHub(real, insert(anchorIdx + 1))).toEqual([]);
+    // Right after the start of the multi-line _jget helper (a few lines into the file) is not a fixture statement.
+    const helperIdx = lines.findIndex((l) => l.includes('_jget'));
+    expect(checkRunHub(real, insert(helperIdx + 1)).join()).toContain(
+      'directly after an existing fixture statement',
+    );
+  });
+
   it('reads only real export statements, never a comment or text in another command', () => {
     const script = [
       '  export RV_FIXTURE_A; RV_FIXTURE_A="1"',

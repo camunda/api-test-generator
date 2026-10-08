@@ -173,9 +173,12 @@ response, is not held by an exclusion, and has no scoped exclusion. Work out **w
      test fixture (a member, a record the path or body needs) that setup could create through a Hub API call the spec
      describes. This applies to any operation, not to one endpoint. You may change exactly three things, and nothing
      else:
-       1. In `scripts/e2e/run-hub.sh`, **add** at most 8 lines next to the fixtures that exist. Each added line must
-          have one of these shapes, copied from its neighbours; any other line makes the verify job fail the run:
-          - a comment or a blank line;
+       1. In `scripts/e2e/run-hub.sh`, **add** at most 8 lines as ONE block, placed directly after an existing
+          `export RV_FIXTURE_...` / `curl ...` fixture line (in the fixture block, never anywhere else in the file).
+          Each added line must have one of these shapes, copied from its neighbours; any other line, or a block in
+          another place, makes the verify job fail the run:
+          - a blank line, or a comment made only of letters, digits, spaces and `. , : ; ( ) / _ @ ' + -` (no `$`,
+            backtick, double quote or backslash: the shell may still expand those);
           - `export RV_FIXTURE_X; RV_FIXTURE_X="$(curl -s -X POST "$POS_URL/<path>" "${h[@]}" -d '<json>' | _jget <key>)"`
             to create a record and export its key;
           - `export RV_FIXTURE_X; RV_FIXTURE_X="<fixed value>"` for a plain value such as an email;

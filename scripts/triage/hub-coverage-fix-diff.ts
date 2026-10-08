@@ -133,37 +133,58 @@ const SETUP_SHAPES: { name: string; re: RegExp }[] = [
   },
 ];
 
+// A comment is inert only when it is a real comment. Inside a multi-line quoted string it is text the shell still expands,
+// so a comment may not contain anything the shell expands or that closes a quote: no $, backtick, quote or backslash.
+const SAFE_COMMENT = /^#[A-Za-z0-9 .,:;()/_@'+-]*$/;
+
+// A line of one of the fixture shapes (not a comment or a blank).
+export function isSetupStatement(line: string): boolean {
+  const t = line.trim();
+  return SETUP_SHAPES.some((shape) => shape.re.test(t));
+}
+
 export function isAllowedSetupLine(line: string): boolean {
   const t = line.trim();
-  if (t === '' || t.startsWith('#')) return true;
-  return SETUP_SHAPES.some((shape) => shape.re.test(t));
+  if (t === '') return true;
+  if (t.startsWith('#')) return SAFE_COMMENT.test(t);
+  return isSetupStatement(t);
 }
 
 const MAX_ADDED_SETUP_LINES = 8;
 
-// run-hub.sh: additions only, few, each of an allowed shape, at least one of them exporting a fixture variable.
+// run-hub.sh: ONE block of added lines, placed directly after an existing fixture statement; nothing else changes.
+// Lines are judged one by one by isAllowedSetupLine, which cannot know where in the file a line lands: the same text is
+// harmless between two statements and live code inside a multi-line quoted string. A fixture statement is a complete,
+// balanced line in the fixture block, so a block inserted right after one cannot be inside a string.
 export function checkRunHub(base: unknown, head: unknown): string[] {
   if (typeof base !== 'string' || typeof head !== 'string') {
     return ['run-hub.sh: its text could not be read on both sides'];
   }
-  const out: string[] = [];
   const was = base.split('\n');
-  const added: string[] = [];
-  let i = 0;
-  for (const line of head.split('\n')) {
-    if (i < was.length && line === was[i]) i++;
-    else added.push(line);
+  const now = head.split('\n');
+  const n = now.length - was.length;
+  if (n <= 0) return ['run-hub.sh: no lines were added (only additions are allowed)'];
+  // The insertion point: the longest common start; the rest of head must be the added block followed by the rest of base.
+  let k = 0;
+  while (k < was.length && was[k] === now[k]) k++;
+  if (!was.slice(k).every((line, i) => line === now[k + n + i])) {
+    return [
+      'run-hub.sh: existing lines were changed or removed, or lines were added in more than one place',
+    ];
   }
-  if (i < was.length) {
-    out.push('run-hub.sh: existing lines were changed or removed (only additions are allowed)');
-  }
-  const code = added.filter((l) => l.trim() !== '' && !l.trim().startsWith('#'));
-  if (code.length > MAX_ADDED_SETUP_LINES) {
+  const out: string[] = [];
+  const added = now.slice(k, k + n);
+  if (added.length > MAX_ADDED_SETUP_LINES) {
     out.push(
-      `run-hub.sh: ${code.length} lines were added, at most ${MAX_ADDED_SETUP_LINES} are allowed`,
+      `run-hub.sh: ${added.length} lines were added, at most ${MAX_ADDED_SETUP_LINES} are allowed`,
     );
   }
-  for (const line of code) {
+  if (!isSetupStatement(k > 0 ? (was[k - 1] ?? '') : '')) {
+    out.push(
+      'run-hub.sh: the lines must be added directly after an existing fixture statement, and this place is not one',
+    );
+  }
+  for (const line of added) {
     if (!isAllowedSetupLine(line)) {
       out.push(
         `run-hub.sh: an added line is not one of the allowed fixture shapes: ${line.trim()}`,
