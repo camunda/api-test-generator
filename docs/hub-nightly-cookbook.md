@@ -70,11 +70,10 @@ The spec-bump and re-enable posts are explained in their own sections below. Mor
 
 - The **positive** suite sends good requests and expects success (including create, read, delete and restore flows).
   The **negative** suite sends bad requests and expects 400, 401, 403 or 404. The 409 (conflict) tests are in the positive suite, because they need setup calls first.
-- **A thread reply under the post** lists the known issues that limit what the suite covers. Each item is either skipped
-  on purpose (the tests are left out) or only partly checked (the test still runs but one assertion, such as the error-body
-  shape, is not made), because of a Hub issue, with its link. A green run does **not** fully cover those. An item can stay
-  listed after its issue is closed, when Hub closed it as not planned.
-  The re-enable check does not watch the partly checked items; see "Not watched" in the re-enable section.
+- **A thread reply under the post** lists the known Hub issues that limit what the suite covers. Each item is either
+  skipped on purpose (the tests are left out) or only partly checked (the test runs, but one assertion, such as the
+  error-body shape, is not made). A green run does **not** fully cover those. What to do when one of those issues
+  closes is in "The re-enable check" below.
 - **`⚠️ config drift: positive-suppress lists X not in the current spec`**: an operation the config skips no longer exists
   upstream (renamed or removed). The generator owner updates `configs/camunda-hub/positive-suppress.json`.
 
@@ -151,9 +150,6 @@ Skipped tests point to a Hub bug. This job watches those bugs. When one closes, 
 `request-validation.json`) are not covered by this check, so nothing tells you when their Hub issue closes. Look at the
 issue's close reason first. **Closed as fixed:** remove the entry by hand. **Closed as not planned:** keep the entry, since
 Hub still does not meet that assertion and removing it would make the nightly fail.
-
-**Check why the issue closed.** If Hub closed it as "not planned", the skip must stay. The check does not read the close
-reason for skips tied to one operation yet, so for those it is a human check.
 
 ## The weekly coverage report (Monday 05:00)
 
