@@ -45,7 +45,7 @@ To run the generated suite by hand for any branch: [hub-ondemand-test](https://g
 
 | The message shows | Whose problem | Do this |
 |---|---|---|
-| ❌ failed above 0, triage says **product** | Probably Hub's | Open the issue linked in the thread. If there is none, filing failed or the finding is marked *report only*: read the finding in the triage run. `hub-medic` is pinged only when a new Hub issue was filed |
+| ❌ failed above 0, triage says **product** | Probably Hub's | Open the issue linked in the thread. If there is none, **nobody was pinged** (filing failed or the finding is marked *report only*): read the finding in the triage run. `hub-medic` is pinged only for a newly filed Hub issue, not for one that is already tracked |
 | Triage says **test-generation** | The generator's, not a Hub bug | Nothing, unless asked. When a fix PR or suppress PR was opened it is linked in the thread and `test-automation-medic` is pinged. When none was (the fix was not safe, or opening it failed) the finding is *report only*: read it in the triage run |
 | Triage says **infrastructure** | Neither: the run itself had a problem | Open the failed step in the nightly run and read the error. Raise it in the channel the first time, with the run link; do not wait for it to repeat |
 | Triage says **flakiness** | A real defect that comes and goes: a test defect (race, bad wait) or a Hub defect (race, missed signal) | Do not wait. Look at it the same day: read the finding in the triage thread, then hand it to the generator owner if the test is at fault or to `hub-medic` if Hub is |
