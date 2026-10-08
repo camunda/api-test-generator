@@ -41,17 +41,26 @@ While Slack is down you can still read the night's result: open the nightly run,
 
 To run the generated suite by hand for any branch: [hub-ondemand-test](https://github.com/camunda/api-test-generator/actions/workflows/hub-ondemand-test.yml) (Run workflow).
 
-**What to do with a failure.** Open the thread under the triage digest. Each failure has a category:
+**What to do with a failure.** Only when the digest lists failures.
 
-| Triage says | What it means | What you do |
+1. Open the thread under the digest. There is one line per failed test.
+2. Find your line below, by the icon at its start and the link at its end, and do what the last column says.
+
+| The line shows | What happened | What you do |
 |---|---|---|
-| 🎫 **known issue** | Already tracked | Nothing. The linked Hub issue is the work item |
-| 📦 **product** | Hub answers differently from its spec | Open the linked issue. **No link means nobody was pinged**: read the finding in the triage run |
-| 🧪 **test-generation** | The generated test is wrong or missing. Not a Hub bug | Review the fix or suppress PR linked in the thread. No PR means it is report only: read the finding in the triage run |
-| 🔧 **infrastructure** | The run itself broke, not Hub or the tests | Open the failed step, read the error, and say so in the channel with the run link. Do not wait for a repeat |
-| 🎲 **flakiness** | A real defect that comes and goes (a race in the test or in Hub) | Look at it the same day. Do not just re-run |
+| 🎫 known issue | Hub already has an issue for it | Nothing. The linked issue is the work |
+| 📦 product, with a 📝 link | Hub is wrong, and the agent filed a **new** Hub issue (`hub-medic` was pinged) | Open the issue and take it, or hand it to the owning team |
+| 📦 product, **no link** | Hub is probably wrong, but no issue was filed and **nobody was pinged** | Open the triage run and read the finding. Then file the Hub issue yourself |
+| 🧪 test-generation, with a 🛠️ link | The generated test is wrong; the agent opened a fix PR | Open the PR, read the diff, and merge it if it is right |
+| 🧪 test-generation, with a ⛔ link | A **suppress PR**: it switches the test off until a Hub bug is fixed | Open the PR. Merge it only if the linked Hub issue is real |
+| 🧪 test-generation, with a ♻️ link | An open PR already covers it | Open that PR and review it |
+| 🧪 test-generation, **no link** | The agent could not fix it safely, so it only reported | Open the triage run, read the finding, and fix the test yourself. If you are stuck, ask in `#ask-qa` |
+| 🔧 infrastructure | The run broke (Hub start, network, registry), not Hub or the tests | Open the failed step in the nightly run and read the error. Say so in the channel with the run link. Re-run only once the outside cause is fixed |
+| 🎲 flakiness | A test passes sometimes and fails sometimes | Open the test in the nightly report and compare the passed and failed attempts. If Hub caused it, file a Hub issue. If the test did, fix the test. Do not just re-run |
+| ⏳ or 🔗 on a line | A hint that a recent Hub change may explain it. It is a guess | Investigate by hand. It does not mean a PR exists |
+| ⚠️ on a line | The agent tried to open an issue or PR and failed | Do it by hand |
 
-The spec-bump and re-enable posts are explained in their own sections below. What each icon and link in the thread means is in "The triage digest".
+The spec-bump and re-enable posts are explained in their own sections below. More on each icon is in "The triage digest".
 
 ## The nightly posts (02:00)
 
