@@ -10344,6 +10344,196 @@ describeForThisConfig(
   },
 );
 
+// ---------------------------------------------------------------------------
+// NESTED enum-typed request-body field seeding (extends #338 to any depth)
+// ---------------------------------------------------------------------------
+//
+// The #338 invariant above iterates only the TOP-LEVEL keys of `bodyTemplate`
+// (`Object.entries(step.bodyTemplate ?? {})`), so an enum-typed leaf nested
+// inside a required array-of-objects was never checked. That gap let
+// `createAgentInstance`'s `history[].role` (an `allOf` `$ref` to
+// `AgentInstanceHistoryRoleEnum`) ship as `"role": "placeholder"`, which the
+// broker rejects with `400 Unexpected value 'placeholder' for enum field
+// 'role'` — 28 live Python failures across `createAgentInstance` /
+// `updateAgentInstance` and their variants.
+//
+// Root cause was `scalarSeedLiteral` in `path-analyser/src/index.ts`, which
+// resolved format → declared type → `'placeholder'` and never consulted
+// `node.enum`. This invariant is the class-scoped guard: it walks the schema
+// to ANY depth and asserts every emitted leaf whose schema declares an enum is
+// a member of that enum, so a sibling nested-enum field cannot regress the same
+// way. Scope mirrors `synthesizeObjectFromPrefix` (required properties only),
+// which is the code path that synthesises these literals.
+describeForThisConfig(
+  'bundled-spec invariants: nested enum-typed request-body field seeding',
+  () => {
+    it('no emitted bodyTemplate seeds "placeholder" (or any non-member) for an enum-typed leaf at any nesting depth', () => {
+      if (!existsSync(FEATURE_SCENARIOS_DIR)) {
+        throw new Error(
+          `Feature output directory not found at ${FEATURE_SCENARIOS_DIR}. Run 'npm run pipeline' first.`,
+        );
+      }
+      if (!existsSync(BUNDLED_SPEC_PATH)) {
+        throw new Error(
+          `Bundled spec not found at ${BUNDLED_SPEC_PATH}. Run 'npm run fetch-spec' first.`,
+        );
+      }
+
+      const spec = loadBundledSpec();
+
+      /**
+       * Collect every enum constraint in a request-body schema, keyed by the
+       * canonical dot + `[]` path notation the body walker below reproduces
+       * (e.g. `history[].role`). Descends through `allOf`/`oneOf` and array
+       * `items` to any depth; `depth` guards against cyclic `$ref`s.
+       */
+      function collectEnumPathsDeep(
+        schema: SpecNode | undefined,
+        prefix: string,
+        out: Map<string, unknown[]>,
+        depth: number,
+      ): void {
+        if (!schema || depth > 8) return;
+        const resolved = resolveSpecNode(schema, spec, new Set());
+        if (!resolved) return;
+        const ownEnum = effectiveEnumFromSpec(resolved, spec, new Set());
+        if (ownEnum && ownEnum.length > 0 && prefix.length > 0 && !out.has(prefix)) {
+          out.set(prefix, ownEnum);
+        }
+        if (resolved.type === 'array' && resolved.items) {
+          collectEnumPathsDeep(resolved.items, `${prefix}[]`, out, depth + 1);
+        } else {
+          const { required, properties } = mergeSchemaShape(resolved, spec, new Set());
+          for (const field of required) {
+            const sub = properties[field];
+            if (!sub) continue;
+            collectEnumPathsDeep(sub, prefix ? `${prefix}.${field}` : field, out, depth + 1);
+          }
+        }
+        for (const variant of resolved.oneOf ?? []) {
+          collectEnumPathsDeep(variant, prefix, out, depth + 1);
+        }
+      }
+
+      const enumPathsByOp = new Map<string, Map<string, unknown[]>>();
+      for (const pathItem of Object.values(spec.paths ?? {})) {
+        for (const op of Object.values(pathItem)) {
+          if (!op.operationId) continue;
+          const body = resolveSpecNode(op.requestBody, spec, new Set());
+          const jsonBody = body?.content?.['application/json']?.schema;
+          if (!jsonBody) continue;
+          const paths = new Map<string, unknown[]>();
+          collectEnumPathsDeep(jsonBody, '', paths, 0);
+          if (paths.size > 0) enumPathsByOp.set(op.operationId, paths);
+        }
+      }
+
+      interface NestedScenarioFile {
+        scenarios: {
+          id: string;
+          requestPlan?: { operationId: string; bodyTemplate?: unknown }[];
+        }[];
+      }
+
+      type NestedOffenderReason = 'placeholder-var' | 'placeholder-literal' | 'non-enum-member';
+      const offenders: {
+        file: string;
+        scenario: string;
+        operationId: string;
+        path: string;
+        value: unknown;
+        expectedEnum: unknown[];
+        reason: NestedOffenderReason;
+      }[] = [];
+      const placeholderPattern = /^\$\{[^}]+\}$/;
+
+      function classifyLeaf(value: unknown, expectedEnum: unknown[]): NestedOffenderReason | null {
+        if (typeof value === 'string' && placeholderPattern.test(value)) return 'placeholder-var';
+        if (value === 'placeholder') return 'placeholder-literal';
+        if (!expectedEnum.includes(value)) return 'non-enum-member';
+        return null;
+      }
+
+      // Non-vacuity: count how many enum-typed leaves were actually checked, and
+      // remember the deepest path seen, so this invariant cannot pass by never
+      // matching anything (e.g. after a notation drift between the schema walker
+      // and the body walker).
+      let leavesChecked = 0;
+      let maxDepthSeen = 0;
+
+      function walkBody(
+        value: unknown,
+        path: string,
+        enumPaths: Map<string, unknown[]>,
+        info: { file: string; scenario: string; operationId: string },
+      ): void {
+        const expected = enumPaths.get(path);
+        if (expected) {
+          leavesChecked += 1;
+          maxDepthSeen = Math.max(maxDepthSeen, path.split(/[.[]/).filter(Boolean).length);
+          const reason = classifyLeaf(value, expected);
+          if (reason) {
+            offenders.push({ ...info, path, value, expectedEnum: expected, reason });
+          }
+          return;
+        }
+        if (Array.isArray(value)) {
+          for (const elem of value) walkBody(elem, `${path}[]`, enumPaths, info);
+          return;
+        }
+        if (isSpecRecord(value)) {
+          for (const [k, v] of Object.entries(value)) {
+            walkBody(v, path ? `${path}.${k}` : k, enumPaths, info);
+          }
+        }
+      }
+
+      for (const dir of [FEATURE_SCENARIOS_DIR, VARIANT_SCENARIOS_DIR]) {
+        if (!existsSync(dir)) continue;
+        for (const f of readdirSync(dir)) {
+          if (!f.endsWith('-scenarios.json')) continue;
+          // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+          const file = JSON.parse(readFileSync(join(dir, f), 'utf8')) as NestedScenarioFile;
+          for (const scenario of file.scenarios ?? []) {
+            for (const step of scenario.requestPlan ?? []) {
+              const enumPaths = enumPathsByOp.get(step.operationId);
+              if (!enumPaths || step.bodyTemplate === undefined) continue;
+              walkBody(step.bodyTemplate, '', enumPaths, {
+                file: f,
+                scenario: scenario.id,
+                operationId: step.operationId,
+              });
+            }
+          }
+        }
+      }
+
+      // Non-vacuity guards: the nested case must actually be exercised. On the
+      // pinned camunda-oca spec `history[].role` is the only required nested
+      // enum leaf that gets synthesised, so at least one leaf at depth >= 2
+      // must have been checked.
+      expect(
+        leavesChecked,
+        'Expected the nested-enum invariant to check at least one enum-typed bodyTemplate leaf; ' +
+          'the schema walker and body walker path notations may have drifted apart.',
+      ).toBeGreaterThan(0);
+      expect(
+        maxDepthSeen,
+        'Expected at least one enum-typed leaf nested below the top level (e.g. history[].role) ' +
+          'to be checked; a depth of 1 means the nested case is not being exercised.',
+      ).toBeGreaterThanOrEqual(2);
+
+      expect(
+        offenders,
+        'A scenario bodyTemplate seeds an invalid value for an enum-typed leaf nested inside the ' +
+          'request body. The planner must emit a literal that is a member of the declared enum at ' +
+          'ANY depth, not just for top-level fields (#338 covers those). Servers reject ' +
+          '"placeholder" and non-member literals with HTTP 400.',
+      ).toEqual([]);
+    });
+  },
+);
+
 // Operations are emitted per-SDK with these layouts (see the respective
 // emitters): JS  -> <opId>/<opId>.<mode>.test.ts, C# -> <opId>/<opId>.<mode>.Tests.cs,
 // Python (flat) -> test_<snake_op_id>.py. These helpers walk the real output

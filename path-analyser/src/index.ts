@@ -1183,9 +1183,11 @@ type RequestBodyPlan =
  * Item-schema enums are sourced from the bundled spec (#338): top-level
  * array nodes carry an `itemEnum` field captured during canonical-shape
  * walking, and `buildRequestBodyFromCanonical` short-circuits to
- * `[itemEnum[0]]` before delegating to this helper. The helper itself
- * remains enum-unaware for deeper nested arrays — those still seed a
- * `'placeholder'` element, tracked separately.
+ * `[itemEnum[0]]` before delegating to this helper. Scalar leaves are
+ * enum-aware via `scalarSeedLiteral` (it returns `node.enum[0]` when the
+ * leaf declares an enum). Deeper nested arrays of enum primitives remain
+ * enum-unaware — `synthesizeArrayElement` still seeds a `'placeholder'`
+ * element for them, tracked separately.
  */
 export type CanonicalNode = {
   path: string;
@@ -1232,11 +1234,18 @@ function formatSeedLiteral(format: string): string | undefined {
  * or the server rejects the whole body: a `boolean` field seeded with the
  * string `'placeholder'` produced `400 "Request body is not readable"` for
  * `createCluster`'s `license.validLicense` (Gap B). Resolution order:
- *   1. format-valid literal (#397) — e.g. a `uuid`/`date-time` string;
- *   2. type-correct literal — `boolean` → `true`, `integer`/`number` → `1`;
- *   3. generic `'placeholder'` string fallback for plain strings / unknown.
+ *   1. first declared `enum` member — an enum is a closed value set, so any
+ *      non-member is rejected even when it is format-valid or type-correct:
+ *      `createAgentInstance`'s `history[].role` seeded with `'placeholder'`
+ *      produced `400 Unexpected value 'placeholder' for enum field 'role'`;
+ *   2. format-valid literal (#397) — e.g. a `uuid`/`date-time` string;
+ *   3. type-correct literal — `boolean` → `true`, `integer`/`number` → `1`;
+ *   4. generic `'placeholder'` string fallback for plain strings / unknown.
  */
 function scalarSeedLiteral(node: CanonicalNode): unknown {
+  // Step 1 must precede the format check: a format-valid literal that is not an
+  // enum member is still rejected, whereas enum members are authored to be valid.
+  if (Array.isArray(node.enum) && node.enum.length > 0) return node.enum[0];
   if (node.format) {
     const lit = formatSeedLiteral(node.format);
     if (lit !== undefined) return lit;
