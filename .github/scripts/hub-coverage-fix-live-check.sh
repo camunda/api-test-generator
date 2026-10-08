@@ -94,7 +94,7 @@ done
 for item in $pending; do
   n="${item%%:*}"
   sha="${item#*:}"
-  note "$n" "The live Hub check was started on the verified commit ${sha:0:7}, but its run could not be found. See the hub-ondemand-test.yml runs on tag \`$(tag_for "$n")\`."
+  note "$n" "The live Hub check was started on the verified commit ${sha:0:7}, but its run could not be found. Check the hub-ondemand-test.yml runs on tag \`$(tag_for "$n")\`. If there is none, run \`hub-ondemand-test.yml\` on the branch before merging."
   failed=1
 done
 exit "$failed"

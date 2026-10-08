@@ -164,6 +164,7 @@ describe('hub-coverage-fix live check dispatch', () => {
     expect(stale.status).toBe(1);
     expect(stale.calls).not.toContain('actions/runs/7');
     expect(stale.calls).toContain('its run could not be found');
+    expect(stale.calls).toContain('run `hub-ondemand-test.yml` on the branch before merging');
   });
 
   it('starts only PRs whose content is constrained: anything with test code or other files stays manual', () => {
