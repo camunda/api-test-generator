@@ -57,7 +57,7 @@ The Hub team:
 - keeps the Hub settings in `configs/camunda-hub/`. Most coverage gaps are fixed there, and the coverage-fix agent handles many of them;
 - changes the generator when a gap needs new behaviour. The agent only reports those, and a person opens the change. The code is in `request-validation/`, `path-analyser/` and `materializer/`, and [AGENTS.md](../AGENTS.md) lists the rules a change must follow.
 
-Some alerts still ping `test-automation-medic` until the workflows are changed to ping `hub-medic`. That change is part of the handover.
+Some alerts still ping `test-automation-medic` until the workflows are changed to ping `hub-medic`. The change is listed in [handover follow-ups](maintainers/handover-follow-ups.md).
 
 **Questions:** ask in `#ask-qa`. The enablement team answers there, but nothing here depends on a reply.
 
