@@ -291,7 +291,10 @@ Work in `{{.WorkspacePath}}/api-test-generator` (already on `main`).
    The suite is: a 403 deny test runs in the `rbac` profile
    (`generated/camunda-hub/request-validation/rbac/<area>-validation-api-tests.spec.ts`); a 404 test and the
    missing-authentication tests run in the `secured` profile (`.../request-validation/secured/...`); a lifecycle test runs in the positive
-   suite (`generated/camunda-hub/playwright/templates/EntityLifecycle/<Resource>.lifecycle.spec.ts`). End the section
+   suite (`generated/camunda-hub/playwright/templates/EntityLifecycle/<Resource>.lifecycle.spec.ts`). A 404 test is also
+   generated into the `unsecured` profile (`.../request-validation/unsecured/...`), which the live run does not execute:
+   name the `secured` copy as the one to look at, and mention the `unsecured` copy once. `sort -u` in the title list
+   shows such a title only once, so look in the generated folders for every copy. End the section
    with how to see it: "In the live run's `hub-suite-reports` artifact, open the <profile> report and search for
    `<operationId>`."
    **Then write the steps the test takes**, as a short numbered list in plain words, under the heading
