@@ -142,12 +142,17 @@ an entry in `entity-kinds.json` that names its create, get and delete operations
    A floor above the measured number also fails here: that is the check working.
 
 You cannot run a live Hub here, and you must not start any live-Hub run yourself. The native live-Hub check
-(`hub-pr-live-check.yml`) skips your PRs. Instead, for a 403/404 PR (which may change only the fixture config, the floors and
-the fixture block of the setup script) the verify job starts `hub-ondemand-test.yml` after it has checked your PR from GitHub, and
-comments the run link on the PR. For a lifecycle PR (it changes the ontology and the invariants test, which are not checked
-line by line) nothing starts: say in the PR body that a person must read the diff and then run `hub-ondemand-test.yml` on the branch. Do not claim in the PR that a person must start it. Say that
-the live check starts automatically after verification, on a tag pinned at the commit that verification inspected (not on the branch, which may move), and that its result is on that run. Leave the PR in draft: a
-person decides, after reading the diff and that run, whether it is good.
+(`hub-pr-live-check.yml`) skips your PRs. What happens instead depends on the kind of PR, and the PR body must say the
+one that applies:
+
+- **Lifecycle PR** (it changes the ontology and the invariants test, which are not checked line by line): nothing
+  starts. Say in the body that a person must read the diff and then run `hub-ondemand-test.yml` on the branch.
+- **403/404 PR** (it may change only the fixture config, the floors and the fixture block of the setup script): the
+  verify job starts `hub-ondemand-test.yml` itself after it has checked your PR from GitHub, on a tag pinned at the
+  commit it inspected (not on the branch, which may move), and comments the run link on the PR. Say in the body that the
+  live check starts automatically after verification and that its result is on that run. Do not say a person must start it.
+
+Leave the PR in draft: a person decides, after reading the diff (and, for a 403/404 PR, that run), whether it is good.
 
 ## Fixing a 403 or 404 gap
 

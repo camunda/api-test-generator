@@ -174,14 +174,20 @@ review"** that shows the check before and after. Read that section first.
 `fix/coverage-`, with the labels `nightly-api-fix`, `auto-generated` and `hub`. The body ends with
 "Found by the camunda-hub coverage-fix agent". The thread under the weekly Slack message lists the ones still open.
 
-**Who reviews them.** A person, always, like any other pull request. The native live Hub check (`hub-pr-live-check`) skips the
-agent's pull requests: it would run the agent's code with Hub access before anything had checked it. Instead, once the
-`verify` job has checked the pull requests from GitHub (files, config, floors), it pins the commit it checked under a
-`hub-live-check/*` tag, starts `hub-ondemand-test` on that tag (not on the branch, which could move afterwards) and
-comments the run link on the pull request. The run covers exactly that commit; a later push is not tested. This is done for the 403/404 pull requests, whose content is fully constrained (one fixture entry, the floors, and the fixture block of the setup script). A lifecycle pull request also changes the ontology and the invariants test, which are not checked line by line, so it stays manual: read the diff, then run `hub-ondemand-test` on its branch. That is the same live check, started automatically but
-only after verification; its result is that run's status, not a check on the pull request. Read the diff and that run,
-and only then mark the pull request ready. If the verify job fails, no live check starts. A pull request that sits unreviewed is closed by the
-same stale-PR clean-up as the nightly fix pull requests.
+**Who reviews them.** A person, always, like any other pull request. The native live Hub check (`hub-pr-live-check`)
+skips the agent's pull requests: it would run the agent's code with Hub access before anything had checked it. What
+happens instead depends on the kind of pull request.
+
+- **Lifecycle pull requests** change the ontology and the invariants test, which are not checked line by line, so the live
+  check is manual: read the diff, then run `hub-ondemand-test` on the branch, and only then mark the pull request ready.
+- **403/404 pull requests** have fully constrained content (one fixture entry, the floors, and the fixture block of the
+  setup script). Once the `verify` job has checked them from GitHub, it pins the commit it checked under a
+  `hub-live-check/*` tag, starts `hub-ondemand-test` on that tag (not on the branch, which could move afterwards) and
+  comments the run link on the pull request. The run covers exactly that commit; a later push is not tested. Its result is
+  that run's status, not a check on the pull request. Read the diff and that run, and only then mark the pull request
+  ready. If the verify job fails, no live check starts.
+
+A pull request that sits unreviewed is closed by the same stale-PR clean-up as the nightly fix pull requests.
 
 **How it runs today.** By hand only: start the workflow
 [`hub-coverage-fix.yml`](../.github/workflows/hub-coverage-fix.yml) from the Actions tab. It is a **dry run by default**:
