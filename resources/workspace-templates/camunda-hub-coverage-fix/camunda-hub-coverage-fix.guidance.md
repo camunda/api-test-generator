@@ -22,7 +22,7 @@ fine and hides a gap.
 | Gap in the report | You |
 |---|---|
 | A resource with no create, read, delete test (`lifecycle.create`, listed under "Missing:" in the report) | **Fix.** See "Fixing a lifecycle gap". |
-| An operation with no 403 or 404 test, that is not excluded or held on purpose | **Fix only when the cause is config alone** (see "Fixing a 403 or 404 gap"). Anything that needs generator code, setup code or touching an exclusion: **report only, with a proposal.** |
+| An operation with no 403 or 404 test, that is not excluded or held on purpose | **Fix when the cause is config alone, or a missing fixture that one setup block can create** (see "Fixing a 403 or 404 gap", outcomes A and B). Anything that needs generator code, another kind of setup change or touching an exclusion: **report only, with a proposal.** |
 | A resource with no delete, restore test, or a link with no add, remove test | Report only for now. |
 | Untested 409 responses | **Never.** Nobody has been able to trigger them on Hub (#638). A guess gives a wrong test. |
 | "Every kind of bad request tested" | **Never.** The report says this over-counts gaps for some kinds. |
@@ -169,15 +169,33 @@ response, is not held by an exclusion, and has no scoped exclusion. Work out **w
      exact name. (`request-validation/templates/support/global-setup.ts` is the generic setup for other configs; it
      does not decide what exists on Hub.) Add exactly one entry, shaped like its neighbours, nothing else. The
      verify job checks the same thing from `main`: one new entry, whose variable `run-hub.sh` exports.
-   - **B. A fixture that setup does not create yet (report only, with a ready-to-apply proposal).** The one thing
-     missing is a test fixture (a member, a record the path or body needs) that setup could create through a Hub API
-     call the spec describes. **Never edit `scripts/e2e/run-hub.sh` or any other script, workflow or template
-     yourself**: any live-Hub run on the PR (the automatic one for a person's PR, `hub-ondemand-test.yml` on request for
-     an agent's) checks out the PR's own code and runs it with Hub access, and once merged the script runs in every Hub
-     suite, so a script change is never something to have in a PR before a person has written or approved it. Write `action: "report-only"` and put
-     the exact change in `proposal`: the lines to add next to the existing fixtures (modelled on them), the one
-     fixture entry for `request-validation.json`, the floor to raise, and the spec section that describes the call.
-     A person applies it. This holds for any operation, not one endpoint.
+   - **B. A fixture that setup does not create yet (you may open a PR, with extra care).** The one thing missing is a
+     test fixture (a member, a record the path or body needs) that setup could create through a Hub API call the spec
+     describes. This applies to any operation, not to one endpoint. You may change exactly three things, and nothing
+     else:
+       1. In `scripts/e2e/run-hub.sh`, **add** at most 8 lines as ONE block, placed directly after an existing
+          `export RV_FIXTURE_...` / `curl ...` fixture line (in the fixture block, never anywhere else in the file).
+          Each added line must have one of these shapes, copied from its neighbours; any other line, or a block in
+          another place, makes the verify job fail the run:
+          - a blank line, or a comment made only of letters, digits, spaces and `. , : ; ( ) / _ @ ' + -` (no `$`,
+            backtick, double quote or backslash: the shell may still expand those);
+          - `export RV_FIXTURE_X; RV_FIXTURE_X="$(curl -s -X POST "$POS_URL/<path>" "${h[@]}" -d '<json>' | _jget <key>)"`
+            to create a record and export its key;
+          - `export RV_FIXTURE_X; RV_FIXTURE_X="<fixed value>"` for a plain value such as an email;
+          - `curl -s -X POST "$POS_URL/<path>" "${h[@]}" -d '<json>' >/dev/null` to prepare a record (POST, PUT or
+            PATCH only; the path may contain `$RV_FIXTURE_*` variables).
+          Never change or remove an existing line. No other command, no pipe except `| _jget`, no redirect except to
+          `/dev/null`, no literal URL.
+       2. In `request-validation.json`, the one new fixture entry that names the variable you exported.
+       3. In `coverage-floors.json`, the floor (step 4).
+     Read the spec for the exact request: names, required fields, and a format Hub accepts (Hub often checks the
+     format of a field, such as an email, before it checks permissions). If the spec does not tell you what a valid
+     request is, if you would need a line of another shape, or if the fixture depends on a product setting or a feature
+     flag, it is not B: it is C.
+     No live Hub runs automatically on your PR (the automatic check skips PRs from the automation account), so
+     nothing in your change executes until a person has read it and started `hub-ondemand-test.yml` on the branch.
+     Say that in the PR. Give the PR a **"Setup change: needs careful review"** section: the lines you added, the API
+     call they make and the spec section that describes it, and what you could not check without a live Hub.
    - **C. Anything else (report only, with a proposal).** That is: a change to generator code
      (`request-validation/src/**`, `request-validation/templates/**`), a fixture that needs a product setting, a
      cluster, a feature flag or a call the spec does not describe, a validation order that makes Hub answer 400
@@ -185,8 +203,9 @@ response, is not held by an exclusion, and has no scoped exclusion. Work out **w
      never overturn it), or a contract that contradicts the test (for example a documented idempotent delete that
      cannot return 404). Edit nothing. Write `action: "report-only"` and fill `proposal` (see the output section):
      the file and the change you would make, and why it is not safe for you to make.
-   The verify job checks the same boundaries from GitHub after the run, and fails the run on any PR that touches a
-   file outside `request-validation.json` and `coverage-floors.json`.
+   The verify job checks the same boundaries from GitHub after the run. It fails the run on any PR that touches a
+   file outside `request-validation.json` and `coverage-floors.json` (outcome A), or outside those two plus
+   `scripts/e2e/run-hub.sh` (outcome B, only the one allowed block).
 3. **Regenerate and measure** exactly as for a lifecycle gap (step 6 there). For a config-only fix, the operation
    must disappear from `missing["<code>"]` in `/tmp/coverage-after/summary.json`, the `codes["<code>"]` numerator
    must go up by exactly one, and nothing else may go down. If it did not move, drop the change and write
@@ -196,7 +215,8 @@ response, is not held by an exclusion, and has no scoped exclusion. Work out **w
 5. **Run the checks last** (step 8 there), then open the PR as the "Opening the PR" section says, with the branch
    `fix/coverage-<operation-kebab>-<code>-<run-id>` and the title
    `test(coverage-fix): add <operationId> <code> test`. In the body, say which config entry you added and why the
-   environment variable it names is already provisioned (give the file and line).
+   environment variable it names is provisioned (outcome A: already exported on `main`, give the file and line;
+   outcome B: exported by the block you added, which must be a new name, never an existing one).
 
 You cannot run a live Hub here, and the order in which Hub checks things (400, then 403, then 404) decides whether
 a new test passes. So be stricter than for a lifecycle gap: if you have any doubt that the request will reach the
@@ -222,7 +242,14 @@ Work in `{{.WorkspacePath}}/api-test-generator` (already on `main`).
 4. Open the PR as a **draft**, authenticating `gh` with the scoped token for this one command (there is no
    ambient `GH_TOKEN` in your environment):
    `GH_TOKEN="$GH_TOKEN_GENERATOR" gh pr create --draft --repo camunda/api-test-generator --base main --label nightly-api-fix --label auto-generated --label hub`.
-   Title: `test(coverage-fix): add <Resource> create-read-delete lifecycle`. The body has the gap, the
+   **The body must OPEN with a section called `## In plain words`** (the verify job fails the run if it is missing,
+   not first, or nearly empty). Write it for someone who has never seen this generator: 3 to 5 short sentences in
+   everyday words. Say what was missing ("there was no test checking what happens when someone without permission
+   tries to remove a member"), what this PR adds, why it is safe to look at (a draft, it changes only test setup and
+   a counter, nothing runs until a person starts it), and what the reviewer should do next (read the diff, then run
+   `hub-ondemand-test.yml` on the branch). Avoid jargon such as fixture, lifecycle, entity-kind or floor; if you need
+   one, explain it in a few words. The technical sections come after it.
+   Title: `test(coverage-fix): add <Resource> create-read-delete lifecycle`. The rest of the body has the gap, the
    numbers before and after, the commands you ran, the report run URL, a note that the standalone create, get and
    delete feature specs of the resource are replaced by the lifecycle test, and the line
    `Found by the camunda-hub coverage-fix agent`.
@@ -275,10 +302,10 @@ something the job runs.
 
 - `camunda-hub`: read only, always.
 - `api-test-generator`: a draft PR only, never a push to `main`.
-- Never edit a script, a workflow or a template: `scripts/**`, `.github/**`, `request-validation/src/**`,
-  `request-validation/templates/**`. Any live-Hub run on a PR (the automatic one for a person's PR, the on-demand one a
-  person starts on an agent's branch) runs the PR's own code with Hub access, and after the merge they run in every
-  Hub suite. A change to any of them is a proposal, never a PR.
+- Never edit a script, a workflow or a template, with one exception: outcome B may add up to 8 lines of the allowed
+  shapes to `scripts/e2e/run-hub.sh`. Everything else under `scripts/**`, `.github/**`, `request-validation/src/**` and
+  `request-validation/templates/**` is a proposal, never a PR. Any live-Hub run on a PR runs the PR's own code with Hub
+  access, and after the merge the setup script runs in every Hub suite.
 - No suppression, exclusion, known issue, `zeroTestOperations` change, weakened assertion, `test.skip` or `it.skip`, or
   lowered floor. Ever.
 - No PR without a proof that the targeted number went up and the checks pass.

@@ -35,6 +35,8 @@ export interface RunPr {
   labels: string[];
   state: string;
   headRefOid: string;
+  // The PR description. Every agent PR must open with a short plain-language section (see PLAIN_WORDS).
+  body?: string;
 }
 
 // What a PR looked like just before the agent started: enough to see that it changed during the run. It holds
@@ -91,8 +93,25 @@ export function parseRunPrs(prs: unknown): RunPr[] {
       labels,
       state: p.state,
       headRefOid: p.headRefOid,
+      ...(typeof p.body === 'string' ? { body: p.body } : {}),
     };
   });
+}
+
+// Every agent PR opens with a short section in plain words, for a reader who has never seen the generator.
+// Not a check of how good it is: only that it exists, has real text, and comes first.
+export const PLAIN_WORDS_HEADING = '## In plain words';
+export function hasPlainWords(body: string | undefined): boolean {
+  if (typeof body !== 'string') return false;
+  const lines = body.replace(/\r\n/g, '\n').trim().split('\n');
+  // The first line must be exactly the heading, not a longer one that merely starts with it.
+  if (lines[0]?.trim() !== PLAIN_WORDS_HEADING) return false;
+  const section: string[] = [];
+  for (const line of lines.slice(1)) {
+    if (line.startsWith('## ')) break;
+    section.push(line);
+  }
+  return section.join(' ').replace(/\s+/g, ' ').trim().length >= 40;
 }
 
 export function parsePreRun(prs: unknown): PreRunPr[] {
@@ -234,6 +253,11 @@ export function verify(
         for (const v of checkChange(candidate, change, provisioned))
           violations.push(`${p.url}: ${v}`);
       }
+    }
+    if (!hasPlainWords(p.body)) {
+      violations.push(
+        `${p.url}: the description does not open with a "${PLAIN_WORDS_HEADING}" section of at least a couple of plain sentences`,
+      );
     }
     if (p.state !== 'OPEN') {
       violations.push(`${p.url}: not open (${p.state}), so there is nothing to review`);

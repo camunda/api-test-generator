@@ -156,14 +156,18 @@ It is a helper: it never merges anything.
 1. **A resource with no "create, read, delete" test** (the "Lifecycle tests (create, read, delete)" line in the Slack
    message). The fix is to add the resource to `configs/camunda-hub/ontology/entity-kinds.json` so the generator writes
    that test, and to raise the matching number in `coverage-floors.json`.
-2. **An endpoint with no 403 (forbidden) or 404 (not found) test**, but only when the cause is a small config entry
-   that the test setup can already satisfy. Most of these gaps need something else: a test record that setup does not
-   create yet (for example a workspace member), a change in the generator's own code, or they are left out on purpose.
-   For those the agent opens **no pull request**. It writes down the exact change it would make (for a missing test
-   record, the lines to add to `scripts/e2e/run-hub.sh`, the config entry and the floor) so a person can apply it. That
-   text appears in the run summary of the workflow run. The agent never edits setup scripts itself: a live Hub run
-   executes a pull request's own code with Hub access, and after the merge the script runs in every Hub suite, so a
-   change to it must be written or approved by a person first.
+2. **An endpoint with no 403 (forbidden) or 404 (not found) test.** The agent reads the cause first. If the only thing
+   missing is a small config entry that the test setup already supports, it adds it. If the only thing missing is a test
+   record that the setup could create through a Hub call the API spec describes (for example a workspace member), it may
+   also add a few lines to `scripts/e2e/run-hub.sh` that create it. Those lines are additions only, at most eight, in one
+   block right after an existing fixture line, and each must be one of a few fixed shapes (the verify job rejects anything else). Its pull request then has a section
+   called **"Setup change: needs careful review"**. Everything else (generator code, a product setting, an exclusion that
+   was decided on purpose) gets **no pull request**: the agent writes down the change it would make and why a person
+   should decide, and that text appears in the run summary of the workflow run.
+
+**Every pull request opens with "In plain words".** A short section in everyday words that says what was missing, what
+the pull request adds, why it is safe to look at and what to do next, so that someone who has never seen the generator can
+follow it. The verify job fails the run if it is missing.
 
 **One exception to know about.** Sometimes an existing check says "this resource must have its own separate test file",
 and the new lifecycle test replaces those files. The agent may then adapt that one check, but only so that it asks for
