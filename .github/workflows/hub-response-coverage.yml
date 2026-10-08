@@ -277,7 +277,7 @@ jobs:
             }
 
       # The coverage-fix agent's run reports in this message's thread. It starts later and elsewhere, so the message
-      # id is kept with this run as a small artifact of its own. Failing to save it only means no reply later.
+      # id is kept with this run as a small artifact of its own. If it cannot be saved the run fails, like any silent Slack failure here, because the coverage-fix report could then not reply in the thread.
       - name: Save the Slack message id
         id: slack-ts
         if: always() && steps.slack-notify.outputs.ts != ''
@@ -290,6 +290,7 @@ jobs:
           printf '%s\n' "$TS" > slack-ts/slack-ts.txt
 
       - name: Upload the Slack message id
+        id: slack-ts-upload
         if: always() && steps.slack-ts.outcome == 'success'
         continue-on-error: true
         uses: actions/upload-artifact@v7
@@ -302,4 +303,4 @@ jobs:
         if: always()
         uses: ./.github/actions/fail-if-slack-failed
         with:
-          outcomes: "${{ (steps.slack.outcome == 'success' && steps.slack.outputs.SLACK_BOT_TOKEN == '') && 'failure' || steps.slack.outcome }} ${{ steps.message.outcome }} ${{ steps.slack-notify.outcome }} ${{ steps.slack-agent-prs.outcome }}"
+          outcomes: "${{ (steps.slack.outcome == 'success' && steps.slack.outputs.SLACK_BOT_TOKEN == '') && 'failure' || steps.slack.outcome }} ${{ steps.message.outcome }} ${{ steps.slack-notify.outcome }} ${{ steps.slack-agent-prs.outcome }} ${{ steps.slack-ts.outcome }} ${{ steps.slack-ts-upload.outcome }}"
