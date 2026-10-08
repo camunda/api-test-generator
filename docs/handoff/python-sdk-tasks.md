@@ -6,6 +6,74 @@ which files to change, gives the code to paste, and lists the commands and expec
 that prove the task is done. Every code block below was applied, unit-tested and run against a
 live broker (2026-09-24, `main` @ `76960e6`), then reverted so you can apply it yourself.
 
+## Status (2026-10-09, branch `fix/python-sdk-emitter-fixes-handoff`)
+
+**S1, S2, S3, P1, P2, P3 and the isFinal-by-index change are all committed and kept** — see the
+baseline table below for the per-task measured effect (256 → 413 of 675). P4 is partially
+satisfied by the red/green fixtures each task added; P5 is investigation-only and its findings
+are now superseded by the item analysis below; **P6 is still an open owner decision**.
+
+This branch adds three further commits on top of that series:
+
+| Commit | Item | What it does |
+|---|---|---|
+| `47826c3` | 1 | `test(oca): accept await_eventually-wrapped calls in the python step invariant (#354)` — the invariant no longer fails on P3's `await_eventually(` wrapper. |
+| `8422eaf` | 2 | `fix(path-analyser): seed nested enum leaves with a declared enum value` — kills the 30x `Unexpected value 'placeholder' for enum field 'role'` bucket. |
+| `0ed2588` | 3 | `test(path-analyser): pin the position-based final request step with a Layer-2 fixture` — a non-vacuous guard for `fdf2766`. |
+
+Items 4 to 8 were then investigated **proposal-only** (no repo code changes). Their measured
+value-for-effort ranking, in the order the next session should implement them:
+
+1. **Item 4 — `tag 'null'`** (the 17x `The provided tag 'null' is not valid` bucket). Worth
+   **10-17 tests**, effort SMALL-MEDIUM, risk LOW-MODERATE, **no sign-off needed**. The only item
+   that is simultaneously unblocked, cheap and worth double-digit tests; a validated probe patch
+   already exists. Not python-specific — playwright/js-sdk emit the identical `tags: [ctx.tagVar]`
+   body and merely hide it behind EdgeLifecycle template suppression (73 ops vs python's 0).
+2. **Item 6a — null-omit a placeholder that resolves to null.** Worth **0-5 tests alone**, effort
+   SMALL-MEDIUM, risk MEDIUM, **no sign-off**. Fixes a genuine emitter defect (we send
+   `{"page":{"after":null}}`, which the broker rejects with `At least one of [from, after, before,
+   limit]`, in 49 files / 96 occurrences) and is a hard prerequisite for 6b. This is the
+   "Follow-up" the isFinal row and the P3 row both flagged.
+3. **Item 5 — double `/v2` prefix** (the 22 cluster-admin 404s, `No endpoint GET
+   /v2/cluster/v2/status`). Option A is emitter-only and needs **no sign-off**, but is worth only
+   **2 tests** now (`getClusterStatus`, `getClusterUpgradeStatus`); the other 20 need cluster-admin
+   credentials plus an `independentAuthGateMode` change in `configs/camunda-oca/request-validation.json`.
+   The extractor and planner already model this correctly (`RequestStep.serverOverride`) and
+   Playwright + request-validation already consume it — only the python/js emitters ignore it.
+4. **Item 6b — replace the `!step.extract?.length` escape hatch with a load-bearing test.** The
+   biggest single payoff (**~38 tests** measured) but **needs sign-off**: 20 of the recovered tests
+   are group-C membership searches (`searchUsersForRole`, `searchRolesForTenant`, ...) where
+   relaxing `require_items` is a **coverage loss, not a fix** — the honest alternative is a planner
+   change that assigns a member before searching the membership. Only the 17 group-A ops
+   (`searchAgentDefinitions`, `searchAuditLogs`, `searchVariables`, ...) are unsatisfiable by
+   construction and legitimately relaxable. Re-measure the 3 group-B `searchAgentInstances` tests
+   first: `8422eaf` may already have recovered them.
+5. **Item 7 — the hardcoded `createDocument(s)` file in P2.** Worth **0 tests** (nothing fails
+   because of it today — all 6 document-upload tests P2 fixed still pass). Its value is removing
+   two camunda-oca-specific operationIds from config-agnostic emitter code
+   (`python-sdk/emitter.ts:614-621`, `csharp-sdk/emitter.ts:422-425`) and fixing **js-sdk, which
+   has no workaround and emits `files: {}` → a latent 415**. Both good options touch `configs/`, so
+   **sign-off is needed**; note `tests/codegen/python-sdk-live-fixes.test.ts:65` currently *pins*
+   the hardcode and must be updated as an intentional behaviour change.
+6. **Item 8 — `content` / `descendUnions`** (array-of-oneOf request bodies). Worth **0 tests**,
+   measured: rewriting all 31 `'content': ['placeholder']` occurrences to a valid
+   `{contentType: 'TEXT', text: ...}` object left the 38 affected tests at **33 failed / 5 passed,
+   unchanged**. The failure chain is discriminator-400 → `No CONFIGURATION history item sets
+   'model'/'provider'/'systemPrompt'` → `No jobLeaseToken provided`, and Item 8 clears only the
+   first link; a fully schema-valid body still gets **503 UNAVAILABLE**. The CONFIGURATION
+   requirement is pure server-side business validation and is **not spec-derivable** (all three
+   fields are optional in `AgentInstanceHistoryItem.required`), so it can only be expressed in
+   `request-defaults.json` — **sign-off required**. Do this **last**, and only after Item 6.
+
+Two cross-cutting facts the ranking depends on:
+
+- **Items 4, 6a and 5A are the entire unblocked set** (~12-24 python tests, no owner input).
+  Everything else is sign-off-gated.
+- **Items 4 and 8 are not python-specific.** The same invalid bodies are emitted identically by
+  playwright, js-sdk and python-sdk (Item 8: 31 occurrences / 8 files in each of the three;
+  csharp-sdk emits no agent-instance operations at all), so a shared planner fix repairs all
+  targets at once.
+
 ## Environment notes (this execution)
 
 - Running on HEAD `3bf01e0`, Linux/bash (not Windows/PowerShell), with a `.venv` Python 3.12
