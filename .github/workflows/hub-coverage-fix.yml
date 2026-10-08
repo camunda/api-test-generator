@@ -602,16 +602,27 @@ jobs:
           for n in $(jq -r --arg run "$GITHUB_RUN_ID" \
             '.[] | select(.number > '"$BASELINE"' and (.headRefName | test("^fix/coverage-.+-" + $run + "$"))) | .number' \
             "${RUNNER_TEMP}/run-prs.json"); do
-            base_sha="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${n}" --jq '.base.sha')"
+            # The base branch and its commit are read in one call, and the branch must be main: if a PR's base
+            # were changed to another branch, files that exist there would drop out of the comparison.
+            base_info="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${n}" --jq '.base.ref + " " + .base.sha')"
+            base_ref="${base_info%% *}"
+            base_sha="${base_info#* }"
+            if [ "$base_ref" != main ]; then
+              echo "::error::PR #$n: its base is $base_ref, not main"
+              exit 1
+            fi
             # Every read below is pinned to the one head commit of the PR list snapshot (the same SHA the live
             # check is later started on), never to the PR's current head, which may have moved.
             head_sha="$(jq -r --argjson n "$n" '.[] | select(.number == $n) | .headRefOid' "${RUNNER_TEMP}/run-prs.json")"
+            # Both the new path and, for a rename, the old one count: a rename from an unapproved path into an
+            # approved one would otherwise look like a single allowed file.
             gh api --paginate "repos/${GITHUB_REPOSITORY}/compare/${base_sha}...${head_sha}?per_page=100" \
-              --jq '.files[].filename' > "${RUNNER_TEMP}/files-${n}.txt"
+              --jq '.files[] | .filename, (.previous_filename // empty)' > "${RUNNER_TEMP}/files-${n}.txt"
             # The compare API cuts its file list at 300 entries. This list is the allowlist gate for the live
             # run, so fail closed: it must have as many files as the PR reports (the head is re-checked below),
             # and an agent PR has a handful at most.
-            listed="$(grep -c . "${RUNNER_TEMP}/files-${n}.txt" || true)"
+            listed="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/compare/${base_sha}...${head_sha}?per_page=100" \
+              --jq '.files | length' | awk '{n += $1} END {print n + 0}')"
             reported="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${n}" --jq '.changed_files')"
             if [ "$listed" != "$reported" ] || [ "$listed" -gt 20 ]; then
               echo "::error::PR #$n: the changed-file list is incomplete or too long ($listed listed, $reported reported)"
