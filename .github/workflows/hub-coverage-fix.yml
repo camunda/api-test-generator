@@ -608,6 +608,15 @@ jobs:
             head_sha="$(jq -r --argjson n "$n" '.[] | select(.number == $n) | .headRefOid' "${RUNNER_TEMP}/run-prs.json")"
             gh api --paginate "repos/${GITHUB_REPOSITORY}/compare/${base_sha}...${head_sha}?per_page=100" \
               --jq '.files[].filename' > "${RUNNER_TEMP}/files-${n}.txt"
+            # The compare API cuts its file list at 300 entries. This list is the allowlist gate for the live
+            # run, so fail closed: it must have as many files as the PR reports (the head is re-checked below),
+            # and an agent PR has a handful at most.
+            listed="$(grep -c . "${RUNNER_TEMP}/files-${n}.txt" || true)"
+            reported="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${n}" --jq '.changed_files')"
+            if [ "$listed" != "$reported" ] || [ "$listed" -gt 20 ]; then
+              echo "::error::PR #$n: the changed-file list is incomplete or too long ($listed listed, $reported reported)"
+              exit 1
+            fi
             for side in base head; do
               sha="$base_sha"; [ "$side" = head ] && sha="$head_sha"
               for f in request-validation coverage-floors; do
