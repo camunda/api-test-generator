@@ -315,6 +315,15 @@ def request_check_state(rv_op, whole_op_excluded, held_kinds):
     return 'ok', present, applicable, []
 
 
+def request_kind_endpoints(rv_ops):
+    """How many endpoints have at least one scenario of each kind, from the negative suite's own coverage data."""
+    counts = {}
+    for op in rv_ops.values():
+        for kind in op.get('kinds', []):
+            counts[kind] = counts.get(kind, 0) + 1
+    return dict(sorted(counts.items()))
+
+
 def build(args):
     gen = os.path.join(ROOT, 'generated', CONFIG)
     pw_dir, rv_dir = f'{gen}/playwright', f'{gen}/request-validation'
@@ -440,6 +449,10 @@ def build(args):
         'optionalFields': [opt_sent, opt_total],
         'requestChecks': [sum(r['requestChecks'] == 'ok' for r in rows), sum(r['requestChecks'] != 'hold' for r in rows)],
         'requestCheckGaps': {r['operationId']: r['requestMissing'] for r in rows if r['requestChecks'] == 'gap'},
+        # For each scenario kind the negative suite generates: how many endpoints have at least one scenario of it.
+        # The floors file keeps a minimum per kind, so a generator that silently stops producing a kind fails CI
+        # even though the report no longer lists that kind as missing (it only lists kinds a generator can build).
+        'requestKindEndpoints': request_kind_endpoints(rv_ops),
         'requestNoTests': sorted(r['operationId'] for r in rows if r['requestChecks'] == 'gap' and not r['requestPresent']),
         'shapeUnvalidated': sorted(r['operationId'] for r in rows if r['shape'] == 'gap'),
         'lifecycle': lifecycle,

@@ -146,6 +146,11 @@ After the fix:
 runs the same script and fails a PR if a number drops below its floor, or if an endpoint has no test at all
 and is not listed in `zeroTestOperations` with a reason. A floor only goes up. Never lower one to make CI pass; add the missing test.
 
+One floor guards the generator itself: `requestKindEndpoints` keeps, for each kind of bad-request test the suite
+generates, how many endpoints have at least one test of that kind. The report names a kind as missing only when the
+generator can build it, so a generator that quietly stops producing a kind would not appear there; this floor makes
+that fail the build instead.
+
 ## The coverage-fix agent
 
 Some gaps are small and safe to fix, so an AI agent can fix them and open a pull request for a person to review.

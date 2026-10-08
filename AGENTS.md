@@ -298,6 +298,11 @@ report's own script, over the generated suites and fails if a number is below it
 operation has no test at all, or if an operation listed in `zeroTestOperations` now has tests. A floor
 is one-way: a PR that closes a gap should raise it, a higher number never fails, and a floor is never
 lowered to make CI pass. A new operation with no test fails until it has one (or is listed with a reason).
+`requestKindEndpoints` in the same file holds, per scenario kind the negative suite generates, how many endpoints
+have at least one scenario of it. The report lists a kind as missing only when a generator can build it, so a
+generator that silently stops producing a kind would not show up there; this floor makes that fail CI. A kind the
+suite generates needs a floor too (the invariant fails until it has one). When a change makes more endpoints get a
+kind, raise its number in the same PR.
 
 ### Response validation in lifecycle suites
 
