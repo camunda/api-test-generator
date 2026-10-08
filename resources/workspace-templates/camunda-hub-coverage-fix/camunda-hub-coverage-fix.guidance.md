@@ -281,9 +281,9 @@ Work in `{{.WorkspacePath}}/api-test-generator` (already on `main`).
    CONFIG=camunda-hub npm run testsuite:generate
    CONFIG=camunda-hub npm run generate:request-validation
    python3 scripts/e2e/hub_response_coverage.py --out /tmp/coverage-before
-   grep -rhoE "test\(\s*['\"`][^'\"`]+" generated/camunda-hub --include='*.ts' | sort -u > /tmp/titles-before.txt
+   grep -rhoP 'test\(\s*["`\x27][^"`\x27]+' generated/camunda-hub --include='*.ts' | sort -u > /tmp/titles-before.txt
    ```
-   (if the `grep` finds nothing, look at how a generated spec writes its test titles and adapt the pattern). After you
+   (the pattern is in single quotes on purpose, so the shell passes the backtick and the quote characters literally; if the `grep` finds nothing, look at how a generated spec writes its test titles and adapt the pattern). After you
    regenerate with your change, save the same list to `/tmp/titles-after.txt` and run `diff /tmp/titles-before.txt
    /tmp/titles-after.txt`: the lines only in the "after" file are the new tests (there should be only the ones you
    expect; if there are others, say so). The "before" numbers of the measuring step come from
