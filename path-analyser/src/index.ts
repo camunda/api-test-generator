@@ -670,7 +670,23 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   });
 }
 
-function buildRequestPlan(
+/**
+ * Turns a planned scenario into the ordered request steps the emitters consume.
+ *
+ * Exported for the Layer-2 planner fixtures (see
+ * `tests/fixtures/planner/final-step-by-position.test.ts`). The CLI guard above
+ * keeps importing this module from kicking off the generator pipeline, so the
+ * export is inert outside tests.
+ *
+ * `isFinal` is derived by POSITION (`opIndex === operations.length - 1`), never
+ * by comparing `operationId` against the last operation's id: a chain may repeat
+ * an operationId (a prerequisite that is also the endpoint, a conflict replay,
+ * a cursor warm-up), and an identity comparison would mark EVERY occurrence
+ * final — duplicating the replay step, giving each one the endpoint's body
+ * variant and error status, and suppressing the producer extracts the earlier
+ * occurrence exists to supply.
+ */
+export function buildRequestPlan(
   scenario: EndpointScenario,
   resp: ResponseShapeSummary | undefined,
   graph: OperationGraph,
