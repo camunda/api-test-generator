@@ -289,12 +289,14 @@ Work in `{{.WorkspacePath}}/api-test-generator` (already on `main`).
       the check order in the controller). (c) **What the live run must show:** the status the test expects, the other
       statuses that are possible and what each would mean ("if the run is red with 401, this gap cannot be fixed this way:
       close the PR"), and anything else that could give the same status (a disabled feature flag that also answers 403).
-      (d) **Only if you added a setup line:** one sentence saying what it does and that it runs against a live Hub as soon
-      as verification passes.
+      (d) **Only if you added a setup line:** one sentence saying what it does (not when the live check runs: the
+      opening already says that).
    3. `## What changed`: one line per file, saying what changed in plain words.
    4. A `<details><summary>Details</summary>` block with everything else, in this order: `### What the test does`, the
       numbers before and after (a small table), `### Setup change: needs careful review` when you added a setup line
       (the lines, the call they make and the spec section that describes it, what you could not check without a live Hub),
+      `### Test change: needs careful review` when you adapted a test invariant (the section the lifecycle steps above
+      describe: the test name, the lines before and after, and how the check stays as strict),
       a note about a sibling PR that touches the same counter, the commands you ran, and the report run URL. Close the
       block with `</details>`.
    5. The last line, outside the block: `Found by the camunda-hub coverage-fix agent`.
