@@ -1,7 +1,7 @@
 # Hub Nightly Channel Cookbook
 
 > **Goal:** read any message in `#camunda-hub-nightly-test-results` and know what it means, whether it is
-> yours to act on, and what to do. You need to know Hub, not how the generator works; the few terms it uses (pin, skip, triage, medic) are explained in "Words used" at the end.
+> yours to act on, and what to do. You need to know Hub, not how the generator works: the few steps that touch the generator are spelled out in "Run it by hand" below, and the big picture is in [how-it-works.md](how-it-works.md). Terms are explained in "Words used" at the end.
 > Messages about a single camunda-hub PR are in `#camunda-hub-pr-e2e-results` instead; see
 > [hub-pr-check-cookbook.md](hub-pr-check-cookbook.md).
 
@@ -13,8 +13,14 @@ A set of automatic jobs then post what they found. Most nights the posts are gre
 **A normal night has 0 failed tests.** Known Hub bugs do not count as failures: their tests are either skipped or run
 without the one assertion Hub cannot meet yet. So any number above 0 is news.
 
-The **generator owner** (the Hub team) acts on the spec-bump, re-enable and weekly-report posts. **Nobody is pinged for these three**: they are plain posts in the channel, and the PRs and issues they open have no assignee or reviewer. Someone on the Hub team has to read the channel (or check these posts on a schedule). `hub-medic` is the on-call group for failures.
-Until the workflows are changed, alerts about the generator itself still ping `test-automation-medic`. The change is listed in [handover follow-ups](maintainers/handover-follow-ups.md).
+> **Status, 8 October 2026:** the handover to the Hub team is in progress. The Hub team already owns everything in this
+> guide and `hub-medic` is the on-call group. The alert pings have not been switched yet: some generator alerts still go
+> to `test-automation-medic`. See [handover follow-ups](maintainers/handover-follow-ups.md).
+
+**Who acts.** The Hub team (the **generator owner**) acts on the spec-bump, re-enable and weekly-report posts. **Nobody is
+pinged for these three**: they are plain posts in the channel, and the PRs and issues they open have no assignee or
+reviewer. So the person on call as `hub-medic` reads the channel each morning and owns them: review the PR, or decide
+what to do with the post. A PR nobody picks up just sits there.
 
 **What you will see, in the order it happens** (all times UTC):
 
@@ -39,8 +45,6 @@ Open [nightly-camunda-hub](https://github.com/camunda/api-test-generator/actions
 
 While Slack is down you can still read the night's result: open the nightly run, then the job summary and the report artifacts; the triage run keeps its digest as an artifact too. You do not need to re-post it.
 
-To run the generated suite by hand for any branch: [hub-ondemand-test](https://github.com/camunda/api-test-generator/actions/workflows/hub-ondemand-test.yml) (Run workflow).
-
 **What to do with a failure.** Only when the digest lists failures.
 
 1. Open the thread under the digest. There is one line per failed test.
@@ -52,15 +56,39 @@ To run the generated suite by hand for any branch: [hub-ondemand-test](https://g
 | 📦 product, with a 📝 link | Hub is wrong, and the agent filed a **new** Hub issue (`hub-medic` was pinged) | Open the issue and take it, or hand it to the owning team |
 | 📦 product, **no link** | Hub is probably wrong, but no issue was filed and **nobody was pinged** | Open the triage run and read the finding. Then file the Hub issue yourself |
 | 🧪 test-generation, with a 🛠️ link | The generated test is wrong; the agent opened a fix PR | Open the PR, read the diff, and merge it if it is right |
-| 🧪 test-generation, with a ⛔ link | A **suppress PR**: it switches the test off until a Hub bug is fixed | Open the PR. Merge it only if the linked Hub issue is real |
+| 🧪 test-generation, with a ⛔ link | A **suppress PR**: it switches the test off until a Hub bug is fixed. It carries the same labels as a fix PR; the ⛔ link and the branch name `fix/nightly-triage-suppress-…` tell them apart | Open the PR. Merge it only if the linked Hub issue is real |
 | 🧪 test-generation, with a ♻️ link | An open PR already covers it | Open that PR and review it |
 | 🧪 test-generation, **no link** | The agent could not fix it safely, so it only reported | Open the triage run, read the finding, and fix the test yourself. If you are stuck, ask in `#ask-qa` |
 | 🔧 infrastructure | The run broke (Hub start, network, registry), not Hub or the tests | Open the failed step in the nightly run and read the error. Say so in the channel with the run link. Re-run only once the outside cause is fixed |
 | 🎲 flakiness | A test passes sometimes and fails sometimes | Open the test in the nightly report and compare the passed and failed attempts. If Hub caused it, file a Hub issue. If the test did, fix the test. Do not just re-run |
 | ⏳ or 🔗 on a line | A hint that a recent Hub change may explain it. It is a guess | Investigate by hand. It does not mean a PR exists |
+| 🚫 unmapped, or the 🚫 *Coverage gap* line in the digest | An operation has no generated test at all. It is not a failing test | Review the 🛠️ fix PR on the line if there is one. With none, it is only reported: see [the coverage report guide](hub-response-coverage-report.md) |
 | ⚠️ on a line | The agent tried to open an issue or PR and failed | Do it by hand |
 
-The spec-bump and re-enable posts are explained in their own sections below. More on each icon is in "The triage digest".
+**When may I re-run?** Only to see whether it still fails after you fixed an outside cause (🔧 infrastructure). A re-run
+never fixes a flaky test (🎲): it only hides it.
+
+A line in the thread looks like this (an example):
+
+> • 📦 product — `getWorkspace` — expected 200, got 500
+> &nbsp;&nbsp;&nbsp;&nbsp;📝 *link to the new Hub issue*
+> &nbsp;&nbsp;&nbsp;&nbsp;🚨 @hub-medic
+
+The first line says what failed. The next line holds the links, and the last line is the ping.
+
+The spec-bump and re-enable posts are explained in their own sections below.
+
+## Run it by hand
+
+Several actions below say "run the suite on a branch". Do it on GitHub:
+
+1. Open [hub-ondemand-test](https://github.com/camunda/api-test-generator/actions/workflows/hub-ondemand-test.yml), click **Run workflow**, and pick the branch you want to test.
+2. Leave the two inputs alone unless you need to: `hub_ref` (the camunda-hub branch or commit the spec is read from, default `main`) and `hub_image_tag` (the Hub image to run against, default `SNAPSHOT`).
+3. Read the result in the run summary and the uploaded reports. This workflow posts nothing to Slack or TestRail.
+
+On your own machine you need Docker, Node 22, Python 3 and a camunda-hub clone next to this repo. The commands are under
+"Reproducing locally" in [maintainers/hub-pr-check-reference.md](maintainers/hub-pr-check-reference.md).
+
 
 ## The nightly posts (02:00)
 
@@ -73,7 +101,7 @@ The spec-bump and re-enable posts are explained in their own sections below. Mor
 - **A thread reply under the post** lists the known Hub issues that limit what the suite covers. Each item is either
   skipped on purpose (the tests are left out) or only partly checked (the test runs, but one assertion, such as the
   error-body shape, is not made). A green run does **not** fully cover those. What to do when one of those issues
-  closes is in "The re-enable check" below.
+  closes is in "The re-enable check" below. The re-enable check does **not** watch the partly checked items; see "Not watched" there.
 - **`⚠️ config drift: positive-suppress lists X not in the current spec`**: an operation the config skips no longer exists
   upstream (renamed or removed). The generator owner updates `configs/camunda-hub/positive-suppress.json`.
 
@@ -95,8 +123,8 @@ bug), 🔧 infrastructure (the run itself broke), 🎲 flakiness (passes sometim
 📝 filed (a new Hub issue was opened tonight).
 
 The **thread** under the digest has one line per failure: the category icon, the operation, and a link. What each icon
-and link means, and what to do, is in the table under "What to do with a failure" above. Fix PRs from the agent carry the
-label `nightly-api-fix`.
+and link means, and what to do, is in the table under "What to do with a failure" above. Fix PRs and suppress PRs from the agent carry the
+labels `nightly-api-fix`, `auto-generated` and `hub`.
 
 Pings:
 
@@ -144,12 +172,12 @@ Skipped tests point to a Hub bug. This job watches those bugs. When one closes, 
 
 | Message | Meaning | Do this |
 |---|---|---|
-| 🎉 *issue* is closed — re-enabled: `ops` → draft PR | The skip was removed in a draft PR | Review the draft PR and run `hub-ondemand-test` on its branch (the automatic live check skips PRs from the automation account). Merge if it is green **and** the Hub issue was closed as fixed. If Hub closed it as not planned, close the PR: the skip must stay |
+| 🎉 *issue* is closed — re-enabled: `ops` → draft PR | The skip was removed in a draft PR | Review the draft PR and run the suite on its branch (see "Run it by hand"; the automatic live check skips PRs from the automation account). Merge if it is green **and** the Hub issue was closed as fixed. If Hub closed it as not planned, close the PR: the skip must stay |
 | 🎉 … already has an open unskip PR | A PR for it exists already | Review that PR |
 | ⚠️ … breaks local generate/tests | Removing the skip makes generation or tests fail | Open the workflow run and investigate |
 | ⚠️ … no generator token was available | The job could not open a PR this time | Nothing, it retries next run |
 | ⚠️ … opening the unskip PR failed | The PR could not be created | Open the workflow run |
-| 📋 … is closed as **fixed**, no specific operation(s) to auto-unskip | A suite-wide skip whose Hub bug is fixed. Nothing can be done automatically | Remove its entry from `knownIssues` in `configs/camunda-hub/request-validation.json` (and any generator skip it describes), then regenerate and run the suite |
+| 📋 … is closed as **fixed**, no specific operation(s) to auto-unskip | A suite-wide skip whose Hub bug is fixed. Nothing can be done automatically | Remove its entry from `knownIssues` in `configs/camunda-hub/request-validation.json` and, if the same operation is also skipped in `positive-suppress.json` (key `suppress`) or excluded in `request-validation.json` (key `excludeOperations`), that entry too. Then run the suite on your branch (see "Run it by hand") |
 | 📋 … is closed as **not planned** | Hub will not fix it, so the skip must stay | Set `"acknowledgedNotPlanned": true` on its `knownIssues` entry in `configs/camunda-hub/request-validation.json`. The alert then stops. Until you do, it repeats every day |
 
 **Not watched:** the "partly checked" items in the negative thread (`knownProblemDetailShapeGaps` in
@@ -173,20 +201,34 @@ How to read the message, how to close a gap, and what the agent does and never d
 
 ## Who to ask
 
+- An alert about Hub or the generator (a failure, a wrong test, a skip): `hub-medic`.
 - Anything in this channel you cannot place: write in the channel.
-- The generator itself (new endpoint, wrong test, skip): `hub-medic`.
-- A Hub behaviour question: `hub-medic`.
+- A question about how the generator works, or a Slack or Vault outage you cannot fix: `#ask-qa`. It is not the place for alerts.
 - Adding a generator PR next to a Hub change (labels, feature flags): see "Adding or changing an endpoint in Hub" in [hub-pr-check-cookbook.md](hub-pr-check-cookbook.md).
 
 ## Words used
 
-More terms (medic, ontology, live check, invariant tests, fingerprint) are in the glossary of [hub-pr-check-cookbook.md](hub-pr-check-cookbook.md).
+More terms (medic, ontology, fingerprint) are in the glossary of [hub-pr-check-cookbook.md](hub-pr-check-cookbook.md).
 
+- **Operation:** one API endpoint, as the spec names it (for example `getWorkspace`). The guide says "endpoint" and "operation" for the same thing.
+- **Fix PR / suppress PR:** a draft PR the triage agent opens in this repo. A fix PR corrects a wrong generated test. A suppress PR switches a test off until a Hub bug is fixed.
 - **Pin:** the camunda-hub commit the invariant tests are checked against.
+- **Invariant tests:** tests in this repo that check the generated output against the pinned spec. They guard the generator, not Hub.
+- **Op-surface drift:** the set of operations in Hub's latest spec differs from the pin (some added or removed).
+- **Auto-adopt:** the spec-bump job opening the PR that moves the pin when the new spec is safe. It still needs a person to merge.
+- **Live check:** running the generated suite against a real Hub. `hub-ondemand-test` does it by hand.
+- **Lifecycle test:** one test that creates, reads and deletes a resource in a row.
+- **Gap digest:** a weekday 07:00 post in `#camunda-hub-pr-e2e-results` about generator gaps from merged camunda-hub PRs. Not part of this channel.
 - **Skip:** a test left out on purpose because of a tracked Hub limitation, with an issue link. It can stay after the issue closes, when Hub will not fix it.
 - **Suite-wide skip:** a skip that is not tied to one endpoint.
+- **Partly checked:** the test runs, but one assertion (the error-body shape) is not made.
 - **TestRail:** the test-management tool the nightly results are also published to.
 - **Vault:** the secrets store the workflows read their tokens from.
 - **Unmapped operation / coverage gap:** an endpoint with no generated test at all.
+
+Config files in `configs/camunda-hub/`:
+- `positive-suppress.json`: operations left out of the positive suite (key `suppress`).
+- `request-validation.json`: settings for the negative suite. `excludeOperations` leaves operations out. `knownIssues` lists suite-wide skips with their Hub issue. `knownProblemDetailShapeGaps` lists the partly checked items. `"acknowledgedNotPlanned": true` on a `knownIssues` entry says Hub will not fix it, so the re-enable alert stops.
+- `spec-pin.json`: the pinned Hub commit.
 
 What the workflows depend on (Vault, Slack token, registry login): [maintainers/workflow-dependencies.md](maintainers/workflow-dependencies.md).
