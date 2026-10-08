@@ -274,18 +274,38 @@ Work in `{{.WorkspacePath}}/api-test-generator` (already on `main`).
 4. Open the PR as a **draft**, authenticating `gh` with the scoped token for this one command (there is no
    ambient `GH_TOKEN` in your environment):
    `GH_TOKEN="$GH_TOKEN_GENERATOR" gh pr create --draft --repo camunda/api-test-generator --base main --label nightly-api-fix --label auto-generated --label hub`.
-   **The body must OPEN with a section called `## In plain words`** (the verify job fails the run if it is missing,
-   not first, or nearly empty). Write it for someone who has never seen this generator: 3 to 5 short sentences in
-   everyday words. Say what was missing ("there was no test checking what happens when someone without permission
-   tries to remove a member"), what this PR adds, why it is safe to look at (a draft, it changes only test setup and
-   a counter), whether the live check starts by itself (yes, after verification, with the run linked in a comment, unless a lifecycle PR also
-   edits the invariants test file: then a person starts it), and what the reviewer should do next (read the diff, then the run,
-   or, when it does not start by itself, run `hub-ondemand-test.yml` on the branch). Avoid jargon such as fixture, lifecycle, entity-kind or floor; if you need
-   one, explain it in a few words. The technical sections come after it.
-   **Right after it, add a section `## The test this adds`** so a reviewer can find the test in the live run without
-   searching. For every test your change makes appear, give: its full title as the report shows it (for example
-   `Workspaces Validation API Tests › removeMember - Denied (no permission)`), the generated file and line it lands in,
-   and the suite it runs in. A fresh workspace has no `generated/camunda-hub/` folder (it is not in git), so the
+   **Shape of the body.** A reviewer should get the point in under a minute, so keep what is above the `Details` block to
+   about 400 words, in this order:
+   1. `## In plain words` (the verify job fails the run if it is missing, not first, or nearly empty). 3 to 5 short
+      sentences in everyday words for someone who has never seen this generator: what was missing ("there was no test
+      checking what happens when someone without permission tries to remove a member"), what this PR adds, why it is safe
+      to look at (a draft, it changes only test setup and a counter), whether the live check starts by itself (yes, after
+      verification, with the run linked in a comment, unless a lifecycle PR also edits the invariants test file: then a
+      person starts it), and what the reviewer does next (read the diff, then the run, or, when it does not start by
+      itself, run `hub-ondemand-test.yml` on the branch). Avoid jargon such as fixture, lifecycle, entity-kind or floor.
+   2. `## What to look at`: three or four bullets, no more. (a) **The test:** its title as the report shows it and the
+      suite it runs in, on one line (for example `removeMember - Denied (no permission)`, in the `rbac` suite). (b) **Why
+      this change is enough:** the cause in two or three sentences, naming the class or file you read (for a 403 or 404 gap,
+      the check order in the controller). (c) **What the live run must show:** the status the test expects, the other
+      statuses that are possible and what each would mean ("if the run is red with 401, this gap cannot be fixed this way:
+      close the PR"), and anything else that could give the same status (a disabled feature flag that also answers 403).
+      (d) **Only if you added a setup line:** one sentence saying what it does and that it runs against a live Hub as soon
+      as verification passes.
+   3. `## What changed`: one line per file, saying what changed in plain words.
+   4. A `<details><summary>Details</summary>` block with everything else, in this order: `### What the test does`, the
+      numbers before and after (a small table), `### Setup change: needs careful review` when you added a setup line
+      (the lines, the call they make and the spec section that describes it, what you could not check without a live Hub),
+      a note about a sibling PR that touches the same counter, the commands you ran, and the report run URL. Close the
+      block with `</details>`.
+   5. The last line, outside the block: `Found by the camunda-hub coverage-fix agent`.
+
+   Say each of our own terms in a few words the first time you use it ("auth-deny: the generator's test that a user
+   without permission is refused", "the `rbac` suite: the tests that run as a user with no permission", "the floor: the
+   counter that stops coverage from going down"). Do not write "outcome A, B or C" in a PR: those are this playbook's
+   words. Say the live check once, in the opening, not again below. Keep every code comment you add to the setup script to
+   one line.
+
+   **Finding the test for the first bullet and the details.** A fresh workspace has no `generated/camunda-hub/` folder (it is not in git), so the
    "before" list must be made on purpose: **before you edit anything** (before the entity-kinds entry, the fixture
    entry or the setup line), run the generate commands of the measuring step once on the untouched checkout and save the
    test titles and the coverage numbers:
@@ -307,10 +327,11 @@ Work in `{{.WorkspacePath}}/api-test-generator` (already on `main`).
    suite (`generated/camunda-hub/playwright/templates/EntityLifecycle/<Resource>.lifecycle.spec.ts`). A 404 test is also
    generated into the `unsecured` profile (`.../request-validation/unsecured/...`), which the live run does not execute:
    name the `secured` copy as the one to look at, and mention the `unsecured` copy once. `sort -u` in the title list
-   shows such a title only once, so look in the generated folders for every copy. End the section
-   with how to see it: "In the live run's `hub-suite-reports` artifact, open the <profile> report and search for
+   shows such a title only once, so look in the generated folders for every copy. In the first bullet of
+   "What to look at", add how to see it: "In the live run's `hub-suite-reports` artifact, open the <profile> report and search for
    `<operationId>`."
-   **Then write the steps the test takes**, as a short numbered list in plain words, under the heading
+
+   **Steps for the details block.** Write the steps the test takes as a short numbered list in plain words, under the heading
    `### What the test does`. Read them from the generated test code you just found, not from what you expect it to do:
    (1) what exists before it starts (the fixtures it uses, and any setup line you added); (2) every request it
    sends, in the order the code sends them: method, path, who sends it (for a 403: the user with no permission) and the
@@ -320,10 +341,9 @@ Work in `{{.WorkspacePath}}/api-test-generator` (already on `main`).
    list every request the generated lifecycle file makes, including any prerequisite requests and the read after the
    delete that checks the resource is gone. Keep each step to one line. If the code does something you did not expect,
    say so in a last line.
-   Title: `test(coverage-fix): add <Resource> create-read-delete lifecycle`. The rest of the body has the gap, the
-   numbers before and after, the commands you ran, the report run URL, a note that the standalone create, get and
-   delete feature specs of the resource are replaced by the lifecycle test, and the line
-   `Found by the camunda-hub coverage-fix agent`.
+   Title: `test(coverage-fix): add <Resource> create-read-delete lifecycle` (for a 403 or 404 gap:
+   `test(coverage-fix): add <operationId> <code> test`). For a lifecycle PR, the details also say that the standalone
+   create, get and delete feature specs of the resource are replaced by the lifecycle test.
 
 **Limits.** There is no weekly cap: every candidate may get a PR. This one limit applies, and it is checked before you open a PR:
 
