@@ -542,8 +542,9 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: read
-      actions: read
-      pull-requests: read
+      # Write: start the live Hub check (hub-ondemand-test.yml) on each verified PR and comment its link.
+      actions: write
+      pull-requests: write
     steps:
       - name: Checkout api-test-generator
         uses: actions/checkout@v6
@@ -629,3 +630,45 @@ jobs:
             "${RUNNER_TEMP}/post/hub-coverage-fix.json" "$GITHUB_RUN_ID" "$DRY_RUN" \
             "app/qa-processes,qa-processes[bot]" "$BASELINE" "$limit" "${RUNNER_TEMP}/pre/pre-run-prs.json" \
             "${RUNNER_TEMP}/pr-changes.json" "${RUNNER_TEMP}/run-hub.sh"
+
+      # The automatic live-Hub check skips PRs from the automation account (hub-pr-live-check.yml): it would run
+      # the PR's own code with Hub access before anyone had checked what the code is. Here the order is the other
+      # way round. This step runs only when the step above passed: the PR is a draft from this run, within its
+      # allowed files and config, and its setup lines match the allowed shapes. Only then is the same live check
+      # (hub-ondemand-test.yml, run on the PR's branch) started, and its link put on the PR. The result is that
+      # run's status, not a check on the PR. Skipped in a dry run, which opens no PR.
+      - name: Start the live Hub check on each verified PR
+        if: ${{ env.DRY_RUN != 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASELINE: ${{ needs.fix.outputs.baseline }}
+        run: |
+          set -uo pipefail
+          failed=0
+          for n in $(jq -r --arg run "$GITHUB_RUN_ID" --argjson base "$BASELINE" \
+            '.[] | select(.number > $base and .state == "OPEN" and (.headRefName | test("^fix/coverage-.+-" + $run + "$"))) | .number' \
+            "${RUNNER_TEMP}/run-prs.json"); do
+            branch="$(jq -r --argjson n "$n" '.[] | select(.number == $n) | .headRefName' "${RUNNER_TEMP}/run-prs.json")"
+            since="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            if ! gh workflow run hub-ondemand-test.yml --repo "$GITHUB_REPOSITORY" --ref "$branch"; then
+              echo "::warning::Could not start the live Hub check for PR #$n"
+              gh pr comment "$n" --repo "$GITHUB_REPOSITORY" --body "The live Hub check could not be started automatically. Run \`hub-ondemand-test.yml\` on branch \`$branch\` before merging." || true
+              failed=1
+              continue
+            fi
+            run_url=""
+            for _ in 1 2 3 4 5 6; do
+              sleep 10
+              id="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow=hub-ondemand-test.yml --branch "$branch" \
+                --event workflow_dispatch --limit 5 --json databaseId,createdAt \
+                --jq "[.[] | select(.createdAt >= \"$since\")] | first | .databaseId // empty")"
+              if [ -n "$id" ]; then run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${id}"; break; fi
+            done
+            if [ -n "$run_url" ]; then
+              body="The live Hub check was started automatically after the verify job passed: $run_url"
+            else
+              body="The live Hub check was started, but its run could not be found yet. See hub-ondemand-test.yml runs on branch \`$branch\`."
+            fi
+            gh pr comment "$n" --repo "$GITHUB_REPOSITORY" --body "$body" || true
+          done
+          exit "$failed"
