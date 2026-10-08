@@ -113,8 +113,9 @@ describe('hub-pr-live-check guard', () => {
     ).toBe('true');
   });
 
-  it("skips a person's PR when an earlier run on the branch was triggered by the automation account, and fails closed when the history cannot be read", () => {
-    // The run history is the unforgeable record of who pushed: commit author and committer can claim any identity.
+  it("skips a person's PR when the automation account ever created or pushed to the branch, and fails closed when the activity log cannot be read", () => {
+    // The repository activity log is the unforgeable record of who created a branch and who pushed to it, including
+    // pushes made before the PR existed. Commit author and committer can claim any identity.
     const base = [
       'claude/some-change',
       'esraagamal6',

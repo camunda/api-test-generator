@@ -36,7 +36,7 @@ jobs:
     # PR. Same requirement, same fix, as triage-camunda-hub-nightly.yml:47-51.
     permissions:
       pull-requests: read
-      actions: read # earlier runs of this workflow on the branch, to see who pushed
+      contents: read # the repository activity log of the branch, to see who created it and pushed to it
     # Real forks get no repo secrets (the run job would just fail at the
     # Vault step for reasons unrelated to the change); Dependabot PRs are
     # same-repo but also get no secrets (a GitHub Actions restriction) — skip
@@ -80,15 +80,16 @@ jobs:
               '' | 'qa-processes[bot]' | 'app/qa-processes') agent=true ;;
             esac
           done
-          # A person's PR can also carry an earlier commit the automation account pushed, which would run on a later
-          # event from the person. Commit author and committer are set by whoever makes the commit, so they prove
-          # nothing. What cannot be forged is who triggered each earlier run of this workflow on the branch: every push
-          # to a PR branch starts a run, recorded with the account that pushed. If any earlier run on this branch was
-          # triggered by the automation account, the PR is skipped. An unreadable history fails closed.
+          # A person's PR can also carry an earlier commit the automation account pushed, possibly before the PR was
+          # opened or while it was closed, which would run on a later event from the person. Commit author and
+          # committer prove nothing, and this workflow only runs on pull_request events, so its own run history misses
+          # such pushes. GitHub's repository activity log records every creation of and push to a branch with the
+          # account that did it, whether or not a PR exists. If the automation account ever created or pushed to this
+          # branch, the PR is skipped. An unreadable log fails closed.
           if [ "$agent" != true ]; then
-            if history=$(gh api --paginate -X GET "repos/$REPO/actions/workflows/hub-pr-live-check.yml/runs" \
-              -f branch="$HEAD_REF" -f event=pull_request -f per_page=100 \
-              --jq '.workflow_runs[] | (.actor.login // ""), (.triggering_actor.login // "")' 2>/dev/null); then
+            if history=$(gh api --paginate -X GET "repos/$REPO/activity" \
+              -f ref="refs/heads/$HEAD_REF" -f per_page=100 \
+              --jq '.[] | (.actor.login // "")' 2>/dev/null); then
               while IFS= read -r who; do
                 case "$who" in
                   'qa-processes[bot]' | 'app/qa-processes') agent=true ;;
