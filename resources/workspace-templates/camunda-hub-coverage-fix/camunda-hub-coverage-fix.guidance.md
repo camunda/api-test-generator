@@ -282,6 +282,44 @@ Work in `{{.WorkspacePath}}/api-test-generator` (already on `main`).
    edits the invariants test file: then a person starts it), and what the reviewer should do next (read the diff, then the run,
    or, when it does not start by itself, run `hub-ondemand-test.yml` on the branch). Avoid jargon such as fixture, lifecycle, entity-kind or floor; if you need
    one, explain it in a few words. The technical sections come after it.
+   **Right after it, add a section `## The test this adds`** so a reviewer can find the test in the live run without
+   searching. For every test your change makes appear, give: its full title as the report shows it (for example
+   `Workspaces Validation API Tests › removeMember - Denied (no permission)`), the generated file and line it lands in,
+   and the suite it runs in. A fresh workspace has no `generated/camunda-hub/` folder (it is not in git), so the
+   "before" list must be made on purpose: **before you edit anything** (before the entity-kinds entry, the fixture
+   entry or the setup line), run the generate commands of the measuring step once on the untouched checkout and save the
+   test titles and the coverage numbers:
+   ```bash
+   CONFIG=camunda-hub npm run fetch-spec
+   CONFIG=camunda-hub npm run testsuite:generate
+   CONFIG=camunda-hub npm run generate:request-validation
+   python3 scripts/e2e/hub_response_coverage.py --out /tmp/coverage-before
+   grep -rhoP 'test\(\s*["`\x27][^"`\x27]+' generated/camunda-hub --include='*.ts' | sort -u > /tmp/titles-before.txt
+   ```
+   (the pattern is in single quotes on purpose, so the shell passes the backtick and the quote characters literally; if the `grep` finds nothing, look at how a generated spec writes its test titles and adapt the pattern). After you
+   regenerate with your change, save the same list to `/tmp/titles-after.txt` and run `diff /tmp/titles-before.txt
+   /tmp/titles-after.txt`: the lines only in the "after" file are the new tests (there should be only the ones you
+   expect; if there are others, say so). The "before" numbers of the measuring step come from
+   `/tmp/coverage-before/summary.json`, not from the weekly report, which may be older than the current `main`.
+   The suite is: a 403 deny test runs in the `rbac` profile
+   (`generated/camunda-hub/request-validation/rbac/<area>-validation-api-tests.spec.ts`); a 404 test and the
+   missing-authentication tests run in the `secured` profile (`.../request-validation/secured/...`); a lifecycle test runs in the positive
+   suite (`generated/camunda-hub/playwright/templates/EntityLifecycle/<Resource>.lifecycle.spec.ts`). A 404 test is also
+   generated into the `unsecured` profile (`.../request-validation/unsecured/...`), which the live run does not execute:
+   name the `secured` copy as the one to look at, and mention the `unsecured` copy once. `sort -u` in the title list
+   shows such a title only once, so look in the generated folders for every copy. End the section
+   with how to see it: "In the live run's `hub-suite-reports` artifact, open the <profile> report and search for
+   `<operationId>`."
+   **Then write the steps the test takes**, as a short numbered list in plain words, under the heading
+   `### What the test does`. Read them from the generated test code you just found, not from what you expect it to do:
+   (1) what exists before it starts (the fixtures it uses, and any setup line you added); (2) every request it
+   sends, in the order the code sends them: method, path, who sends it (for a 403: the user with no permission) and the
+   body if any; (3) what it checks after each request: the status it expects and any other check the code makes. Some
+   values are only known while the suite runs (a key a setup call creates, for example `RV_FIXTURE_WORKSPACE_KEY`): write
+   those as the fixture variable name, never invent a value. A lifecycle test sends more than create, read and delete:
+   list every request the generated lifecycle file makes, including any prerequisite requests and the read after the
+   delete that checks the resource is gone. Keep each step to one line. If the code does something you did not expect,
+   say so in a last line.
    Title: `test(coverage-fix): add <Resource> create-read-delete lifecycle`. The rest of the body has the gap, the
    numbers before and after, the commands you ran, the report run URL, a note that the standalone create, get and
    delete feature specs of the resource are replaced by the lifecycle test, and the line
