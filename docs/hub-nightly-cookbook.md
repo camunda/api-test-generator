@@ -18,13 +18,13 @@ Until the workflows are changed, alerts about the generator itself still ping `t
 
 **What you will see, in the order it happens** (all times UTC):
 
-| When | Message | Do you need to act? |
-|---|---|---|
-| 02:00 | Posted every night. Two posts: **positive suite** and **negative suite**, each with a ✅ passed / ❌ failed count | Only if ❌ is above 0 |
-| After the run | Posted every night. **Triage digest**, with "No failures tonight" when green, and links to the nightly run and the triage run. When there are failures, a thread under it has one line per failure | Only if the digest lists failures |
-| 03:00 | **Spec-bump alert**, only when the spec changed (the pinned spec is behind Hub's latest), or when the check itself failed and cannot tell | Only the generator owner (the Hub team after the handover) |
-| 04:00 | **Re-enable check**, only when a watched Hub bug closed: a skipped test can come back, or a skip that cannot come back (closed as not planned) needs a decision | Only the generator owner (the Hub team after the handover) |
-| Monday 05:00 | Posted every week. **Weekly coverage report** | Only the generator owner (the Hub team after the handover) |
+| When | Message | Do you need to act? | Workflow |
+|---|---|---|---|
+| 02:00 | Posted every night. Two posts: **positive suite** and **negative suite**, each with a ✅ passed / ❌ failed count | Only if ❌ is above 0 | [nightly-camunda-hub](https://github.com/camunda/api-test-generator/actions/workflows/nightly-camunda-hub.yml) |
+| After the run | Posted every night. **Triage digest**, with "No failures tonight" when green, and links to the nightly run and the triage run. When there are failures, a thread under it has one line per failure | Only if the digest lists failures | [triage-camunda-hub-nightly](https://github.com/camunda/api-test-generator/actions/workflows/triage-camunda-hub-nightly.yml) |
+| 03:00 | **Spec-bump alert**, only when the spec changed (the pinned spec is behind Hub's latest), or when the check itself failed and cannot tell | Only the generator owner (the Hub team after the handover) | [spec-bump-check](https://github.com/camunda/api-test-generator/actions/workflows/spec-bump-check.yml) |
+| 04:00 | **Re-enable check**, only when a watched Hub bug closed: a skipped test can come back, or a skip that cannot come back (closed as not planned) needs a decision | Only the generator owner (the Hub team after the handover) | [hub-known-issue-reenable-check](https://github.com/camunda/api-test-generator/actions/workflows/hub-known-issue-reenable-check.yml) |
+| Monday 05:00 | Posted every week. **Weekly coverage report** | Only the generator owner (the Hub team after the handover) | [hub-response-coverage](https://github.com/camunda/api-test-generator/actions/workflows/hub-response-coverage.yml) (Run workflow starts a dry run) |
 
 So a night with no spec-bump or re-enable post is normal. A night with no nightly post or no triage digest is not (see below).
 
@@ -39,16 +39,7 @@ Open [nightly-camunda-hub](https://github.com/camunda/api-test-generator/actions
 
 While Slack is down you can still read the night's result: open the nightly run, then the job summary and the report artifacts; the triage run keeps its digest as an artifact too. You do not need to re-post it.
 
-**Where to look (GitHub Actions pages, in `camunda/api-test-generator`)**
-
-| Page | Shows |
-|---|---|
-| [nightly-camunda-hub](https://github.com/camunda/api-test-generator/actions/workflows/nightly-camunda-hub.yml) | The 02:00 run behind the nightly posts |
-| [triage-camunda-hub-nightly](https://github.com/camunda/api-test-generator/actions/workflows/triage-camunda-hub-nightly.yml) | The triage behind the digest |
-| [spec-bump-check](https://github.com/camunda/api-test-generator/actions/workflows/spec-bump-check.yml) | The 03:00 spec check |
-| [hub-known-issue-reenable-check](https://github.com/camunda/api-test-generator/actions/workflows/hub-known-issue-reenable-check.yml) | The 04:00 re-enable check |
-| [hub-response-coverage](https://github.com/camunda/api-test-generator/actions/workflows/hub-response-coverage.yml) | The weekly coverage report (Run workflow starts a dry run) |
-| [hub-ondemand-test](https://github.com/camunda/api-test-generator/actions/workflows/hub-ondemand-test.yml) | Run the generated suite by hand for any branch |
+To run the generated suite by hand for any branch: [hub-ondemand-test](https://github.com/camunda/api-test-generator/actions/workflows/hub-ondemand-test.yml) (Run workflow).
 
 **Is it my problem?**
 
