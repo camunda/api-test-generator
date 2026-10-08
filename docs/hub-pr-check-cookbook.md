@@ -26,6 +26,8 @@ does not yet understand a new endpoint, or that the test run itself had a proble
 | Red (`failure`) | Something failed | Follow the steps below |
 | No status at all | Usually skipped on purpose (draft PR, fork, docs-only change). Rarely the status could not be posted | Open the "Trigger api-test-generator hub suite" job on your PR: it says whether the check ran or was skipped. If it ran, ask in `#camunda-hub-pr-e2e-results` |
 
+**How long it takes.** The check starts after Hub's image for your PR is built, and a run takes about 5 minutes. The status and the Slack alert appear when it finishes, not when it starts.
+
 **If it is red, read the verdict line in the Slack alert (or the run summary). It says which case you are in:**
 
 | The alert says | Whose problem | What to do |
@@ -38,7 +40,7 @@ does not yet understand a new endpoint, or that the test run itself had a proble
 | "Could not confirm" | Unknown | Open the failing test in the run's report (steps below) |
 | Every test of **one new endpoint** fails with 404, and you added it behind a feature flag | Nobody's bug: the test Hub does not switch your flag on | Add the flag to `docker/docker-compose.hub.yml` **in the api-test-generator repo** (a PR there, then re-run the check), or suppress the endpoint with a reason and an issue. Details under "Common failure patterns" |
 
-Still stuck? Post the run link in `#camunda-hub-pr-e2e-results`. Every alert carries the links you need.
+Still stuck? Post the run link in `#camunda-hub-pr-e2e-results`. Every alert carries the links you need. For any other question or help, ask in `#ask-qa` and tag `@test-automation-medic`.
 
 **Where to look (GitHub Actions pages, in `camunda/api-test-generator`)**
 
@@ -46,7 +48,7 @@ Still stuck? Post the run link in `#camunda-hub-pr-e2e-results`. Every alert car
 |---|---|
 | [hub-pr-check](https://github.com/camunda/api-test-generator/actions/workflows/hub-pr-check.yml) | The check that runs on every camunda-hub PR: every run, its result, and the reports. Start here for a red check |
 | [hub-pr-live-check](https://github.com/camunda/api-test-generator/actions/workflows/hub-pr-live-check.yml) | The live-Hub run on pull requests to *this* repo (changes to the generator itself). Not on camunda-hub PRs, and not on PRs opened by the automation account (the AI agents and the re-enable and spec-bump scripts): for those, read the diff and run `hub-ondemand-test` on the branch |
-| [hub-ondemand-test](https://github.com/camunda/api-test-generator/actions/workflows/hub-ondemand-test.yml) | Run the generated suite by hand for any branch of this repo (Run workflow) |
+| [hub-ondemand-test](https://github.com/camunda/api-test-generator/actions/workflows/hub-ondemand-test.yml) | Run the generated suite by hand for any branch of this repo. Steps: "Run it by hand" in [hub-nightly-cookbook.md](hub-nightly-cookbook.md) |
 
 **Words used in this page and in the nightly cookbook**
 
@@ -58,12 +60,14 @@ Still stuck? Post the run link in `#camunda-hub-pr-e2e-results`. Every alert car
 - **Ontology:** the config files in `configs/camunda-hub/ontology/` that tell the generator how each resource is created, read, deleted and linked.
 - **Live check:** the `hub-pr-live-check` workflow, which runs the generated suite against a live Hub for pull requests to the generator repo itself. It skips pull requests from the automation account (the AI agents and the re-enable and spec-bump scripts); for those, a person reads the diff and runs the `hub-ondemand-test` workflow on the branch.
 - **Invariant tests:** tests in the generator repo that check the generated output against one pinned camunda-hub spec.
-- **Fingerprint:** a short label for exactly what failed, used so the same failure does not post twice (see below).
+- **Fingerprint:** a short label for exactly what failed, used so the same failure does not post twice (see "Who gets told what" in [maintainers/hub-pr-check-reference.md](maintainers/hub-pr-check-reference.md)).
 - **Evidence:** a failing test or an untested endpoint. "No evidence" means the run left no readable report.
 
 ## Who owns what
 
-See "Who owns what" in [hub-nightly-cookbook.md](hub-nightly-cookbook.md). In short: the Hub team owns the generator after the handover. Medic: `hub-medic` after the handover; until the workflows are changed, generator alerts still ping `test-automation-medic`. This check is **informational, not required**.
+The Hub team owns the generator after the handover, and `hub-medic` is the on-call group. Until the workflows are changed,
+some generator alerts still ping `test-automation-medic` (see [handover follow-ups](maintainers/handover-follow-ups.md)).
+This check is **informational, not required**.
 
 ## Adding or changing an endpoint in Hub: do you need a generator PR?
 

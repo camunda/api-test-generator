@@ -18,6 +18,10 @@ Workflow: [`hub-response-coverage.yml`](../.github/workflows/hub-response-covera
 | One issue per API area `[hub-response-coverage] <Area>: missing response or bad-request tests` | A table of that area's endpoints and what each is missing |
 | Run summary and the `hub-coverage-report` artifact | The full per-endpoint table, `history.csv` (one row per scheduled run), `page.html` |
 
+The report job starts at 05:00 UTC on Monday, and the Slack message and issues appear when it finishes. The coverage-fix agent starts after that.
+
+**Who acts.** The Hub team. Nobody is pinged: the Slack message is a plain post, and the area issues have no assignee. Someone on the Hub team (the person on call as `hub-medic`) reads the channel on Monday and picks up the gaps and the agent's draft PRs.
+
 ### Reading the Slack message
 
 The numbers below are an example.
