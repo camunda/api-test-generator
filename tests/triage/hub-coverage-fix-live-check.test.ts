@@ -1,0 +1,168 @@
+import { spawnSync } from 'node:child_process';
+import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { load } from 'js-yaml';
+import { describe, expect, it } from 'vitest';
+
+const script = join(
+  dirname(fileURLToPath(import.meta.url)),
+  '../../.github/scripts/hub-coverage-fix-live-check.sh',
+);
+
+const RUN = '555';
+const SHA = 'a'.repeat(40);
+
+interface Opts {
+  state?: string;
+  head?: string;
+  dryNoPrs?: boolean;
+  tagFails?: boolean;
+  dispatchFails?: boolean;
+  commentFails?: boolean;
+  // The run list the fake `gh run list` returns, after jq is applied by the script itself.
+  runs?: { databaseId: number; createdAt: string; headSha: string }[];
+  attempt?: string;
+}
+
+// Runs the script with a fake `gh` that records every call to a log file.
+function run(o: Opts = {}) {
+  const dir = mkdtempSync(join(tmpdir(), 'live-check-'));
+  const log = join(dir, 'calls.log');
+  const prs = o.dryNoPrs
+    ? []
+    : [
+        {
+          number: 10,
+          state: o.state ?? 'OPEN',
+          headRefName: `fix/coverage-thing-create-${RUN}`,
+          headRefOid: o.head ?? SHA,
+        },
+        { number: 5, state: 'OPEN', headRefName: `fix/coverage-old-${RUN}`, headRefOid: SHA },
+        { number: 11, state: 'OPEN', headRefName: 'fix/coverage-x-999', headRefOid: SHA },
+      ];
+  writeFileSync(join(dir, 'prs.json'), JSON.stringify(prs));
+  const future = new Date(Date.now() + 3600_000).toISOString();
+  writeFileSync(
+    join(dir, 'runs.json'),
+    JSON.stringify(o.runs ?? [{ databaseId: 42, createdAt: future, headSha: SHA }]),
+  );
+  writeFileSync(
+    join(dir, 'gh'),
+    [
+      '#!/usr/bin/env bash',
+      'echo "$*" >> "$FAKE_LOG"',
+      'for LAST_ARG; do :; done',
+      'case "$1 $2" in',
+      '  "api -X") [ "$FAKE_TAG_FAILS" = 1 ] && exit 1; exit 0 ;;',
+      '  "workflow run") [ "$FAKE_DISPATCH_FAILS" = 1 ] && exit 1; exit 0 ;;',
+      '  "run list") jq -r "$LAST_ARG" "$FAKE_RUNS"; exit 0 ;;',
+      '  "pr comment") [ "$FAKE_COMMENT_FAILS" = 1 ] && exit 1; exit 0 ;;',
+      'esac',
+      'exit 0',
+      '',
+    ].join('\n'),
+  );
+  chmodSync(join(dir, 'gh'), 0o755);
+  const r = spawnSync('bash', [script], {
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      PATH: `${dir}:${process.env.PATH}`,
+      RUN_PRS: join(dir, 'prs.json'),
+      BASELINE: '7',
+      GITHUB_RUN_ID: RUN,
+      GITHUB_RUN_ATTEMPT: o.attempt ?? '1',
+      GITHUB_REPOSITORY: 'camunda/api-test-generator',
+      GITHUB_SERVER_URL: 'https://github.com',
+      GH_TOKEN: 'x',
+      POLL_SECONDS: '0',
+      POLL_TRIES: '2',
+      FAKE_LOG: log,
+      FAKE_RUNS: join(dir, 'runs.json'),
+      FAKE_TAG_FAILS: o.tagFails ? '1' : '0',
+      FAKE_DISPATCH_FAILS: o.dispatchFails ? '1' : '0',
+      FAKE_COMMENT_FAILS: o.commentFails ? '1' : '0',
+    },
+  });
+  const calls = (() => {
+    try {
+      return readFileSync(log, 'utf8');
+    } catch {
+      return '';
+    }
+  })();
+  return { status: r.status, calls, stderr: r.stderr, stdout: r.stdout };
+}
+
+describe('hub-coverage-fix live check dispatch', () => {
+  it('pins the verified commit under a tag, starts the run on that tag, and comments the run link', () => {
+    const r = run();
+    expect(r.status, r.stderr).toBe(0);
+    const tag = `hub-live-check/${RUN}-1-10`;
+    expect(r.calls).toContain(`ref=refs/tags/${tag}`);
+    expect(r.calls).toContain(`sha=${SHA}`);
+    expect(r.calls).toContain(
+      `workflow run hub-ondemand-test.yml --repo camunda/api-test-generator --ref ${tag}`,
+    );
+    expect(r.calls).toContain('actions/runs/42');
+    // Only this run's PR above the baseline: not #5 (old) and not #11 (another run).
+    expect(r.calls.match(/workflow run/g)?.length).toBe(1);
+  });
+
+  it('puts the run attempt in the tag, so a re-run does not hit an existing ref', () => {
+    expect(run({ attempt: '2' }).calls).toContain(`hub-live-check/${RUN}-2-10`);
+  });
+
+  it('does nothing when there is no PR of this run, and for a PR that is not open', () => {
+    expect(run({ dryNoPrs: true }).calls).toBe('');
+    const closed = run({ state: 'CLOSED' });
+    expect(closed.status).toBe(0);
+    expect(closed.calls).not.toContain('workflow run');
+  });
+
+  it('fails closed when the tag cannot be created or the run cannot be started: a fallback comment, no run, exit 1', () => {
+    for (const o of [{ tagFails: true }, { dispatchFails: true }]) {
+      const r = run(o);
+      expect(r.status).toBe(1);
+      expect(r.calls).toContain('pr comment 10');
+      expect(r.calls).toContain('could not be started automatically');
+    }
+    expect(run({ tagFails: true }).calls).not.toContain('workflow run');
+  });
+
+  it('refuses a PR whose snapshot has no head commit', () => {
+    const r = run({ head: 'null' });
+    expect(r.status).toBe(1);
+    expect(r.calls).not.toContain('workflow run');
+  });
+
+  it('matches the run by the verified commit and the start time, not by a branch', () => {
+    const future = new Date(Date.now() + 3600_000).toISOString();
+    const other = run({ runs: [{ databaseId: 9, createdAt: future, headSha: 'b'.repeat(40) }] });
+    expect(other.status).toBe(1);
+    expect(other.calls).toContain('its run could not be found');
+    const old = run({ runs: [{ databaseId: 9, createdAt: '2020-01-01T00:00:00Z', headSha: SHA }] });
+    expect(old.status).toBe(1);
+    expect(old.calls).not.toContain('--branch');
+  });
+
+  it('fails the step when the comment cannot be posted', () => {
+    expect(run({ commentFails: true }).status).toBe(1);
+  });
+
+  it('is only started by the workflow outside a dry run, after the verify step', () => {
+    const wf: unknown = load(
+      readFileSync(join(dirname(script), '../workflows/hub-coverage-fix.yml'), 'utf8'),
+    );
+    const isRec = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null;
+    const jobs = isRec(wf) && isRec(wf.jobs) ? wf.jobs : {};
+    const verify = isRec(jobs.verify) ? jobs.verify : {};
+    const steps = (Array.isArray(verify.steps) ? verify.steps : []).filter(isRec);
+    const names = steps.map((s) => String(s.name ?? ''));
+    const start = names.indexOf('Start the live Hub check on each verified PR');
+    expect(start).toBeGreaterThan(names.indexOf('Verify the PRs'));
+    expect(String(steps[start]?.if)).toContain("DRY_RUN != 'true'");
+  });
+});
