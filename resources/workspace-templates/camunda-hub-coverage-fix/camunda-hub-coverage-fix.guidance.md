@@ -172,12 +172,14 @@ response, is not held by an exclusion, and has no scoped exclusion. Work out **w
    - **Check the order Hub does things in before you say a real record is needed.** Open the operation's controller in
      the camunda-hub clone (search for the operation's route, for example `@DeleteMapping("/clusters/{clusterId}")`, or
      for its `@PreAuthorize`). If the permission check (`@PreAuthorize`) runs first and the path key is a plain `String`
-     that is not looked up before it (no entity parameter that Spring resolves on its own), then a made-up value for that
-     key still reaches the 403, and the test needs no real record, no created fixture and no feature flag. Do not
-     copy the answer from another operation: `removeMember` looks the member up first, `removeClusterRegistration` does
-     not. When a made-up value is enough, the fix is outcome B with a plain fixed value
-     (`export RV_FIXTURE_X; RV_FIXTURE_X="<made-up value>"`), and the PR says in "What the live run must show" what else
-     could produce the same status. For example, if a disabled feature flag also answers 403, the test would pass for that
+     that is not looked up before it (no entity parameter that Spring resolves on its own), then a made-up value for **that
+     key** still reaches the 403. That settles only that key. Do the same check for **every other** path key, query
+     parameter and body field the request needs, and for every other gate before the permission check (validation, a
+     feature flag, a filter): only when none of them needs a real record, a created fixture or a switched-on feature can
+     you say the test needs none. Do not copy the answer from another operation: `removeMember` looks the member up
+     first, `removeClusterRegistration` does not. When made-up values are enough, the fix is outcome B with a plain fixed
+     value (`export RV_FIXTURE_X; RV_FIXTURE_X="<made-up value>"`), and the PR says in "What the live run must show" what
+     else could produce the same status. For example, if a disabled feature flag also answers 403, the test would pass for that
      reason too, and a reviewer should know.
 2. **Decide which of three outcomes it is.** This applies to any operation, not to one endpoint: the question is
    always "what is the one thing missing, and may I add it?".
@@ -189,8 +191,9 @@ response, is not held by an exclusion, and has no scoped exclusion. Work out **w
      does not decide what exists on Hub.) Add exactly one entry, shaped like its neighbours, nothing else. The
      verify job checks the same thing from `main`: one new entry, whose variable `run-hub.sh` exports.
    - **B. A fixture that setup does not create yet (you may open a PR, with extra care).** The one thing missing is a
-     test fixture (a member, a record the path or body needs) that setup could create through a Hub API call the spec
-     describes. This applies to any operation, not to one endpoint. You may change exactly three things, and nothing
+     test fixture: either a record the path or body needs, which setup could create through a Hub API call the spec
+     describes, or a made-up plain value (for example an ID that Hub never looks up before the permission check, as the
+     "Check the order" step shows). This applies to any operation, not to one endpoint. You may change exactly three things, and nothing
      else:
        1. In `scripts/e2e/run-hub.sh`, **add** at most 8 lines as ONE block, placed directly after an existing
           `export RV_FIXTURE_...` / `curl ...` fixture line (in the fixture block, never anywhere else in the file).
