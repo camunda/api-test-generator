@@ -22,7 +22,7 @@ pinged for these three**: they are plain posts in the channel, and the PRs and i
 reviewer. So the person on call as `hub-medic` reads the channel each morning and owns them: review the PR, or decide
 what to do with the post. A PR nobody picks up just sits there.
 
-**What you will see, in the order it happens** (all times UTC):
+**What you will see, in the order it happens** (all times UTC; examples of each message are in the sections below):
 
 | When | Message | Do you need to act? | Workflow |
 |---|---|---|---|
@@ -31,6 +31,8 @@ what to do with the post. A PR nobody picks up just sits there.
 | 03:00 | **Spec-bump alert**, only when the spec changed (the pinned spec is behind Hub's latest), or when the check itself failed and cannot tell | Only the generator owner (the Hub team after the handover) | [spec-bump-check](https://github.com/camunda/api-test-generator/actions/workflows/spec-bump-check.yml) |
 | 04:00 | **Re-enable check**, only when a watched Hub bug closed: a skipped test can come back, or a skip that cannot come back (closed as not planned) needs a decision | Only the generator owner (the Hub team after the handover) | [hub-known-issue-reenable-check](https://github.com/camunda/api-test-generator/actions/workflows/hub-known-issue-reenable-check.yml) |
 | Monday 05:00 | Posted every week. **Weekly coverage report** | Only the generator owner (the Hub team after the handover) | [hub-response-coverage](https://github.com/camunda/api-test-generator/actions/workflows/hub-response-coverage.yml) (Run workflow starts a dry run) |
+
+The times are when each job **starts**, not when its post arrives. The spec-bump post comes about 2 minutes later; the nightly posts and the triage digest come after the run finishes, usually 20 to 25 minutes later (the nightly job is allowed 25).
 
 So a night with no spec-bump or re-enable post is normal. A night with no nightly post or no triage digest is not: see "When a post is missing" below.
 
@@ -162,7 +164,7 @@ invariant tests.
 
 ## The re-enable check (04:00)
 
-Nobody is pinged for this post, and the draft PR it opens has no reviewer. It is only a message in the channel at about 04:00 UTC, and it is silent on most days.
+Nobody is pinged for this post, and the draft PR it opens has no reviewer. It is only a message in the channel at about 04:00 UTC, and it is silent on most days. A message that says "see the workflow run log" ends with an **Open the workflow run** link. Posts from before 7 October have no link; open the [workflow page](https://github.com/camunda/api-test-generator/actions/workflows/hub-known-issue-reenable-check.yml) instead.
 
 Skipped tests point to a Hub bug. This job watches those bugs. When one closes, it tries to bring the tests back.
 
