@@ -11,7 +11,7 @@ type BaselineObject = Record<string, unknown>;
 
 /**
  * The required fields of a ROOT allOf's constituents that a body can omit, with the baseline body to omit them from,
- * or undefined when there are none. A allOf nested inside a property is not looked at. generate.ts reuses
+ * or undefined when there are none. An allOf nested inside a property is not looked at. generate.ts reuses
  * `isAllOfMissingRequiredEligible` for the coverage report's applicability.
  */
 export function allOfMissingRequiredPlan(
