@@ -123,7 +123,7 @@ Hub's latest spec. The headline says what changed:
 
 The last line says what to do:
 
-- **➡️ Adopt via bump PR #N**: the new spec is safe. The generator owner reviews and merges the bump PR, which moves the pin.
+- **➡️ Adopt via bump PR #N**: the new spec is safe, and the bot has already opened the bump PR for you. The generator owner reviews and merges it, which moves the pin. While it stays open, later checks update the same PR; once it is merged, the next change gets a new one.
 - **📋 Blocked — see tracking issue #N**: the new spec breaks something, or needs a test the generator does not have. Read
   the issue. The pin does not move until it is fixed.
 - **⚠️ Spec-bump check failed for X**: a step of the job itself failed, so the drift result may be missing. Open the run

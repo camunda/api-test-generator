@@ -38,7 +38,7 @@ a **re-enable check** (a Hub bug we had worked around was fixed, so a skipped te
 | Red PR check, alert says "infrastructure failure" | Not yours. Open the failed step, find the outside cause, ask if unsure |
 | Nightly post shows failures | Open the triage thread: one line per failure says whose it is |
 | No nightly post in the morning | The run or the posting broke, not Hub. See "If a morning has no nightly post" in the nightly guide |
-| Spec-bump alert | Hub's API changed. Update the pinned spec as the alert describes |
+| Spec-bump alert | Hub's API changed. The bot has already opened a PR that updates the pinned spec: review it and merge it |
 | Re-enable check | A Hub bug was fixed. Bring the test back, or decide on a bug closed as not planned |
 | Weekly report lists gaps | Read the "what to do" column. Some are Hub bugs, some are generator gaps |
 | A draft PR from the coverage-fix agent | Read its "In plain words" section first. Review it like any PR |
