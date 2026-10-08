@@ -23,28 +23,27 @@ export function isAmbiguousPair(
 
 /**
  * The variant pairs of a ROOT oneOf that a merged, ambiguous body can be built from, in the order the scenarios are
- * built (a oneOf nested inside a property is not looked at). The generator builds one scenario per pair, and
- * generate.ts reuses `isOneOfAmbiguousEligible` (some pair exists) for the coverage report's applicability, so
- * both read the same list.
+ * built, one at a time (a oneOf nested inside a property is not looked at). The generator builds one scenario per
+ * pair and stops at its cap without walking the rest, and generate.ts reuses `isOneOfAmbiguousEligible` (some pair
+ * exists) for the coverage report's applicability, so both read the same sequence.
  */
-export function ambiguousPairs(
+export function* ambiguousPairs(
   op: OperationModel,
-): { i: number; j: number; a: SchemaFragment; b: SchemaFragment }[] {
+): Generator<{ i: number; j: number; a: SchemaFragment; b: SchemaFragment }> {
   const root = op.requestBodySchema;
-  if (!root || !Array.isArray(root.oneOf) || root.oneOf.length < 2) return [];
-  const pairs: { i: number; j: number; a: SchemaFragment; b: SchemaFragment }[] = [];
+  if (!root || !Array.isArray(root.oneOf) || root.oneOf.length < 2) return;
   for (let i = 0; i < root.oneOf.length; i++) {
     for (let j = i + 1; j < root.oneOf.length; j++) {
       const a = root.oneOf[i];
       const b = root.oneOf[j];
-      if (a && b && isAmbiguousPair(a, b)) pairs.push({ i, j, a, b });
+      if (a && b && isAmbiguousPair(a, b)) yield { i, j, a, b };
     }
   }
-  return pairs;
 }
 
+/** Stops at the first pair: the answer needs no more. */
 export function isOneOfAmbiguousEligible(op: OperationModel): boolean {
-  return ambiguousPairs(op).length > 0;
+  return ambiguousPairs(op).next().done === false;
 }
 
 export function generateOneOfAmbiguous(ops: OperationModel[], opts: Opts): ValidationScenario[] {
