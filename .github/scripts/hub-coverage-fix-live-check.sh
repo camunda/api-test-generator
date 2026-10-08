@@ -41,7 +41,9 @@ note() {
     failed=1
     return
   fi
-  kept="$(printf '%s\n' "$current" | awk -v s="$BODY_START" -v e="$BODY_END" '$0 == s {skip = 1; next} $0 == e {skip = 0; next} !skip')"
+  kept="$(printf '%s\n' "$current" | awk -v s="$BODY_START" -v e="$BODY_END" '{ line = $0; sub(/\r$/, "", line) } line == s {skip = 1; next} line == e {skip = 0; next} !skip')"
+  # GitHub keeps CRLF line endings when a description was written in the web editor: the markers are compared without
+  # the carriage return, and every other line is kept as it was."
   if ! gh api -X PATCH "repos/${GITHUB_REPOSITORY}/pulls/$1" \
     -f body="$(printf '%s\n\n%s\n### Live Hub check\n\n%s\n%s' "$kept" "$BODY_START" "$2" "$BODY_END")" > /dev/null; then
     echo "::warning::Could not update the description of PR #$1"

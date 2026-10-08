@@ -27,6 +27,7 @@ interface Opts {
   listFails?: boolean;
   files?: string[];
   bodyFails?: boolean;
+  body?: string;
   attempt?: string;
 }
 
@@ -99,6 +100,7 @@ function run(o: Opts = {}) {
       FAKE_TAG_FAILS: o.tagFails ? '1' : '0',
       FAKE_BODY_FAILS: o.bodyFails ? '1' : '0',
       FAKE_BODY:
+        o.body ??
         '## In plain words\n\nSomething.\n\n<!-- live-check:start -->\n### Live Hub check\n\nold text\n<!-- live-check:end -->',
       FAKE_DISPATCH_FAILS: o.dispatchFails ? '1' : '0',
       FAKE_COMMENT_FAILS: o.commentFails ? '1' : '0',
@@ -255,5 +257,19 @@ describe('hub-coverage-fix live check dispatch', () => {
 
   it('fails the step when the description cannot be updated', () => {
     expect(run({ bodyFails: true }).status).toBe(1);
+  });
+
+  it('replaces the block even when the description uses CRLF line endings', () => {
+    const body =
+      '## In plain words\r\n\r\nSomething.\r\n\r\n<!-- live-check:start -->\r\n### Live Hub check\r\n\r\nold text\r\n<!-- live-check:end -->';
+    const r = run({ body });
+    expect(r.status, r.stderr).toBe(0);
+    const at = r.calls.indexOf('-X PATCH');
+    expect(at).toBeGreaterThanOrEqual(0);
+    const patch = r.calls.slice(at);
+    expect(patch).toContain('Something.');
+    expect(patch).not.toContain('old text');
+    expect(patch.match(/live-check:start/g)?.length).toBe(1);
+    expect(patch).toContain('actions/runs/42');
   });
 });
