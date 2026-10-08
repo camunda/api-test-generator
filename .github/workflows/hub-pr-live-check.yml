@@ -36,6 +36,7 @@ jobs:
     # PR. Same requirement, same fix, as triage-camunda-hub-nightly.yml:47-51.
     permissions:
       pull-requests: read
+      contents: read # the repository activity log of the branch, to see who created it and pushed to it
     # Real forks get no repo secrets (the run job would just fail at the
     # Vault step for reasons unrelated to the change); Dependabot PRs are
     # same-repo but also get no secrets (a GitHub Actions restriction) — skip
@@ -53,8 +54,56 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          ACTOR: ${{ github.actor }}
+          SENDER: ${{ github.event.sender.login }}
         run: |
           set -euo pipefail
+          # SECURITY: a PR opened by one of our AI agents is not run automatically either. The live check below runs
+          # the PR's own code with Hub access the moment the PR opens, and the verification of what an agent changed
+          # only runs later, so a person reads the diff first and then runs hub-ondemand-test.yml on the branch.
+          # The agents and the deterministic scripts (spec-bump, re-enable check) open their PRs with the same
+          # automation identity (qa-processes), and an agent chooses its own branch name, so neither the branch name
+          # nor anything else a PR says about itself can tell them apart. Every PR from that identity is therefore
+          # skipped, and so is one whose event was triggered by that identity (a commit it pushed to someone else's PR), or with an
+          # empty branch name, author or actor. Both values are only read from the environment.
+          agent=false
+          case "$HEAD_REF" in
+            '' | fix/coverage-* | fix/nightly-triage-*) agent=true ;;
+          esac
+          # Who opened the PR is not enough: the automation token can also push a commit to a PR a person opened, and
+          # that commit would run on the next event. So the account that triggered this event (the pusher, for a
+          # synchronize event) is checked as well.
+          for who in "$PR_AUTHOR" "$ACTOR" "$SENDER"; do
+            case "$who" in
+              '' | 'qa-processes[bot]' | 'app/qa-processes') agent=true ;;
+            esac
+          done
+          # A person's PR can also carry an earlier commit the automation account pushed, possibly before the PR was
+          # opened or while it was closed, which would run on a later event from the person. Commit author and
+          # committer prove nothing, and this workflow only runs on pull_request events, so its own run history misses
+          # such pushes. GitHub's repository activity log records every creation of and push to a branch with the
+          # account that did it, whether or not a PR exists. If the automation account ever created or pushed to this
+          # branch, the PR is skipped. An unreadable log fails closed.
+          if [ "$agent" != true ]; then
+            if history=$(gh api --paginate -X GET "repos/$REPO/activity" \
+              -f ref="refs/heads/$HEAD_REF" -f per_page=100 \
+              --jq '.[] | (.actor.login // "")' 2>/dev/null); then
+              while IFS= read -r who; do
+                case "$who" in
+                  'qa-processes[bot]' | 'app/qa-processes') agent=true ;;
+                esac
+              done <<<"$history"
+            else
+              agent=true
+            fi
+          fi
+          if [ "$agent" = true ]; then
+            echo "::warning::PR branch '$HEAD_REF' (author '$PR_AUTHOR') comes from the automation account or an AI agent branch — skipping the automatic live-Hub check; read the diff, then run hub-ondemand-test.yml on the branch before merging."
+            echo "proceed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           # SECURITY (mirrors triage-camunda-hub-nightly.yml's identical
           # guard): calling a local reusable workflow (`uses: ./...`) resolves
           # to the version of that file AS IT EXISTS ON THE PR's OWN COMMIT —

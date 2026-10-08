@@ -45,7 +45,7 @@ Still stuck? Post the run link in `#camunda-hub-pr-e2e-results`. Every alert car
 | Page | Shows |
 |---|---|
 | [hub-pr-check](https://github.com/camunda/api-test-generator/actions/workflows/hub-pr-check.yml) | The check that runs on every camunda-hub PR: every run, its result, and the reports. Start here for a red check |
-| [hub-pr-live-check](https://github.com/camunda/api-test-generator/actions/workflows/hub-pr-live-check.yml) | The live-Hub run on pull requests to *this* repo (changes to the generator itself). Not on camunda-hub PRs |
+| [hub-pr-live-check](https://github.com/camunda/api-test-generator/actions/workflows/hub-pr-live-check.yml) | The live-Hub run on pull requests to *this* repo (changes to the generator itself). Not on camunda-hub PRs, and not on PRs opened by the automation account (the AI agents and the re-enable and spec-bump scripts): for those, read the diff and run `hub-ondemand-test` on the branch |
 | [hub-ondemand-test](https://github.com/camunda/api-test-generator/actions/workflows/hub-ondemand-test.yml) | Run the generated suite by hand for any branch of this repo (Run workflow) |
 
 **Words used in this page and in the nightly cookbook**
@@ -56,7 +56,7 @@ Still stuck? Post the run link in `#camunda-hub-pr-e2e-results`. Every alert car
 - **Medic:** a Slack group on call for a test area (`hub-medic` for Hub, `test-automation-medic` for the generator and pipeline). The alert pings the right one.
 - **Classifier:** an automated step that reads the failure and picks one of the verdicts above. It is an AI agent and can be wrong; it is told to answer "unknown" rather than guess.
 - **Ontology:** the config files in `configs/camunda-hub/ontology/` that tell the generator how each resource is created, read, deleted and linked.
-- **Live check:** the `hub-pr-live-check` workflow, which runs the generated suite against a live Hub for pull requests to the generator repo itself.
+- **Live check:** the `hub-pr-live-check` workflow, which runs the generated suite against a live Hub for pull requests to the generator repo itself. It skips pull requests from the automation account (the AI agents and the re-enable and spec-bump scripts); for those, a person reads the diff and runs the `hub-ondemand-test` workflow on the branch.
 - **Invariant tests:** tests in the generator repo that check the generated output against one pinned camunda-hub spec.
 - **Fingerprint:** a short label for exactly what failed, used so the same failure does not post twice (see below).
 - **Evidence:** a failing test or an untested endpoint. "No evidence" means the run left no readable report.

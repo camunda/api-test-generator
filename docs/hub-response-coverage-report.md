@@ -174,7 +174,9 @@ review"** that shows the check before and after. Read that section first.
 `fix/coverage-`, with the labels `nightly-api-fix`, `auto-generated` and `hub`. The body ends with
 "Found by the camunda-hub coverage-fix agent". The thread under the weekly Slack message lists the ones still open.
 
-**Who reviews them.** A person, always, like any other pull request. A pull request that sits unreviewed is closed by the
+**Who reviews them.** A person, always, like any other pull request. The automatic live Hub check does **not** run on the
+agent's pull requests (it would run the agent's code with Hub access before anyone has read it). Read the diff, then run
+the `hub-ondemand-test` workflow on the branch, and only then mark the pull request ready. A pull request that sits unreviewed is closed by the
 same stale-PR clean-up as the nightly fix pull requests.
 
 **How it runs today.** By hand only: start the workflow

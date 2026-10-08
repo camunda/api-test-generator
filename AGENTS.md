@@ -649,10 +649,15 @@ The **Hub PR live check**
 ([hub-pr-live-check.yml](.github/workflows/hub-pr-live-check.yml), #513) closes
 the gap `ci.yml`'s `hub-invariants` leaves: that job only checks the **pinned**
 hub spec, never a live Hub. This workflow fires on every `pull_request`
-targeting `main` (a guard job skips real forks, Dependabot, and any PR whose
+targeting `main` (a guard job skips real forks, Dependabot, any PR whose
 diff touches `.github/**` — the same "don't let a PR's own modified workflow
 code execute with production secrets" concern the triage workflow's dispatch
-guard has) and calls `_hub-suite-run.yml` (the same reusable
+guard has — and any PR from the `qa-processes` automation account, where the AI
+agents and the deterministic scripts share one token: also a PR on a `fix/coverage-*`
+or `fix/nightly-triage-*` branch, an event that account triggered, or a branch
+that account ever created or pushed to (read from the repository activity log,
+which also covers pushes made before the PR existed). For those, a person reads the diff and runs
+`hub-ondemand-test.yml` on the branch) and calls `_hub-suite-run.yml` (the same reusable
 `hub-ondemand-test.yml` wraps) directly, so the result is a real **native**
 GitHub Actions check on the PR — no polling, no comment-posting, unlike the
 dispatch→poll→comment pattern used elsewhere for a workflow that can't be
@@ -811,17 +816,19 @@ grant spec-bump-check.yml's bump-PR token already uses on this repo, so no new
 App permission is needed). Before opening ANY PR, a deterministic step fetches
 every open `nightly-api-fix`-labelled PR's actual diff (not a self-reported tag)
 so the agent can skip an operation already being fixed/suppressed elsewhere,
-rather than opening a duplicate. Any PR the agent does open is automatically
-validated: [hub-pr-live-check.yml](.github/workflows/hub-pr-live-check.yml)
-fires on every same-repo `pull_request` targeting `main` whose diff doesn't
-touch `.github/**` — exactly what these PRs look like — running a real
-live-Hub check natively (the `hub-invariants` job that also runs
-automatically on the PR via `ci.yml` only checks static invariants against
-the pinned spec, so this is genuinely additional signal, not a duplicate). An
-earlier version of this workflow manually dispatched
-[hub-ondemand-test.yml](.github/workflows/hub-ondemand-test.yml) and
-commented the run link for the same purpose; that became redundant once
-hub-pr-live-check.yml shipped (#513) and has been removed.
+rather than opening a duplicate. A PR the agent opens is **not** run
+automatically against a live Hub:
+[hub-pr-live-check.yml](.github/workflows/hub-pr-live-check.yml) fires on every
+same-repo `pull_request` targeting `main` whose diff doesn't touch `.github/**`,
+and runs the PR's own code with Hub access the moment it opens, so its guard
+skips agent PRs: every PR from the `qa-processes` account (the agents and the
+deterministic scripts use the same token, and an agent picks its own branch
+name, so no branch name can be trusted), branches `fix/coverage-*` and
+`fix/nightly-triage-*`, and an empty branch or author. For those, a person
+reads the diff and then runs
+[hub-ondemand-test.yml](.github/workflows/hub-ondemand-test.yml) on the branch
+before merging. The `hub-invariants` job that runs automatically via `ci.yml`
+only checks static invariants against the pinned spec, so it is not a substitute.
 
 Before filing a genuinely NEW (not already-known) product bug, #482 adds a
 live re-check: a step earlier in the same job spins up ONE fresh, separate
@@ -877,9 +884,10 @@ reverts and reports instead of opening a broken PR. Entirely deterministic —
 no agent involved, unlike the triage flow above; detecting a closed issue and
 removing a JSON entry are pure mechanics. Same two-App-token split as the
 triage agent (`GH_TOKEN_HUB` for the issue-state check, `GH_TOKEN_GENERATOR`
-for the PR); no manual live-Hub validation dispatch is needed for any PR it
-opens, since `hub-pr-live-check.yml` already fires automatically on it (see
-the triage agent's own paragraph above for why). Top-level `knownIssues[]`
+for the PR); its PRs (branch `chore/hub-unskip-*`) come from the same account
+as the AI agents, so `hub-pr-live-check.yml` skips them too: a person runs
+`hub-ondemand-test.yml` on the branch before merging (see the triage agent's
+own paragraph above). Top-level `knownIssues[]`
 entries (suite-wide, no `operationId`) get a Slack mention when closed but are
 never auto-acted on — there's nothing mechanical to remove for them. Silent
 (no Slack post) when there's nothing to report, matching spec-bump-check's

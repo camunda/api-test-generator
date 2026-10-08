@@ -734,15 +734,13 @@ jobs:
           fi
           cp /tmp/hub-triage.json "${GITHUB_WORKSPACE}/hub-triage.json"
 
-      # Any fix/suppress/unskip PR opened against api-test-generator already
-      # gets a real live-Hub check automatically: hub-pr-live-check.yml fires
-      # on every same-repo `pull_request` targeting main whose diff doesn't
-      # touch .github/** (exactly what these bot-opened PRs look like), and
-      # runs the same _hub-suite-run.yml reusable hub-ondemand-test.yml wraps
-      # — as a native GitHub Actions check, not a comment. A prior version of
-      # this workflow manually dispatched hub-ondemand-test.yml and commented
-      # the run link for the same purpose; that became redundant once
-      # hub-pr-live-check.yml shipped (#513) and has been removed.
+      # A fix/suppress PR the agent opens against api-test-generator does NOT get the automatic live-Hub check:
+      # hub-pr-live-check.yml skips every PR from the automation account (the agent and the deterministic scripts use the
+      # same token, and the agent picks its own branch name), because that check runs the PR's own code with Hub access
+      # the moment the PR opens, before anyone has read it. A person reads the diff and then runs hub-ondemand-test.yml
+      # on the PR's branch before merging. (An earlier version of this workflow dispatched hub-ondemand-test.yml itself
+      # and commented the run link; that was removed when hub-pr-live-check.yml shipped (#513), and the automatic run
+      # was then limited to PRs from people.)
 
       # No reports downloaded → write an inconclusive result so Slack announces it
       # (never a green digest). Mirrors the c8 "no false all-clear" rule.
