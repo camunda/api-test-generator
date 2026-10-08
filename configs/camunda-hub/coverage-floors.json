@@ -14,6 +14,25 @@
   "lifecycleCreateCovered": 6,
   "lifecycleRestoreCovered": 4,
   "lifecycleEdgeCovered": 1,
+  "requestKindEndpoints": {
+    "additional-prop": 18,
+    "additional-prop-general": 14,
+    "auth-absent": 64,
+    "auth-deny": 61,
+    "auth-invalid": 64,
+    "constraint-violation": 13,
+    "enum-violation": 17,
+    "explicit-null-required": 13,
+    "format-invalid": 1,
+    "malformed-json-body": 31,
+    "missing-body": 20,
+    "missing-required": 25,
+    "missing-required-combo": 7,
+    "not-found-fake-id": 42,
+    "pagination-limit-invalid": 14,
+    "pagination-offset-past-total": 14,
+    "type-mismatch": 32
+  },
   "zeroTestOperations": [
     {
       "operationId": "getClusterUsageMetrics",

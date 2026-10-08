@@ -5,22 +5,28 @@ interface Opts {
   onlyOperations?: Set<string>;
 }
 
+/**
+ * Whether a `missing-body` scenario is built for the operation: only when the body is explicitly required OR
+ * effectively required (every property is required). Optional bodies are skipped entirely (we don't assert
+ * positives; business logic not derivable here). generate.ts reuses this exact check for the coverage report's
+ * applicability, so the report cannot ask for a scenario this generator never builds.
+ */
+export function isMissingBodyEligible(op: OperationModel): boolean {
+  if (!op.requestBodySchema) return false;
+  if (op.bodyRequired === true) return true;
+  const schema = op.requestBodySchema;
+  if (schema.type === 'object' && schema.properties && op.requiredProps?.length) {
+    const propCount = Object.keys(schema.properties).length;
+    return propCount > 0 && op.requiredProps.length === propCount;
+  }
+  return false;
+}
+
 export function generateMissingBody(ops: OperationModel[], opts: Opts): ValidationScenario[] {
   const out: ValidationScenario[] = [];
   for (const op of ops) {
     if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId)) continue;
-    if (!op.requestBodySchema) continue;
-    // New policy: Only generate missing-body scenarios when body is explicitly required OR effectively required.
-    // Skip optional bodies entirely (we don't assert positives; business logic not derivable here).
-    let required = op.bodyRequired === true;
-    if (!required) {
-      const schema = op.requestBodySchema;
-      if (schema && schema.type === 'object' && schema.properties && op.requiredProps?.length) {
-        const propCount = Object.keys(schema.properties).length;
-        if (propCount > 0 && op.requiredProps.length === propCount) required = true;
-      }
-    }
-    if (!required) continue; // skip optional body omission
+    if (!isMissingBodyEligible(op)) continue;
     out.push({
       id: makeId([op.operationId, 'missingBody']),
       operationId: op.operationId,

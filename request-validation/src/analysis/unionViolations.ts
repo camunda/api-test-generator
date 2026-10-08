@@ -5,18 +5,35 @@ interface Opts {
   onlyOperations?: Set<string>;
 }
 
+/**
+ * The first two object variants (with `required`) of a ROOT oneOf, or undefined when there are fewer than two. A
+ * oneOf nested inside a property is not looked at. generate.ts reuses `isUnionEligible` for the coverage report's
+ * applicability.
+ */
+export function unionVariants(
+  op: OperationModel,
+): { a: SchemaFragment; b: SchemaFragment } | undefined {
+  if (!op.rootOneOf || op.rootOneOf.length < 2) return undefined;
+  const variants = op.rootOneOf.filter(
+    (v) => v && v.type === 'object' && Array.isArray(v.required),
+  );
+  const a = variants[0];
+  const b = variants[1];
+  return a && b ? { a, b } : undefined;
+}
+
+export function isUnionEligible(op: OperationModel): boolean {
+  return unionVariants(op) !== undefined;
+}
+
 export function generateUnionViolations(ops: OperationModel[], opts: Opts): ValidationScenario[] {
   const out: ValidationScenario[] = [];
   for (const op of ops) {
     if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId)) continue;
-    if (!op.rootOneOf || op.rootOneOf.length < 2) continue;
     // select first two variants with object + required
-    const variants = op.rootOneOf.filter(
-      (v) => v && v.type === 'object' && Array.isArray(v.required),
-    );
-    if (variants.length < 2) continue;
-    const a = variants[0];
-    const b = variants[1];
+    const variants = unionVariants(op);
+    if (!variants) continue;
+    const { a, b } = variants;
     const combinedRequired = Array.from(new Set([...(a.required ?? []), ...(b.required ?? [])]));
     const body: Record<string, unknown> = {};
     for (const f of combinedRequired) {

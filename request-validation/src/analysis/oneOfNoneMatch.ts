@@ -6,22 +6,42 @@ interface Opts {
   capPerOperation?: number;
 }
 
+/**
+ * The first two object variants of a ROOT oneOf, when a body that matches none of them can be built (one of them has
+ * a required field to omit). undefined otherwise. A oneOf nested inside a property is not looked at. generate.ts
+ * reuses `isOneOfNoneMatchEligible` for the coverage report's applicability.
+ */
+export function noneMatchVariants(
+  op: OperationModel,
+): { a: SchemaFragment; b: SchemaFragment } | undefined {
+  const root = op.requestBodySchema;
+  if (!root || !Array.isArray(root.oneOf) || root.oneOf.length < 2) return undefined;
+  const objVariants = root.oneOf.filter((v) => v && v.type === 'object');
+  const a = objVariants[0];
+  const b = objVariants[1];
+  if (!a || !b) return undefined;
+  const reqA: string[] = Array.isArray(a.required) ? a.required : [];
+  const reqB: string[] = Array.isArray(b.required) ? b.required : [];
+  if (!reqA.length && !reqB.length) return undefined; // nothing to omit
+  return { a, b };
+}
+
+export function isOneOfNoneMatchEligible(op: OperationModel): boolean {
+  return noneMatchVariants(op) !== undefined;
+}
+
 // Produces a body that intentionally matches none of the oneOf variants (by omitting discriminator or required markers)
 export function generateOneOfNoneMatch(ops: OperationModel[], opts: Opts): ValidationScenario[] {
   const out: ValidationScenario[] = [];
   for (const op of ops) {
     if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId)) continue;
-    const root = op.requestBodySchema;
-    if (!root || !Array.isArray(root.oneOf) || root.oneOf.length < 2) continue;
+    const variants = noneMatchVariants(op);
+    if (!variants) continue;
     let produced = 0;
     // Strategy: collect union of required keys across first two object variants, then remove at least one required from each variant
-    const objVariants = root.oneOf.filter((v) => v && v.type === 'object');
-    if (objVariants.length < 2) continue;
-    const a = objVariants[0];
-    const b = objVariants[1];
+    const { a, b } = variants;
     const reqA: string[] = Array.isArray(a.required) ? a.required : [];
     const reqB: string[] = Array.isArray(b.required) ? b.required : [];
-    if (!reqA.length && !reqB.length) continue; // nothing to omit
     const body: Record<string, unknown> = {};
     // Include all but first required of variant A and all but first required of variant B (ensuring each variant's requirement set is broken)
     for (const r of reqA.slice(1)) body[r] = placeholder(a.properties?.[r]);

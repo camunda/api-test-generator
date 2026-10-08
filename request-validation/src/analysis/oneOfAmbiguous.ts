@@ -6,39 +6,71 @@ interface Opts {
   capPerOperation?: number;
 }
 
+/** Two object variants that both list `required`: the pair a merged, ambiguous body can be built from. */
+export function isAmbiguousPair(
+  a: SchemaFragment | undefined,
+  b: SchemaFragment | undefined,
+): boolean {
+  return (
+    !!a &&
+    !!b &&
+    a.type === 'object' &&
+    b.type === 'object' &&
+    Array.isArray(a.required) &&
+    Array.isArray(b.required)
+  );
+}
+
+/**
+ * The variant pairs of a ROOT oneOf that a merged, ambiguous body can be built from, in the order the scenarios are
+ * built, one at a time (a oneOf nested inside a property is not looked at). The generator builds one scenario per
+ * pair and stops at its cap without walking the rest, and generate.ts reuses `isOneOfAmbiguousEligible` (some pair
+ * exists) for the coverage report's applicability, so both read the same sequence.
+ */
+export function* ambiguousPairs(
+  op: OperationModel,
+): Generator<{ i: number; j: number; a: SchemaFragment; b: SchemaFragment }> {
+  const root = op.requestBodySchema;
+  if (!root || !Array.isArray(root.oneOf) || root.oneOf.length < 2) return;
+  for (let i = 0; i < root.oneOf.length; i++) {
+    for (let j = i + 1; j < root.oneOf.length; j++) {
+      const a = root.oneOf[i];
+      const b = root.oneOf[j];
+      if (a && b && isAmbiguousPair(a, b)) yield { i, j, a, b };
+    }
+  }
+}
+
+/** Stops at the first pair: the answer needs no more. */
+export function isOneOfAmbiguousEligible(op: OperationModel): boolean {
+  return ambiguousPairs(op).next().done === false;
+}
+
 export function generateOneOfAmbiguous(ops: OperationModel[], opts: Opts): ValidationScenario[] {
   const out: ValidationScenario[] = [];
   for (const op of ops) {
     if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId)) continue;
-    const root = op.requestBodySchema;
-    if (!root || !Array.isArray(root.oneOf) || root.oneOf.length < 2) continue;
     // For each pair (first up to cap) merge required sets
     let produced = 0;
-    for (let i = 0; i < root.oneOf.length; i++) {
-      for (let j = i + 1; j < root.oneOf.length; j++) {
-        if (opts.capPerOperation && produced >= opts.capPerOperation) break;
-        const a = root.oneOf[i];
-        const b = root.oneOf[j];
-        if (!a || !b || a.type !== 'object' || b.type !== 'object') continue;
-        if (!Array.isArray(a.required) || !Array.isArray(b.required)) continue;
-        const merged: Record<string, unknown> = {};
-        for (const r of a.required) merged[r] = placeholder(a.properties?.[r]);
-        for (const r of b.required) merged[r] = placeholder(b.properties?.[r]);
-        out.push({
-          id: makeId([op.operationId, 'oneofAmbiguous', String(i), String(j)]),
-          operationId: op.operationId,
-          method: op.method,
-          path: op.path,
-          type: 'oneof-ambiguous',
-          target: 'oneOf',
-          requestBody: merged,
-          params: buildParams(op.path),
-          expectedStatus: 400,
-          description: `Ambiguous oneOf variants ${i}+${j}`,
-          headersAuth: true,
-        });
-        produced++;
-      }
+    for (const { i, j, a, b } of ambiguousPairs(op)) {
+      if (opts.capPerOperation && produced >= opts.capPerOperation) break;
+      const merged: Record<string, unknown> = {};
+      for (const r of a.required ?? []) merged[r] = placeholder(a.properties?.[r]);
+      for (const r of b.required ?? []) merged[r] = placeholder(b.properties?.[r]);
+      out.push({
+        id: makeId([op.operationId, 'oneofAmbiguous', String(i), String(j)]),
+        operationId: op.operationId,
+        method: op.method,
+        path: op.path,
+        type: 'oneof-ambiguous',
+        target: 'oneOf',
+        requestBody: merged,
+        params: buildParams(op.path),
+        expectedStatus: 400,
+        description: `Ambiguous oneOf variants ${i}+${j}`,
+        headersAuth: true,
+      });
+      produced++;
     }
   }
   return out;

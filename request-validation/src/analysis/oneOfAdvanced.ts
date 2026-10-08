@@ -10,21 +10,58 @@ function isVariantSchema(v: unknown): v is SchemaFragment {
   return !!v && typeof v === 'object' && !Array.isArray(v);
 }
 
+/**
+ * The first three object variants (with `required`) of a ROOT oneOf, or undefined when there are fewer than three.
+ * generate.ts reuses `isOneOfMultiAmbiguousEligible` for the coverage report's applicability.
+ */
+export function multiAmbiguousVariants(
+  op: OperationModel,
+): { a: SchemaFragment; b: SchemaFragment; c: SchemaFragment } | undefined {
+  if (!op.rootOneOf || op.rootOneOf.length < 3) return undefined;
+  const variants = op.rootOneOf
+    .filter(isVariantSchema)
+    .filter((v) => v.type === 'object' && Array.isArray(v.required));
+  const [a, b, c] = variants;
+  return a && b && c ? { a, b, c } : undefined;
+}
+
+export function isOneOfMultiAmbiguousEligible(op: OperationModel): boolean {
+  return multiAmbiguousVariants(op) !== undefined;
+}
+
+/**
+ * The first two object variants (with properties) of a ROOT oneOf and a property of the second that the first
+ * lacks, or undefined. generate.ts reuses `isOneOfCrossBleedEligible` for the coverage report's applicability.
+ */
+export function crossBleedPlan(
+  op: OperationModel,
+): { a: SchemaFragment; b: SchemaFragment; uniqueB: string } | undefined {
+  if (!op.rootOneOf || op.rootOneOf.length < 2) return undefined;
+  const variants = op.rootOneOf
+    .filter(isVariantSchema)
+    .filter((v) => v.type === 'object' && v.properties);
+  const [a, b] = variants;
+  if (!a || !b) return undefined;
+  const aProps = a.properties ?? {};
+  const bProps = b.properties ?? {};
+  const uniqueB = Object.keys(bProps).find((k) => !(k in aProps));
+  return uniqueB ? { a, b, uniqueB } : undefined;
+}
+
+export function isOneOfCrossBleedEligible(op: OperationModel): boolean {
+  return crossBleedPlan(op) !== undefined;
+}
+
 export function generateOneOfMultiAmbiguous(
   ops: OperationModel[],
   opts: Opts,
 ): ValidationScenario[] {
   const out: ValidationScenario[] = [];
   for (const op of ops) {
-    if (!op.rootOneOf || op.rootOneOf.length < 3) continue;
     if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId)) continue;
-    const variants = op.rootOneOf
-      .filter(isVariantSchema)
-      .filter((v) => v.type === 'object' && Array.isArray(v.required));
-    if (variants.length < 3) continue;
-    const a = variants[0];
-    const b = variants[1];
-    const c = variants[2];
+    const variants = multiAmbiguousVariants(op);
+    if (!variants) continue;
+    const { a, b, c } = variants;
     const merged: Record<string, unknown> = {};
     for (const r of a.required ?? []) merged[r] = placeholder(a.properties?.[r]);
     for (const r of b.required ?? []) merged[r] = placeholder(b.properties?.[r]);
@@ -50,22 +87,15 @@ export function generateOneOfMultiAmbiguous(
 export function generateOneOfCrossBleed(ops: OperationModel[], opts: Opts): ValidationScenario[] {
   const out: ValidationScenario[] = [];
   for (const op of ops) {
-    if (!op.rootOneOf || op.rootOneOf.length < 2) continue;
     if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId)) continue;
-    const variants = op.rootOneOf
-      .filter(isVariantSchema)
-      .filter((v) => v.type === 'object' && v.properties);
-    if (variants.length < 2) continue;
-    const a = variants[0];
-    const b = variants[1];
+    const plan = crossBleedPlan(op);
+    if (!plan) continue;
+    const { a, b, uniqueB } = plan;
     // Build body for variant A then inject a property unique to B
     const body: Record<string, unknown> = {};
     const reqA = Array.isArray(a.required) ? a.required : [];
     for (const r of reqA) body[r] = placeholder(a.properties?.[r]);
-    const aProps = a.properties ?? {};
     const bProps = b.properties ?? {};
-    const uniqueB = Object.keys(bProps).find((k) => !(k in aProps));
-    if (!uniqueB) continue;
     body[uniqueB] = placeholder(bProps[uniqueB]);
     out.push({
       id: makeId([op.operationId, 'oneofCrossBleed', uniqueB]),

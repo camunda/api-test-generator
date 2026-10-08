@@ -1025,6 +1025,26 @@ describeForThisConfig('camunda-hub bundled-spec invariants (#128)', () => {
       for (const [label, actual, floor] of single) {
         if (!(actual >= floor)) regressed.push(`${label}: ${actual}, floor ${floor}`);
       }
+      // Per scenario kind: how many endpoints have at least one scenario of it. The report lists only the kinds a
+      // generator can build as missing, so a generator that silently stops producing a kind would no longer show up
+      // there; this floor catches it. A kind the suite generates needs a floor too, or its guard would go missing.
+      const kindFloors = isRecord(floors.requestKindEndpoints) ? floors.requestKindEndpoints : {};
+      const kindActual = isRecord(summary.requestKindEndpoints) ? summary.requestKindEndpoints : {};
+      expect(
+        Object.keys(kindActual)
+          .filter((k) => !(k in kindFloors))
+          .sort(),
+        'scenario kinds the suite generates but requestKindEndpoints has no floor for (add one)',
+      ).toEqual([]);
+      for (const [kind, floor] of Object.entries(kindFloors)) {
+        const actual = typeof kindActual[kind] === 'number' ? kindActual[kind] : 0;
+        if (!isFloor(floor)) regressed.push(`requestKindEndpoints.${kind}: floor is not a count`);
+        else if (actual < floor) {
+          regressed.push(
+            `scenario kind ${kind}: ${actual} endpoints have one, floor ${floor} (a generator stopped producing it?)`,
+          );
+        }
+      }
       expect(regressed, 'response coverage dropped below its floor').toEqual([]);
 
       const allowed = new Set(
