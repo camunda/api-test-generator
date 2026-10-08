@@ -80,7 +80,7 @@ When the coverage-fix agent has pull requests waiting for review, a reply appear
 
 ## Closing a gap
 
-This is maintainer work: it needs the generator, not just Hub. An area issue lists, per endpoint, the **missing responses**
+Some gaps need a generator change, not just a Hub setting. An area issue lists, per endpoint, the **missing responses**
 and the **missing bad-request tests**. Find the endpoint's row, then use the table for what it lacks.
 
 | The row says it is missing | What it means | Where to look, and the usual fix |

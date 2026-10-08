@@ -154,22 +154,16 @@ Hub still does not meet that assertion and removing it would make the nightly fa
 ## The weekly coverage report (Monday 05:00)
 
 Counts how many endpoints have a test for every response the spec lists, split into **positive** and **negative** tests,
-with the change since last week in brackets. Gaps in endpoint responses and bad-request tests become issues (lifecycle gaps do not, see below). Read
-[hub-response-coverage-report.md](hub-response-coverage-report.md).
+with the change since last week in brackets.
 
-**Is a gap bad?** It is a to-do, not an incident. Nothing is broken. A line such as "Lifecycle tests (create, read, delete): 5 of 6
-resources. Missing: Version" (an example) means that resource has no single test that creates, reads and deletes
-one, while its individual endpoint tests still exist. A missing resource is usually just not added yet; a known Hub bug
-that excludes it is listed separately. The generator owner fixes it by adding the resource to
-`configs/camunda-hub/ontology/entity-kinds.json`. Lifecycle gaps open no issue, so only the weekly report shows them.
-Fixing a gap is maintainer work that needs the generator: follow "Closing a gap" in
+**A gap is a to-do, not an incident.** Nothing is broken. Gaps in endpoint responses and bad-request tests become issues.
+Lifecycle gaps (a resource with no create-read-delete test) open no issue, so only this report shows them.
+
+After the report, the coverage-fix agent starts by itself. For small, safe gaps it opens **draft pull requests for you to
+review**. It never merges anything, and the thread under the weekly Slack message lists the ones still waiting.
+
+How to read the message, how to close a gap, and what the agent does and never does:
 [hub-response-coverage-report.md](hub-response-coverage-report.md).
-An AI agent (the coverage-fix agent) can help with two kinds of gap: a missing create-read-delete test, and a missing 403 or
-404 test when the cause is a small config entry. It opens a **draft pull request for you to review**, or, when a gap needs more
-(generator code, or something excluded on purpose), writes a proposal in the run summary and opens nothing. It runs by hand
-today, never merges anything, and the thread under the weekly Slack message lists its pull requests still waiting for review.
-"The coverage-fix agent" in [hub-response-coverage-report.md](hub-response-coverage-report.md) explains what it does and
-never does.
 
 ## Who to ask
 
