@@ -31,7 +31,7 @@ const openedPr = {
   title: 'test(coverage-fix): add removeMember 403 test',
 };
 
-function build(gaps: unknown, prs: unknown[] = [openedPr], issueUrl = '') {
+function build(gaps: unknown, prs: unknown[] = [openedPr], issueUrl = '', maxIssue = '') {
   const dir = mkdtempSync(join(tmpdir(), 'cf-report-'));
   writeFileSync(join(dir, 'result.json'), JSON.stringify({ gaps }));
   writeFileSync(join(dir, 'prs.json'), JSON.stringify(prs));
@@ -53,6 +53,7 @@ function build(gaps: unknown, prs: unknown[] = [openedPr], issueUrl = '') {
         GITHUB_SERVER_URL: 'https://github.com',
         GITHUB_REPOSITORY: 'camunda/api-test-generator',
         ISSUE_URL: issueUrl,
+        ...(maxIssue ? { ISSUE_MAX_CHARS: maxIssue } : {}),
       },
     },
   );
@@ -114,30 +115,48 @@ describe('hub-coverage-fix-report', () => {
     expect(r.slack).not.toContain('pull/999');
   });
 
-  it('writes nothing for a quiet run, and warns when the result has no gaps list', () => {
+  it('writes nothing for a quiet run', () => {
     const quiet = build([], []);
     expect(quiet.slack).toBe('');
     expect(quiet.issue).toBe('');
-    const dir = mkdtempSync(join(tmpdir(), 'cf-report-'));
-    writeFileSync(join(dir, 'result.json'), '{"agent_error":true}');
-    writeFileSync(join(dir, 'prs.json'), '[]');
-    const r = spawnSync(
-      'bash',
-      [
-        script,
-        join(dir, 'result.json'),
-        join(dir, 'prs.json'),
-        join(dir, 'i.md'),
-        join(dir, 's.txt'),
-      ],
-      {
-        encoding: 'utf8',
-        env: { ...process.env, GITHUB_RUN_ID: RUN, BASELINE: '0' },
-      },
-    );
-    expect(r.status).toBe(0);
-    expect(r.stdout).toContain('no gaps list');
-    expect(readFileSync(join(dir, 's.txt'), 'utf8')).toBe('');
+  });
+
+  it('still reports the PRs GitHub shows when the agent left no usable result', () => {
+    const run = (result: string, prs: unknown[]) => {
+      const dir = mkdtempSync(join(tmpdir(), 'cf-report-'));
+      writeFileSync(join(dir, 'result.json'), result);
+      writeFileSync(join(dir, 'prs.json'), JSON.stringify(prs));
+      const r = spawnSync(
+        'bash',
+        [
+          script,
+          join(dir, 'result.json'),
+          join(dir, 'prs.json'),
+          join(dir, 'i.md'),
+          join(dir, 's.txt'),
+        ],
+        { encoding: 'utf8', env: { ...process.env, GITHUB_RUN_ID: RUN, BASELINE: '900' } },
+      );
+      expect(r.status, r.stderr).toBe(0);
+      return {
+        out: r.stdout,
+        slack: readFileSync(join(dir, 's.txt'), 'utf8'),
+        issue: readFileSync(join(dir, 'i.md'), 'utf8'),
+      };
+    };
+    for (const bad of ['{"agent_error":true}', '{"gaps":"no"}', 'not json']) {
+      const withPr = run(bad, [openedPr]);
+      expect(withPr.out).toContain('no gaps list');
+      expect(withPr.slack).toContain('1 PR opened, 0 gaps left');
+      expect(withPr.slack).toContain('pull/999');
+      expect(withPr.slack).toContain('The agent left no usable result');
+      expect(withPr.issue).toContain('pull/999');
+      expect(withPr.issue).toContain('The agent left no usable result');
+      // With no PR either, the note still says the agent left nothing usable.
+      const none = run(bad, []);
+      expect(none.slack).toContain('0 PRs opened, 0 gaps left');
+      expect(none.slack).toContain('The agent left no usable result');
+    }
   });
 
   it('treats the agent text as untrusted: mentions, control characters, length, and everything in a code span', () => {
@@ -199,6 +218,29 @@ describe('hub-coverage-fix-report', () => {
     expect(r.issue.length).toBeLessThan(60000);
     expect(r.slack.length).toBeLessThan(4000);
     expect(r.issue).toContain('<!-- coverage-fix-run:555 -->');
+  });
+
+  it('cuts a too long comment at the end of a line, so every agent text keeps its closing backtick', () => {
+    const evil = '[a](https://evil.example) ![i](https://evil.example/i.png) ';
+    const gaps = Array.from({ length: 20 }, (_, i) => ({
+      kind: 'status-403',
+      resource: `op${i}`,
+      action: 'report-only',
+      reason: evil + 'r'.repeat(800),
+      proposal: evil + 'p'.repeat(1200),
+      file_error: evil + 'e'.repeat(200),
+    }));
+    const prs = Array.from({ length: 20 }, (_, i) => ({
+      ...openedPr,
+      number: 1000 + i,
+      title: 't'.repeat(120),
+    }));
+    const r = build(gaps, prs, '', '9000');
+    expect(r.issue.length).toBeLessThan(9300);
+    expect(r.issue).toContain('…cut here');
+    const lines = r.issue.split('\n').filter((l) => /^ {2}- (Reason|Proposal|Error): /.test(l));
+    expect(lines.length).toBeGreaterThan(3);
+    for (const l of lines) expect(l.endsWith('`'), l.slice(-40)).toBe(true);
   });
 
   it('caps the number of gaps shown and says how many more there are', () => {
