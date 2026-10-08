@@ -113,6 +113,29 @@ describe('select', () => {
     ]);
   });
 
+  it('does not hold an area for a recent PR that was closed without being merged', () => {
+    const prs = [pr({ state: 'CLOSED', headRefName: 'fix/coverage-version-222' })];
+    const s = select(['Version'], rows, prs, now);
+    expect(s.candidates.map((c) => c.resource)).toEqual(['Version']);
+    expect(s.skipped).toEqual([]);
+  });
+
+  it('holds an area for a recent PR that was merged', () => {
+    const prs = [pr({ state: 'MERGED', headRefName: 'fix/coverage-version-222' })];
+    const s = select(['Version'], rows, prs, now);
+    expect(s.candidates).toEqual([]);
+    expect(s.skipped[0]?.reason).toContain('already has an agent PR');
+  });
+
+  it('lets a status gap be tried again after its PR was closed without merging', () => {
+    const closed = [pr({ state: 'CLOSED', headRefName: 'fix/coverage-remove-member-403-333' })];
+    const gaps = [{ operationId: 'removeMember', code: '403' as const }];
+    const again = select([], rows, closed, now, [], [], gaps);
+    expect(again.candidates.map((c) => c.resource)).toEqual(['removeMember']);
+    const open = [pr({ state: 'OPEN', headRefName: 'fix/coverage-remove-member-403-333' })];
+    expect(select([], rows, open, now, [], [], gaps).candidates).toEqual([]);
+  });
+
   it('skips an area whose agent PR is still open even when it is older than the window', () => {
     const prs = [
       pr({

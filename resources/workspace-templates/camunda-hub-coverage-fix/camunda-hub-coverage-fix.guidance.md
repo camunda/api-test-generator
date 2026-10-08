@@ -353,7 +353,8 @@ Work in `{{.WorkspacePath}}/api-test-generator` (already on `main`).
   for a 403 or 404 gap) in the report's
   `rows.json` (the spec's first tag, the same grouping the weekly report uses for its area issues). If two missing resources
   share an area, pick one and report the other. Skip an area when `$OPEN_FIX_PRS_FILE` or
-  `$RECENT_COVERAGE_FIX_PRS_FILE` already holds a PR for a resource in that area.
+  `$RECENT_COVERAGE_FIX_PRS_FILE` already holds an open or merged PR for a resource in that area. A PR with state
+  `CLOSED` was closed without being merged: it does not hold its area, and the gap may be tried again.
 
 The job already enforces this limit in code before you start, so `candidates` respects them. Check them
 yourself anyway, and report the gaps you leave for later.

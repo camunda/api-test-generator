@@ -133,7 +133,7 @@ jobs:
       # Fails closed: if the PR history cannot be read, or a query comes back full (so it may be cut
       # off), the busy areas cannot be counted, so the run stops rather than guessing.
       # Two queries, merged: every OPEN PR (an old open PR still holds its area), and every one created in
-      # the last 8 days, open or closed (the busy-area window is 7 days). A single "newest 100" query would
+      # the last 8 days, open, closed or merged (the busy-area window is 7 days; the selector ignores the closed ones). A single "newest 100" query would
       # eventually push an old open PR out of the list. There is no label filter on purpose: a label can be
       # removed by anyone, which would hide a PR from the count. The selector picks the agent's PRs by branch.
       - name: List the agent's PR history
