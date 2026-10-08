@@ -1,6 +1,8 @@
 // Picks which coverage gaps the coverage-fix agent may work on in one run, and enforces its limits
 // in code so the agent's own playbook is not the only guard:
-//   - at most one agent PR per API area, counting PRs from the last WINDOW_DAYS days and any still open.
+//   - at most one agent PR per API area, counting PRs from the last WINDOW_DAYS days and any still open. A PR that
+//     was closed without being merged (a person decided against it, or it went stale) does not hold its area, so the
+//     gap can be tried again; a merged PR still does for the window.
 // There is no cap on the number of PRs per run or per week: the areas and the gaps are the limit.
 //
 // Only the gap kind the pilot allows is considered: a resource with no create-read-delete test
@@ -125,10 +127,13 @@ export function select(
     for (const code of STATUS_CODES) areaByKebab.set(`${kebab(r.operationId)}-${code}`, r.area);
   }
 
-  // An area is busy when an agent PR for one of its resources is recent or still open.
+  // An area is busy when an agent PR for one of its resources is recent or still open. A PR closed without being
+  // merged does not count: the gap is still there, and a retry is the point.
   const busyAreas = new Set<string>();
   for (const p of agentPrs) {
-    if (!isRecent(p.createdAt, now) && p.state.toLowerCase() !== 'open') continue;
+    const state = p.state.toLowerCase();
+    if (state === 'closed') continue;
+    if (!isRecent(p.createdAt, now) && state !== 'open') continue;
     const k = resourceFromBranch(p.headRefName);
     const area = k ? areaByKebab.get(k) : undefined;
     if (area) busyAreas.add(area);
