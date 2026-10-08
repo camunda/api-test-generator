@@ -197,7 +197,7 @@ How to read the message, how to close a gap, and what the agent does and never d
 
 - An alert about Hub or the generator (a failure, a wrong test, a skip): `hub-medic`.
 - Anything in this channel you cannot place: write in the channel.
-- Any question or help request, such as how the generator works or a Slack or Vault outage you cannot fix: ask in `#ask-qa` and tag `@test-automation-medic`. It is not the place for alerts.
+- Any question or help request, such as how the generator works or a Slack or Vault outage you cannot fix: ask in `#ask-qa` and tag `@test-automation-medic`.
 - Adding a generator PR next to a Hub change (labels, feature flags): see "Adding or changing an endpoint in Hub" in [hub-pr-check-cookbook.md](hub-pr-check-cookbook.md).
 
 ## Words used
