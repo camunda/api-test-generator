@@ -83,7 +83,22 @@ cannot work out:
 - a **state-dependent 409 or 400** that needs setup calls (`conflict-replay.json`);
 - a **new kind of resource** that should get a create, read, delete flow test (`ontology/entity-kinds.json`).
 
-**If you need one, open it at the same time as your Hub PR.** When to merge it depends on what it contains:
+**If you need one, open it at the same time as your Hub PR.**
+
+**Testing it.** You can test the generator PR before your Hub PR merges, in two ways:
+
+- **On GitHub, to check the generator side.** Run `hub-ondemand-test` on your generator branch and set `hub_ref` to your Hub
+  PR's branch. The tests are generated from your PR's spec with your generator fix. The Hub they run against is the latest
+  published build of Hub's `main`, **not your PR**, so tests for a brand-new endpoint get 404 there. It shows that
+  generation and the invariants work, not that the endpoint behaves as the tests expect. Steps: "Run it by hand" in
+  [hub-nightly-cookbook.md](hub-nightly-cookbook.md).
+- **On your machine, to check against your PR's own Hub.** Check out the Hub PR's commit next to this repo and start the
+  Hub image for that PR. Commands: "Reproducing locally" in
+  [maintainers/hub-pr-check-reference.md](maintainers/hub-pr-check-reference.md). It needs access to the container registry.
+
+Re-running the PR check does not test your generator PR: it runs the generator's `main`.
+
+**When to merge it** depends on what it contains:
 
 - **It does not name the new endpoint** (for example a feature flag in `docker/docker-compose.hub.yml`): merge it first. The
   check is green from the first push and the nightly never fails.
