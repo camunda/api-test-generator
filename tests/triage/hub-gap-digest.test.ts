@@ -1,9 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import {
+  type ApiIssue,
   buildDigest,
+  collectGapIssues,
+  type DigestDeps,
+  type GapIssue,
   type Item,
   parseHubPr,
   postDigest,
+  resolveItems,
+  runDigest,
 } from '../../scripts/triage/hub-gap-digest.ts';
 
 const now = new Date('2026-10-10T07:00:00Z');
@@ -100,6 +106,292 @@ describe('postDigest', () => {
     await expect(
       postDigest('hello', 'tok', '#chan', async () => ({ ok: false, error: 'not_in_channel' })),
     ).rejects.toThrow('Slack post failed: not_in_channel');
+  });
+});
+
+// Regression: when every camunda-hub lookup failed (broken token, API outage), the old script skipped
+// each issue with a warning and printed "Nothing overdue", so the run stayed green over a read it
+// never made. resolveItems must report those failures so main can fail the run.
+describe('resolveItems', () => {
+  const gap = (over: Partial<GapIssue>): GapIssue => ({
+    number: 1,
+    url: 'https://github.com/camunda/api-test-generator/issues/1',
+    title: '[hub-pr-check] Generator gap on camunda-hub#100',
+    createdAt: '2026-10-05T07:00:00Z',
+    assignee: 'alice',
+    ...over,
+  });
+
+  it('reports every issue as failed when all lookups fail, instead of returning nothing silently', async () => {
+    const issues = [gap({ number: 1 }), gap({ number: 2, title: 'x camunda-hub#200' })];
+    const r = await resolveItems(issues, async () => {
+      throw new Error('HTTP 401');
+    });
+    expect(r.items).toHaveLength(0);
+    expect(r.failed).toHaveLength(2);
+    expect(r.failed[0]).toContain('camunda-hub#100');
+    expect(r.failed[0]).toContain('HTTP 401');
+  });
+
+  it('keeps the readable PRs and still reports the unreadable one', async () => {
+    const issues = [
+      gap({ number: 1 }),
+      gap({ number: 2, title: 'Generator gap on camunda-hub#200' }),
+    ];
+    const r = await resolveItems(issues, async (pr) => {
+      if (pr === 200) throw new Error('HTTP 503');
+      return { state: 'merged', mergedAt: '2026-10-07T07:00:00Z' };
+    });
+    expect(r.items.map((i) => i.hubPr)).toEqual([100]);
+    expect(r.failed).toEqual([expect.stringContaining('camunda-hub#200')]);
+  });
+
+  it('reports an issue whose title names no camunda-hub PR, rather than dropping it', async () => {
+    const r = await resolveItems(
+      [gap({ number: 7, title: 'Generator gap, no PR named' })],
+      async () => {
+        throw new Error('should not be called');
+      },
+    );
+    expect(r.items).toHaveLength(0);
+    expect(r.failed).toEqual(['api-test-generator#7: no camunda-hub PR number in its title']);
+  });
+
+  it('reports nothing when every lookup succeeds', async () => {
+    const r = await resolveItems([gap({})], async () => ({ state: 'open', mergedAt: '' }));
+    expect(r.failed).toEqual([]);
+    expect(r.items[0]?.hubState).toBe('open');
+  });
+});
+
+// Five full pages prove only that there are at least 500 issues, not that any was left unread, so the
+// page after the cap is probed. Reporting truncation on exactly 500 would fail every daily run.
+describe('collectGapIssues', () => {
+  const apiIssue = (number: number, over: Partial<ApiIssue> = {}): ApiIssue => ({
+    number,
+    html_url: `https://github.com/camunda/api-test-generator/issues/${number}`,
+    title: `Generator gap on camunda-hub#${number}`,
+    created_at: '2026-10-05T07:00:00Z',
+    assignee: null,
+    ...over,
+  });
+  // `total` issues, served 100 per page, numbered from 1.
+  const pagesOf =
+    (total: number) =>
+    async (page: number): Promise<ApiIssue[]> => {
+      const from = (page - 1) * 100 + 1;
+      const to = Math.min(page * 100, total);
+      return from > to ? [] : Array.from({ length: to - from + 1 }, (_, k) => apiIssue(from + k));
+    };
+
+  it('stops at a short page without reading further', async () => {
+    const asked: number[] = [];
+    const r = await collectGapIssues(async (page) => {
+      asked.push(page);
+      return pagesOf(150)(page);
+    });
+    expect(r.issues).toHaveLength(150);
+    expect(r.truncated).toBe(false);
+    expect(asked).toEqual([1, 2]);
+  });
+
+  it('is not truncated when there are exactly 500 issues', async () => {
+    const r = await collectGapIssues(pagesOf(500));
+    expect(r.issues).toHaveLength(500);
+    expect(r.truncated).toBe(false);
+  });
+
+  it('is truncated when an issue exists past the 500th', async () => {
+    const r = await collectGapIssues(pagesOf(501));
+    expect(r.issues).toHaveLength(500);
+    expect(r.truncated).toBe(true);
+  });
+
+  it('is not truncated when the page past the cap holds only pull requests', async () => {
+    const r = await collectGapIssues(async (page) =>
+      page === 6 ? [apiIssue(900, { pull_request: {} })] : pagesOf(500)(page),
+    );
+    expect(r.truncated).toBe(false);
+  });
+
+  // The endpoint returns pull requests too, so a full page past the cap can hold no issue at all.
+  const fullOfPrs = (): ApiIssue[] =>
+    Array.from({ length: 100 }, (_, k) => apiIssue(5000 + k, { pull_request: {} }));
+
+  it('is truncated when an issue sits behind a full page of pull requests past the cap', async () => {
+    const r = await collectGapIssues(async (page) => {
+      if (page === 6) return fullOfPrs();
+      if (page === 7) return [apiIssue(901)];
+      return pagesOf(500)(page);
+    });
+    expect(r.issues).toHaveLength(500);
+    expect(r.truncated).toBe(true);
+  });
+
+  it('is complete when full pages of pull requests past the cap end in a short page', async () => {
+    const r = await collectGapIssues(async (page) => {
+      if (page === 6) return fullOfPrs();
+      if (page === 7) return [apiIssue(901, { pull_request: {} })];
+      return pagesOf(500)(page);
+    });
+    expect(r.truncated).toBe(false);
+  });
+
+  it('is truncated when it cannot show completeness within the probe limit', async () => {
+    const r = await collectGapIssues(async (page) => (page > 5 ? fullOfPrs() : pagesOf(500)(page)));
+    expect(r.truncated).toBe(true);
+  });
+
+  it('leaves pull requests out of the issues it returns', async () => {
+    const r = await collectGapIssues(async () => [apiIssue(1), apiIssue(2, { pull_request: {} })]);
+    expect(r.issues.map((i) => i.number)).toEqual([1]);
+  });
+
+  it('reads the assignee login, or an empty string when unassigned', async () => {
+    const r = await collectGapIssues(async () => [
+      apiIssue(1, { assignee: { login: 'alice' } }),
+      apiIssue(2),
+    ]);
+    expect(r.issues.map((i) => i.assignee)).toEqual(['alice', '']);
+  });
+});
+
+// The run-level contract: whatever could be read is still posted and closed, and the run then fails
+// when any part of the read was incomplete. These drive runDigest with fakes for every read and write,
+// so they fail if the wiring ever stops turning a problem into a rejection.
+describe('runDigest', () => {
+  const gapIssue = (number: number, hubPr: number): GapIssue => ({
+    number,
+    url: `https://github.com/camunda/api-test-generator/issues/${number}`,
+    title: `[hub-pr-check] Generator gap on camunda-hub#${hubPr}`,
+    createdAt: '2026-10-05T07:00:00Z',
+    assignee: 'alice',
+  });
+
+  const mergedPr = { state: 'merged' as const, mergedAt: '2026-10-07T07:00:00Z' };
+  const closedPr = { state: 'closed' as const, mergedAt: '' };
+
+  function harness(over: Partial<DigestDeps> = {}) {
+    const posted: string[] = [];
+    const closed: number[] = [];
+    const errors: string[] = [];
+    const deps: DigestDeps = {
+      dryRun: false,
+      slackToken: 'tok',
+      listIssues: async () => ({ issues: [gapIssue(1, 100)], truncated: false }),
+      lookupPr: async () => mergedPr,
+      closeIssue: async (i) => {
+        closed.push(i.number);
+      },
+      post: async (text) => {
+        posted.push(text);
+      },
+      log: () => {},
+      error: (line) => {
+        errors.push(line);
+      },
+      now,
+      ...over,
+    };
+    return { deps, posted, closed, errors };
+  }
+
+  it('posts the overdue digest and resolves when every read succeeded', async () => {
+    const h = harness();
+    await expect(runDigest(h.deps)).resolves.toBeUndefined();
+    expect(h.posted).toHaveLength(1);
+    expect(h.errors).toEqual([]);
+  });
+
+  it('stays silent and resolves when nothing is tracked', async () => {
+    const h = harness({ listIssues: async () => ({ issues: [], truncated: false }) });
+    await expect(runDigest(h.deps)).resolves.toBeUndefined();
+    expect(h.posted).toEqual([]);
+  });
+
+  it('fails when every lookup fails, instead of staying green over a read it never made', async () => {
+    const h = harness({
+      lookupPr: async () => {
+        throw new Error('HTTP 401');
+      },
+    });
+    await expect(runDigest(h.deps)).rejects.toThrow('Digest incomplete: 1 problem(s)');
+    expect(h.errors).toEqual([expect.stringContaining('HTTP 401')]);
+    expect(h.posted).toEqual([]);
+  });
+
+  it('still posts and closes what it could read, then fails for the one it could not', async () => {
+    const h = harness({
+      listIssues: async () => ({
+        issues: [gapIssue(1, 100), gapIssue(2, 200), gapIssue(3, 300)],
+        truncated: false,
+      }),
+      lookupPr: async (pr) => {
+        if (pr === 200) return closedPr;
+        if (pr === 300) throw new Error('HTTP 503');
+        return mergedPr;
+      },
+    });
+    await expect(runDigest(h.deps)).rejects.toThrow('Digest incomplete');
+    expect(h.posted).toHaveLength(1);
+    expect(h.posted[0]).toContain('camunda-hub#100');
+    expect(h.closed).toEqual([2]);
+    expect(h.errors).toEqual([expect.stringContaining('camunda-hub#300')]);
+  });
+
+  it('fails when the issue list was cut off by the page cap', async () => {
+    const h = harness({ listIssues: async () => ({ issues: [], truncated: true }) });
+    await expect(runDigest(h.deps)).rejects.toThrow('Digest incomplete');
+    expect(h.errors).toEqual([expect.stringContaining('the rest were not read')]);
+  });
+
+  it('fails when overdue PRs exist but there is no Slack token, and posts nothing', async () => {
+    const h = harness({ slackToken: '' });
+    await expect(runDigest(h.deps)).rejects.toThrow('Digest incomplete');
+    expect(h.posted).toEqual([]);
+    expect(h.errors).toEqual([expect.stringContaining('SLACK_TOKEN is empty')]);
+  });
+
+  it('does not need a Slack token when nothing is overdue', async () => {
+    const h = harness({ slackToken: '', lookupPr: async () => ({ state: 'open', mergedAt: '' }) });
+    await expect(runDigest(h.deps)).resolves.toBeUndefined();
+  });
+
+  it('fails on a title naming no camunda-hub PR', async () => {
+    const h = harness({
+      listIssues: async () => ({
+        issues: [{ ...gapIssue(9, 1), title: 'Generator gap, no PR named' }],
+        truncated: false,
+      }),
+    });
+    await expect(runDigest(h.deps)).rejects.toThrow('Digest incomplete');
+  });
+
+  it('on a dry run posts and closes nothing, but still fails on a partial read', async () => {
+    const h = harness({
+      dryRun: true,
+      listIssues: async () => ({
+        issues: [gapIssue(1, 100), gapIssue(2, 200), gapIssue(3, 300)],
+        truncated: false,
+      }),
+      lookupPr: async (pr) => {
+        if (pr === 200) return closedPr;
+        if (pr === 300) throw new Error('HTTP 503');
+        return mergedPr;
+      },
+    });
+    await expect(runDigest(h.deps)).rejects.toThrow('Digest incomplete');
+    expect(h.posted).toEqual([]);
+    expect(h.closed).toEqual([]);
+  });
+
+  it('propagates a rejected Slack post', async () => {
+    const h = harness({
+      post: async () => {
+        throw new Error('Slack post failed: not_in_channel');
+      },
+    });
+    await expect(runDigest(h.deps)).rejects.toThrow('Slack post failed: not_in_channel');
   });
 });
 
