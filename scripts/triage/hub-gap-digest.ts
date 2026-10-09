@@ -206,63 +206,89 @@ export async function resolveItems(
   return { items, failed };
 }
 
-async function main(): Promise<void> {
-  const repo = env('GITHUB_REPOSITORY') || 'camunda/api-test-generator';
-  const dryRun = env('DRY_RUN') === 'true';
-  const ghToken = env('GITHUB_TOKEN');
-  const hubToken = env('HUB_TOKEN');
-  if (!ghToken || !hubToken) throw new Error('GITHUB_TOKEN and HUB_TOKEN are required');
+/** Everything `runDigest` reads or writes, so a test can drive the whole run without the network. */
+export interface DigestDeps {
+  dryRun: boolean;
+  /** Empty when the Slack token was not available. */
+  slackToken: string;
+  listIssues: () => Promise<{ issues: GapIssue[]; truncated: boolean }>;
+  lookupPr: (pr: number) => Promise<{ state: HubPrState; mergedAt: string }>;
+  closeIssue: (item: Item) => Promise<void>;
+  post: (text: string, token: string) => Promise<void>;
+  log: (line: string) => void;
+  error: (line: string) => void;
+  now: Date;
+}
 
-  // Every problem is collected and reported at the end. The run still posts and closes what it
-  // could read, then fails, so a partial read is never mistaken for a clean one.
+/** Reads the tracked issues, closes the ones whose PR was closed unmerged, posts the overdue digest,
+ * then throws if any part of the read did not complete. Every problem is collected and reported at the
+ * end: the run still posts and closes what it could read, so a partial read is never mistaken for a
+ * clean one and never costs the readable part its alert. */
+export async function runDigest(deps: DigestDeps): Promise<void> {
   const problems: string[] = [];
-  const { issues, truncated } = await openGapIssues(repo, ghToken);
+  const { issues, truncated } = await deps.listIssues();
   if (truncated) {
     problems.push(`more than ${MAX_PAGES * 100} open generator-gap issues; the rest were not read`);
   }
-  const { items, failed } = await resolveItems(issues, (pr) => hubPrState(pr, hubToken));
+  const { items, failed } = await resolveItems(issues, deps.lookupPr);
   problems.push(...failed);
 
-  const digest = buildDigest(items, new Date());
+  const digest = buildDigest(items, deps.now);
 
   for (const i of digest.toClose) {
-    console.log(`camunda-hub#${i.hubPr} closed without merging: closing #${i.number}`);
-    if (dryRun) continue;
-    await api(`https://api.github.com/repos/${repo}/issues/${i.number}/comments`, ghToken, {
-      method: 'POST',
-      body: JSON.stringify({
-        body: `camunda-hub#${i.hubPr} was closed without merging, so this generator gap will not land on Hub main. Closing.`,
-      }),
-    });
-    await api(`https://api.github.com/repos/${repo}/issues/${i.number}`, ghToken, {
-      method: 'PATCH',
-      body: JSON.stringify({ state: 'closed', state_reason: 'not_planned' }),
-    });
+    deps.log(`camunda-hub#${i.hubPr} closed without merging: closing #${i.number}`);
+    if (!deps.dryRun) await deps.closeIssue(i);
   }
 
   if (digest.text === '') {
-    console.log('Nothing overdue; staying silent.');
+    deps.log('Nothing overdue; staying silent.');
   } else {
-    console.log(digest.text);
-    const slackToken = env('SLACK_TOKEN');
-    if (dryRun) {
-      console.log('Dry run: not posting.');
-    } else if (!slackToken) {
+    deps.log(digest.text);
+    if (deps.dryRun) {
+      deps.log('Dry run: not posting.');
+    } else if (!deps.slackToken) {
       problems.push('overdue PRs found but SLACK_TOKEN is empty, so the digest was not posted');
     } else {
-      await postDigest(
-        digest.text,
-        slackToken,
-        env('SLACK_CHANNEL') || '#camunda-hub-pr-e2e-results',
-      );
+      await deps.post(digest.text, deps.slackToken);
     }
   }
 
   // A dry run still fails on problems: it is how a manual check shows a partial read.
   if (problems.length > 0) {
-    for (const p of problems) console.error(`::error title=Digest incomplete::${p}`);
+    for (const p of problems) deps.error(`::error title=Digest incomplete::${p}`);
     throw new Error(`Digest incomplete: ${problems.length} problem(s), see the errors above`);
   }
+}
+
+async function main(): Promise<void> {
+  const repo = env('GITHUB_REPOSITORY') || 'camunda/api-test-generator';
+  const ghToken = env('GITHUB_TOKEN');
+  const hubToken = env('HUB_TOKEN');
+  if (!ghToken || !hubToken) throw new Error('GITHUB_TOKEN and HUB_TOKEN are required');
+
+  await runDigest({
+    dryRun: env('DRY_RUN') === 'true',
+    slackToken: env('SLACK_TOKEN'),
+    listIssues: () => openGapIssues(repo, ghToken),
+    lookupPr: (pr) => hubPrState(pr, hubToken),
+    closeIssue: async (i) => {
+      await api(`https://api.github.com/repos/${repo}/issues/${i.number}/comments`, ghToken, {
+        method: 'POST',
+        body: JSON.stringify({
+          body: `camunda-hub#${i.hubPr} was closed without merging, so this generator gap will not land on Hub main. Closing.`,
+        }),
+      });
+      await api(`https://api.github.com/repos/${repo}/issues/${i.number}`, ghToken, {
+        method: 'PATCH',
+        body: JSON.stringify({ state: 'closed', state_reason: 'not_planned' }),
+      });
+    },
+    post: (text, token) =>
+      postDigest(text, token, env('SLACK_CHANNEL') || '#camunda-hub-pr-e2e-results'),
+    log: (line) => console.log(line),
+    error: (line) => console.error(line),
+    now: new Date(),
+  });
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) await main();
