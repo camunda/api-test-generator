@@ -16,6 +16,11 @@ the generator and pipeline"); this page lists what has to change in code before 
 | `scripts/triage/hub-triage-format-slack.sh` | `def test_automation_medic`. Used by the nightly triage digest: a generator fix PR, a suppress PR, or a failure the triage could not classify |
 | `.github/workflows/hub-pr-check.yml` (the "3 times today" message) | The text names `test-automation-medic`; change the name with the ping |
 
+**The generator-gap alert ("api-test-generator not yet handling a new/changed endpoint")** should ping `hub-medic`. The PR author
+acts first: the `Generator gap on camunda-hub#N` issue is assigned to them. `hub-medic` is the backup and the visibility. If
+this turns out to be noisy, ping only when the gap is still open after the PR merges (the daily gap digest already lists
+those). An engine change is an escalation to `#ask-qa`, not a reason to page `test-automation-medic` first.
+
 **Watch for.**
 - Some alerts already ping both groups (startup failure, high-confidence product failure). After the switch, drop the
   duplicate so `hub-medic` is pinged once.
