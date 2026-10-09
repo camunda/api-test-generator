@@ -161,7 +161,7 @@ in api-test-generator against any branch.
   `Generator gap` issue and a comment on the PR. The repo-wide view is the weekly report:
   [hub-response-coverage-report.md](hub-response-coverage-report.md).
 - *Red but "not a Hub bug":* the check is informational, not required, while reliability proves out.
-- *Slack edited instead of a new message:* the PR failed the same way again, so its message was updated. Details: "Why a Slack message is sometimes edited instead of posted again" in [maintainers/hub-pr-check-reference.md](maintainers/hub-pr-check-reference.md).
+- *Slack edited instead of a new message:* the PR failed the same way again (same failing tests), so its message was updated and nobody was pinged again. A new message is posted only when the failure changes.
 - *The classifier said `unknown`:* it is told to prefer that over guessing `product`, because
   `product` at high confidence pages hub-medic.
 
@@ -196,5 +196,5 @@ Terms used in this page and in the nightly guide.
 - **Ontology:** the config files in `configs/camunda-hub/ontology/` that tell the generator how each resource is created, read, deleted and linked.
 - **Live check:** the `hub-pr-live-check` workflow, which runs the generated suite against a live Hub for pull requests to the generator repo itself. It skips pull requests from the automation account (the AI agents and the re-enable and spec-bump scripts); for those, a person reads the diff and runs the `hub-ondemand-test` workflow on the branch.
 - **Invariant tests:** tests in the generator repo that check the generated output against one pinned camunda-hub spec.
-- **Fingerprint:** a short label for exactly what failed, used so the same failure does not post twice (see "Who gets told what" in [maintainers/hub-pr-check-reference.md](maintainers/hub-pr-check-reference.md)).
+- **Fingerprint:** a short label for exactly what failed, the failing tests plus the endpoints with no test. The same fingerprint edits one Slack message instead of posting a new one.
 - **Evidence:** a failing test or an untested endpoint. "No evidence" means the run left no readable report.
