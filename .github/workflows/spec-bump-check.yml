@@ -539,6 +539,7 @@ jobs:
           UNMAPPED_LIST="${UNMAPPED:-}" \
           LINK="$link" \
           COOKBOOK_URL="$COOKBOOK_URL" \
+          HUB_MEDIC='<!subteam^S014VK4482H|hub-medic>' \
           node -e '
             const e = process.env;
             // UNMAPPED is already ", "-joined by the python step that produces it
@@ -563,7 +564,7 @@ jobs:
               : hasUnmapped
               ? `:alert2: *camunda-hub coverage regression* vs latest \`${e.LATEST}\` (no operationId churn):`
               : `:alert2: *camunda-hub spec pin is behind* latest \`${e.LATEST}\` (no operationId churn, no coverage regression):`;
-            const text = headline + unmappedLine + `\n${e.LINK}\n<${e.COOKBOOK_URL}|📖 What this alert means>`;
+            const text = headline + unmappedLine + `\n${e.LINK}\n<${e.COOKBOOK_URL}|📖 What this alert means>\n:rotating_light: ${e.HUB_MEDIC}`;
             require("fs").appendFileSync(process.env.GITHUB_OUTPUT, `text_json=${JSON.stringify(text)}\n`);
           '
 

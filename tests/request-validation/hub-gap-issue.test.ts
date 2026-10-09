@@ -438,6 +438,23 @@ const baseSummary = (over: Record<string, unknown> = {}) => ({
 });
 
 describe('weekly Slack message', () => {
+  const HUB_MEDIC = '<!subteam^S014VK4482H|hub-medic>';
+
+  it('pings hub-medic when some endpoint is missing a test', () => {
+    expect(slackText(baseSummary({ opsMissingResponseTest: 2 }), null)).toContain(HUB_MEDIC);
+    expect(
+      slackText(baseSummary({ opsMissingResponseTest: 0, zeroTestOperations: ['x'] }), null),
+    ).toContain(HUB_MEDIC);
+  });
+
+  it('does not ping anyone when nothing is missing', () => {
+    const text = slackText(
+      baseSummary({ opsMissingResponseTest: 0, zeroTestOperations: [] }),
+      null,
+    );
+    expect(text).not.toContain('hub-medic');
+  });
+
   it('has a positive-tests section and a negative-tests section, each holding its own lines', () => {
     const text = slackText(baseSummary(), null);
     const at = (needle: string) => text.indexOf(needle);

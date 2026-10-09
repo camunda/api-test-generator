@@ -13,12 +13,9 @@ A set of automatic jobs then post what they found. Most nights the posts are gre
 **A normal night has 0 failed tests.** Known Hub bugs do not count as failures: their tests are either skipped or run
 without the one assertion Hub cannot meet yet. So any number above 0 is news.
 
-> Which alerts ping whom today, and the open change to `hub-medic`: see "Who owns what" in [how-it-works.md](how-it-works.md).
-
-**Who acts.** The Hub team (the **generator owner**) acts on the spec-bump, re-enable and weekly-report posts. **Nobody is
-pinged for these three**: they are plain posts in the channel, and the PRs and issues they open have no assignee or
-reviewer. So the person on call as `hub-medic` reads the channel each morning and owns them: review the PR, or decide
-what to do with the post. A PR nobody picks up just sits there.
+**Who acts.** The Hub team (the **generator owner**) acts on the spec-bump, re-enable and weekly-report posts. Each of them
+pings `hub-medic`, so the person on call reviews the PR it opened, or decides what to do with the post. See "Who gets
+pinged" in [how-it-works.md](how-it-works.md).
 
 **What you will see, in the order it happens** (all times UTC; examples of each message are in the sections below):
 
@@ -128,8 +125,7 @@ and link means, and what to do, is in the table under "What to do with a failure
 labels `nightly-api-fix`, `auto-generated` and `hub`.
 
 **Pings.** `hub-medic` is pinged for a newly filed Hub issue, a fix or suppress PR that needs review, and a failure the triage
-could not classify. `test-automation-medic` is pinged only for shared-pipeline faults the Hub team cannot fix (Vault, the Slack bot).
-Which pings have not been switched yet: see "Who owns what" in [how-it-works.md](how-it-works.md).
+could not classify. `test-automation-medic` is not pinged by the digest.
 
 Three warnings replace the normal digest. Treat each as "do not trust a green night":
 
@@ -161,7 +157,7 @@ invariant tests.
 
 ## The re-enable check (04:00)
 
-Nobody is pinged for this post, and the draft PR it opens has no reviewer. It is only a message in the channel at about 04:00 UTC, and it is silent on most days. Each message ends with an **Open the workflow run** link.
+This post pings `hub-medic`. It appears at about 04:00 UTC and is silent on most days. The draft PR it opens requests a review from the Hub backend team when it is marked ready. Each message ends with an **Open the workflow run** link.
 
 Skipped tests point to a Hub bug. This job watches those bugs. When one closes, it tries to bring the tests back.
 
