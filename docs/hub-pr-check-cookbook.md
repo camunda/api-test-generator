@@ -2,7 +2,7 @@
 
 > **Goal:** if the `api-test-generator/hub-suite` check on your camunda-hub PR is red, or a Slack alert names
 > your PR, you can tell in a few minutes whether it is your problem and what to do. "Start here" assumes
-> you know Hub, not how the generator works; its few terms (generator gap, classifier, fingerprint) are explained in "Words used" at the end. The check is
+> you know Hub, not how the generator works; its few terms (generator gap, classifier, fingerprint) are explained in "Words used" in [how-it-works.md](how-it-works.md#words-used). The check is
 > **informational, not required**: a red result does not block merging.
 
 **Looking for something else?** This guide is only about the check on a single camunda-hub PR. For the nightly run, the spec-bump and re-enable alerts and the weekly report, see [how-it-works.md](how-it-works.md).
@@ -37,10 +37,10 @@ a Slack alert, and a pass says nothing.
 
 **Does it open a fix PR?** No. The check only reads and reports, and opens issues: `Generator gap on camunda-hub#N` (assigned
 to you when your spec change caused it) and `[hub-pr-check] Coverage gap on camunda-hub#N` when an endpoint has no generated
-test. The fix is a generator PR, opened by a person (see [Adding or changing an endpoint in Hub](#adding-or-changing-an-endpoint-in-hub-do-you-need-a-generator-pr)) or, later, by the
-nightly triage agent for small, safe gaps.
+test. The fix is a generator PR, opened by a person (see [Adding or changing an endpoint in Hub](#adding-or-changing-an-endpoint-in-hub-do-you-need-a-generator-pr)) or by the
+nightly triage agent when the fix is small and safe.
 
-**How long it takes.** The check starts after Hub's image for your PR is built, and a run takes about 5 minutes. The status and the Slack alert appear when it finishes, not when it starts. The run, its result and its reports are on the [hub-pr-check](https://github.com/camunda/api-test-generator/actions/workflows/hub-pr-check.yml) page.
+**How long it takes.** The check starts after Hub's image for your PR is built, and a run usually takes about 5 minutes. The status and the Slack alert appear when it finishes, not when it starts. The run, its result and its reports are on the [hub-pr-check](https://github.com/camunda/api-test-generator/actions/workflows/hub-pr-check.yml) page.
 
 **If it is red, read the verdict line in the Slack alert (or the run summary). It says which case you are in:**
 
@@ -51,8 +51,8 @@ nightly triage agent for small, safe gaps.
 | "Hub PR image did not start" | Possibly yours: Hub did not become ready | Open the run, find the step "Wait for Hub to be ready", read the startup error |
 | "api-test-generator not yet handling a new/changed endpoint" | The generator's, not a Hub bug | **You act first.** When your spec change caused it, an issue `Generator gap on camunda-hub#N` is opened, and assigned to you if GitHub allows it. `hub-medic` is the backup. Ask in `#ask-qa` (tag `@test-automation-medic`) for help |
 | "Likely a real regression from this PR" | Probably yours | Read the change the alert points to. The tests are right and Hub now answers differently |
-| "Could not confirm" | Unknown | Open the failing test in the run's report (see "Finding the cause" below) |
-| Every test of **one new endpoint** fails with 404, and you added it behind a feature flag | Nobody's bug: the test Hub does not switch your flag on | Add the flag to `docker/docker-compose.hub.yml` **in the api-test-generator repo** (a PR there, then re-run the check), or suppress the endpoint with a reason and an issue. Details under "Common failure patterns" |
+| "Could not confirm" | Unknown | Open the failing test in the run's report (see [Finding the cause of a red check](#finding-the-cause-of-a-red-check)) |
+| Every test of **one new endpoint** fails with 404, and you added it behind a feature flag | Nobody's bug: the test Hub is not started with your flag on | Add the flag to `docker/docker-compose.hub.yml` **in the api-test-generator repo** (a PR there, then re-run the check), or suppress the endpoint with a reason and an issue. Details under "Common failure patterns" |
 
 Still stuck? Ask in `#ask-qa` (tag `@test-automation-medic`) and include the run link. Every alert carries the links you need.
 
@@ -138,8 +138,8 @@ If a test cannot pass yet, suppress it so CI is not blocked, and track it so it 
 
 ## Re-run without a new push
 
-Run the workflow `trigger-api-test-generator.yml` in camunda-hub by hand (Actions, then Run workflow) with the
-PR's `pr_number` and `source_sha`. This bypasses the path gate and the draft skip. Or run `hub-ondemand-test.yml`
+Run the workflow [`trigger-api-test-generator.yml`](https://github.com/camunda/camunda-hub/actions/workflows/trigger-api-test-generator.yml) in camunda-hub by hand (Actions, then Run workflow) with the
+PR's `pr_number` and `source_sha` (the PR's head commit). This bypasses the path gate and the draft skip. Or run `hub-ondemand-test.yml`
 in api-test-generator against any branch.
 
 ## Reproducing locally
@@ -160,8 +160,8 @@ Do not call `npx playwright` directly: it skips the `POS_FIXTURE_*` settings tha
 - **A new endpoint behind a feature flag fails with 404s.** The test Hub starts with a fixed list of flags, set in this repo's
   `docker/docker-compose.hub.yml`, not by your PR. If your flag is not in it, the endpoint answers 404 and all its tests
   fail (the nightly too). It is not a Hub bug. Add the flag there (the variable name must match how Hub reads the
-  property), or suppress the endpoint with a reason and a tracking issue. The alert may call it a generator gap or a
-  product failure: check for 404 on every test of that endpoint first.
+  property, for example `FEATURE_WORKSPACES_ENABLED: "true"`), or suppress the endpoint with a reason and a tracking issue. The alert may call it a generator gap or a
+  regression: check for 404 on every test of that endpoint first.
 - **New endpoint, nothing generated.** Operation is in `unmappedOperations`. The ontology and
   scenario templates do not cover it yet. Not a Hub bug; the coverage-gap issue tracks it.
 - **Changed response shape.** Generated assertions expect the old schema. Generator gap.
@@ -192,17 +192,3 @@ Do not call `npx playwright` directly: it skips the `POS_FIXTURE_*` settings tha
   comes back. The PR comment is marked resolved on a green run too.
 - **Not the same as the weekly report.** Its index and area issues are repo-wide, not tied to a PR, and **not assigned**: the
   Hub team picks them up (see [hub-response-coverage-report.md](hub-response-coverage-report.md)).
-
-## Words used
-
-Terms used in this page and in the nightly guide.
-
-- **Generated suite:** the tests, written by the generator from the spec. Nobody edits them by hand.
-- **Generator gap:** the generator has no test, or a wrong test, for an endpoint. Not a Hub bug.
-- **Coverage gap:** an endpoint with no generated test at all (also called an *unmapped operation*).
-- **Medic:** a Slack group on call for a test area (`hub-medic` is the on-call group; which alerts ping whom today is in the status note of the [nightly guide](hub-nightly-cookbook.md)).
-- **Classifier:** an automated step that reads the failure and picks one of the verdicts above. It is an AI agent and can be wrong; it is told to answer "unknown" rather than guess.
-- **Ontology:** the config files in `configs/camunda-hub/ontology/` that tell the generator how each resource is created, read, deleted and linked.
-- **Live check:** the `hub-pr-live-check` workflow, which runs the generated suite against a live Hub for pull requests to the generator repo itself (see "Testing it" above).
-- **Invariant tests:** tests in the generator repo that check the generated output against one pinned camunda-hub spec.
-- **Fingerprint:** a short label for exactly what failed, the failing tests plus the endpoints with no test. The same fingerprint edits one Slack message instead of posting a new one.

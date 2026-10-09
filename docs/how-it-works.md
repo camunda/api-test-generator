@@ -35,7 +35,7 @@ Three more posts show up only when needed: a **spec-bump alert** (Hub's API chan
 | You see | Do this |
 |---|---|
 | Red PR check, alert says "likely a real regression" | It is probably your change. Read what the alert points to |
-| Red PR check, alert says "generator not handling a new endpoint" | Not a Hub bug, but you act first: open the generator PR (see the PR check guide). Stuck? Ask in `#ask-qa` (tag `@test-automation-medic`) |
+| Red PR check, alert says "api-test-generator not yet handling a new/changed endpoint" | Not a Hub bug, but you act first: open the generator PR (see the PR check guide). Stuck? Ask in `#ask-qa` (tag `@test-automation-medic`) |
 | Red PR check, alert says "infrastructure failure" | Not yours. Open the failed step, find the outside cause, ask if unsure |
 | Nightly post shows failures | Open the triage thread: one line per failure says whose it is |
 | No nightly post in the morning | The run or the posting broke, not Hub. See "If a morning has no nightly post" in the nightly guide |
@@ -43,12 +43,12 @@ Three more posts show up only when needed: a **spec-bump alert** (Hub's API chan
 | Re-enable check | A Hub bug was fixed. Bring the test back, or decide on a bug closed as not planned |
 | A weekday post in `#camunda-hub-pr-e2e-results` listing generator gaps | A merged Hub PR left a generator gap. Open each issue and finish the generator PR |
 | Weekly report lists gaps | Read the "what to do" column. Some are Hub bugs, some are generator gaps |
-| A draft PR from the coverage-fix agent | Read its "In plain words" section first. Review it like any PR |
+| A draft PR from the coverage-fix agent | Read its "In plain words" section first. Review it like any PR, within a day: a PR with no activity for a day is closed unless it has the `do-not-close` label |
 | Not sure | Ask in `#ask-qa` (tag `@test-automation-medic`) and include the run link |
 
 ## Who owns what
 
-**After the handover the Hub team owns this project**: the alerts, the Hub settings, and the generator itself,
+**The Hub team owns this project**: the alerts, the Hub settings, and the generator itself,
 including changing it when a new kind of coverage needs it. The test automation enablement team does not
 carry on-call or maintenance duties for it.
 
@@ -59,16 +59,30 @@ The Hub team:
 - keeps the Hub settings in `configs/camunda-hub/`. Most coverage gaps are fixed there, and the coverage-fix agent handles many of them;
 - changes the generator when a gap needs new behaviour. The agent only reports those, and a person opens the change. The code is in `request-validation/`, `path-analyser/` and `materializer/`, and [AGENTS.md](../AGENTS.md) lists the rules a change must follow.
 
-Which alerts ping whom today: see the status note in the [nightly guide](hub-nightly-cookbook.md).
+**Pings are not switched yet.** Some generator alerts still go to `test-automation-medic` instead of `hub-medic`, and three
+posts ping nobody (the spec-bump alert, the re-enable check, the weekly report). The change is tracked in
+[#712](https://github.com/camunda/api-test-generator/issues/712). Until then, whoever is on call as `hub-medic` reads both Slack
+channels each morning: PR-check alerts and the gap digest are in `#camunda-hub-pr-e2e-results`, everything else is in
+`#camunda-hub-nightly-test-results`.
 
 **Questions or help:** ask in `#ask-qa` and tag `@test-automation-medic`. The enablement team answers there, but nothing here depends on a reply.
 
 ## Words used
 
-- **Generated suite:** the tests the generator writes. Nobody edits them by hand.
-- **Generator gap:** the generator has no test, or a wrong one, for something. Not a Hub bug.
+- **Generated suite:** the tests the generator writes from the spec. Nobody edits them by hand.
+- **Operation:** one API endpoint, as the spec names it (for example `getWorkspace`). The guides use "endpoint" and "operation" for the same thing.
+- **Generator gap:** the generator has no test, or a wrong one, for an endpoint. Not a Hub bug.
+- **Coverage gap / unmapped operation:** an endpoint with no generated test at all.
 - **Coverage:** how many of the API's answers (success, 403, 404, bad request...) have a test.
-- **Pin:** the exact version of Hub's API description the tests are built from.
-- **Medic:** a Slack group on call for a test area.
+- **Pin:** the camunda-hub commit whose API description the invariant tests are checked against. The spec-bump alert moves it.
+- **Invariant tests:** tests in this repo that check the generated output against the pinned spec. They guard the generator, not Hub.
+- **Skip:** a test left out on purpose because of a tracked Hub limitation, with an issue link. It can stay after the issue closes, when Hub will not fix it. A **suite-wide skip** is not tied to one endpoint.
+- **Partly checked:** the test runs, but one assertion (the error-body shape) is not made.
+- **Fix PR / suppress PR:** a draft PR the triage agent opens in this repo. A fix PR corrects a wrong generated test. A suppress PR switches a test off until a Hub bug is fixed; its branch is named `fix/nightly-triage-suppress-…`. Both carry the labels `nightly-api-fix`, `auto-generated` and `hub`.
+- **Medic:** a Slack group on call for a test area. `hub-medic` is the on-call group.
+- **Classifier:** the automated step that reads a failed PR check and picks a verdict. It is an AI agent and can be wrong; it is told to answer "unknown" rather than guess.
+- **Ontology:** the config files in `configs/camunda-hub/ontology/` that tell the generator how each resource is created, read, deleted and linked.
+- **Live check:** running the generated suite against a real Hub. `hub-pr-live-check` does it on PRs to this repo and `hub-ondemand-test` does it by hand.
+- **Fingerprint:** the failing tests plus the endpoints with no test. The same fingerprint edits one Slack message instead of posting a new one.
 
 Want to change how the generator works? See the [README](../README.md) and [AGENTS.md](../AGENTS.md).

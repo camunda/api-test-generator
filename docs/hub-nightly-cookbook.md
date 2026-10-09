@@ -1,7 +1,7 @@
 # Hub Nightly Channel Cookbook
 
 > **Goal:** read any message in `#camunda-hub-nightly-test-results` and know what it means, whether it is
-> yours to act on, and what to do. You need to know Hub, not how the generator works: the few steps that touch the generator are spelled out in "Run it by hand" below, and the big picture is in [how-it-works.md](how-it-works.md). Terms are explained in "Words used" at the end.
+> yours to act on, and what to do. You need to know Hub, not how the generator works: the few steps that touch the generator are spelled out in "Run it by hand" below, and the big picture is in [how-it-works.md](how-it-works.md). Terms are explained in "Words used" in how-it-works.md.
 > Messages about a single camunda-hub PR are in `#camunda-hub-pr-e2e-results` instead; see
 > [hub-pr-check-cookbook.md](hub-pr-check-cookbook.md).
 
@@ -13,9 +13,7 @@ A set of automatic jobs then post what they found. Most nights the posts are gre
 **A normal night has 0 failed tests.** Known Hub bugs do not count as failures: their tests are either skipped or run
 without the one assertion Hub cannot meet yet. So any number above 0 is news.
 
-> **Status, 8 October 2026:** the handover to the Hub team is in progress. The Hub team already owns everything in this
-> guide and `hub-medic` is the on-call group. The alert pings have not been switched yet: some generator alerts still go
-> to `test-automation-medic`. The change is tracked in [camunda/api-test-generator#712](https://github.com/camunda/api-test-generator/issues/712).
+> Which alerts ping whom today, and the open change to `hub-medic`: see "Who owns what" in [how-it-works.md](how-it-works.md).
 
 **Who acts.** The Hub team (the **generator owner**) acts on the spec-bump, re-enable and weekly-report posts. **Nobody is
 pinged for these three**: they are plain posts in the channel, and the PRs and issues they open have no assignee or
@@ -131,7 +129,7 @@ labels `nightly-api-fix`, `auto-generated` and `hub`.
 
 **Pings.** `hub-medic` is pinged for a newly filed Hub issue, a fix or suppress PR that needs review, and a failure the triage
 could not classify. `test-automation-medic` is pinged only for shared-pipeline faults the Hub team cannot fix (Vault, the Slack bot).
-The status note at the top says which pings have not been switched yet.
+Which pings have not been switched yet: see "Who owns what" in [how-it-works.md](how-it-works.md).
 
 Three warnings replace the normal digest. Treat each as "do not trust a green night":
 
@@ -200,14 +198,3 @@ How to read the message, how to close a gap, and what the agent does and never d
 - Anything in this channel you cannot place: write in the channel.
 - Any question or help request, such as how the generator works or a Slack or Vault outage you cannot fix: ask in `#ask-qa` and tag `@test-automation-medic`.
 - Adding a generator PR next to a Hub change (labels, feature flags): see [Adding or changing an endpoint in Hub](hub-pr-check-cookbook.md#adding-or-changing-an-endpoint-in-hub-do-you-need-a-generator-pr).
-
-## Words used
-
-More terms (medic, ontology, fingerprint, invariant tests, live check) are in the glossary of [hub-pr-check-cookbook.md](hub-pr-check-cookbook.md).
-
-- **Operation:** one API endpoint, as the spec names it (for example `getWorkspace`). The guide says "endpoint" and "operation" for the same thing.
-- **Fix PR / suppress PR:** a draft PR the triage agent opens in this repo. A fix PR corrects a wrong generated test. A suppress PR switches a test off until a Hub bug is fixed. It carries the same labels as a fix PR; its branch is named `fix/nightly-triage-suppress-…`.
-- **Pin:** the camunda-hub commit the invariant tests are checked against.
-- **Skip:** a test left out on purpose because of a tracked Hub limitation, with an issue link. It can stay after the issue closes, when Hub will not fix it. A **suite-wide skip** is not tied to one endpoint.
-- **Partly checked:** the test runs, but one assertion (the error-body shape) is not made.
-- **Unmapped operation / coverage gap:** an endpoint with no generated test at all.

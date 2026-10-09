@@ -76,7 +76,7 @@ and the **missing bad-request tests**. Find the endpoint's row, then use the tab
 |---|---|---|
 | **success** | No success test for the endpoint | First check `configs/camunda-hub/positive-suppress.json`: if it is listed, read its `reason`: it says whether this is a Hub limitation (the fix is on the Hub side), a generator gap (for example the planner cannot source an ID), or an operation left out on purpose. Do not assume it is Hub's. If it is not listed, the generator could not chain the calls the endpoint needs (an ID it cannot create). See `unmappedOperations` in `generated/camunda-hub/playwright/coverage.json`, then teach the generator how to create that resource in `configs/camunda-hub/ontology/` (`entity-kinds.json`, `runtime-states.json`) or the fixtures |
 | **400**, **401**, **403**, **404** | A bad-request, no-auth, forbidden or not-found test is missing | Generated when the operation is eligible and not excluded. First check `excludeOperations` in `configs/camunda-hub/request-validation.json` (the entry always has a `reason`; a Hub issue is optional, and some exclusions such as `purgeFile` and `addMember` have only a reason). If it is not excluded, it is not eligible: **403** needs a request that reaches the authorization check, so a valid fixture-backed request body and path (`resourceFixtures` in the same file; the rule is `isAuthDenyEligible` in `request-validation/src/analysis/authDeny.ts`), and **404** needs an ID the generator can make up (`isNotFoundEligible` in `request-validation/src/analysis/notFoundFakeId.ts`). The fix is then fixture modelling or the eligibility rule, not an exclusion. The modes `authAbsentMode`, `authDenyMode` and `notFoundMode` in the same file set how Hub is expected to answer. A 404 test needs an ID it can make up, so an endpoint with no path key needs the not-found generator extended (`notFoundFakeId.ts` and the emitter that writes its tests). Do not add a test file by hand: generation deletes the output folder every time, and the report only counts generated files |
-| **409** | A documented conflict is not tested (only a 409 the spec documents is counted) | Needs a state first. In `configs/camunda-hub/conflict-replay.json`, use `replay` when repeating the same call is enough to conflict (a duplicate create), or `sequences` for setup calls followed by the call that should answer 409 (for example restoring a file whose project was deleted). List it under `untested` with an issue if it cannot be provoked. The weekly report reads the latest Hub `main` spec, but the invariant tests use the pinned one (`spec-pin.json`), and they fail an entry for a 409 the pinned spec does not document: if the 409 is new, bump the pin first (see the README) |
+| **409** | A documented conflict is not tested (only a 409 the spec documents is counted) | Needs a state first. In `configs/camunda-hub/conflict-replay.json`, use `replay` when repeating the same call is enough to conflict (a duplicate create), or `sequences` for setup calls followed by the call that should answer 409 (for example restoring a file whose project was deleted). List it under `untested` with an issue if it cannot be provoked. The weekly report reads the latest Hub `main` spec, but the invariant tests use the pinned one (`spec-pin.json`), and they fail an entry for a 409 the pinned spec does not document: if the 409 is new, bump the pin first (see [the README](../README.md#bumping-the-spec-pin)) |
 | **a bad-request kind** (for example `allof-conflict`, `union`, `missing-body`) | The endpoint has no test of that kind | Generated from the spec's schema. For the body-shape kinds the report can list a kind that cannot be built for that endpoint, so first generate (see below) and look for the endpoint in `generated/camunda-hub/request-validation/COVERAGE.md`. If the kind applies but is not generated, the fix is in the generator's code (`request-validation/src/analysis/`, and `request-validation/scripts/generate.ts` decides which kinds count as applicable), not in config. If it does not apply it is an over-count: there is no switch today to mark a kind not applicable, so say so in the issue and leave it open |
 | **Lifecycle tests** (in the weekly Slack message, not in an area issue) | A resource or link has no create, read, delete flow | Add it to `configs/camunda-hub/ontology/entity-kinds.json` or `edges.json` |
 
@@ -97,13 +97,13 @@ After the fix:
 3. Raise the matching number in `configs/camunda-hub/coverage-floors.json` in the same PR.
 4. If the fix needed a flag or a new resource, see [Adding or changing an endpoint in Hub](hub-pr-check-cookbook.md#adding-or-changing-an-endpoint-in-hub-do-you-need-a-generator-pr) for the labels.
 
-`AGENTS.md` has more on each config file, but it is written for AI agents and is long. If a step here is unclear, ask in
+`AGENTS.md` has more on each config file. It is long: read only the section for the file you are changing. If a step here is unclear, ask in
 `#ask-qa` (tag `@test-automation-medic`).
 
 ### Floors
 
 `coverage-floors.json` pins the numbers this report shows. The Hub invariant `response coverage does not regress`
-runs the same script and fails a PR if a number drops below its floor, or if an endpoint has no test at all
+(in the `hub invariants` CI job of this repo, on every PR) runs the same script and fails a PR if a number drops below its floor, or if an endpoint has no test at all
 and is not listed in `zeroTestOperations` with a reason. A floor only goes up. Never lower one to make CI pass; add the missing test.
 
 ## The coverage-fix agent
@@ -137,29 +137,23 @@ review"** that shows the check before and after. Read that section first.
 `fix/coverage-`, with the labels `nightly-api-fix`, `auto-generated` and `hub`. The body ends with
 "Found by the camunda-hub coverage-fix agent". The thread under the weekly Slack message lists the ones still open.
 
-**Who reviews them.** A person, always, like any other pull request. The native live Hub check (`hub-pr-live-check`)
-skips the agent's pull requests: it would run the agent's code with Hub access before anything had checked it. What
-happens instead depends on the kind of pull request.
+**Who reviews them.** A person, always. The usual live check (`hub-pr-live-check`) skips these pull requests on purpose: it
+would run the agent's code with Hub access before anything had checked it. What happens instead depends on the kind:
 
-- **Pull requests with constrained content** start by themselves. That is a 403/404 pull request (one fixture entry, the
-  floors, and the fixture block of the setup script) or a lifecycle pull request that changes only the floors and adds one
-  plain-data entry to `entity-kinds.json`. Once the `verify` job has checked them from GitHub, it pins the commit it checked
-  under a `hub-live-check/*` tag, starts `hub-ondemand-test` on that tag (not on the branch, which could move afterwards)
-  and comments the run link on the pull request. The run covers exactly that commit; a later push is not tested. Its result
-  is that run's status, not a check on the pull request. Read the diff and that run, and only then mark the pull request
-  ready. If the verify job fails, no live check starts.
-- **A lifecycle pull request that also edits the invariants test file** (code, not data) stays manual: read the diff, then
-  run `hub-ondemand-test` on the branch, and only then mark the pull request ready.
+- **A constrained pull request** (a 403/404 one that touches only a fixture entry, the floors and the fixture block of the
+  setup script, or a lifecycle one that touches only the floors and one plain-data entry in `entity-kinds.json`): once the
+  `verify` job has checked it, it starts `hub-ondemand-test` on that exact commit and comments the run link on the pull
+  request. Read the diff and that run, then mark the pull request ready. A later push is not tested.
+- **A lifecycle pull request that also edits the invariants test file** (code, not data): read the diff, run
+  `hub-ondemand-test` on the branch yourself ("Run it by hand" in [the nightly guide](hub-nightly-cookbook.md#run-it-by-hand)),
+  then mark it ready.
 
-A pull request with no activity for a day is closed by the daily stale-PR clean-up, like the nightly fix pull requests, unless it has the `do-not-close` label. So review it within a day, or add that label.
+A pull request with no activity for a day is closed by the daily stale-PR clean-up, like the nightly fix pull requests,
+unless it has the `do-not-close` label. So review it within a day, or add that label.
 
 **What it tells people.** After a real run, the `verify` job posts what the agent found, including the gaps that got no PR:
-one comment on the weekly tracking issue (the full record: each gap, what the agent did, its reason and proposal) and one
-reply in the weekly Slack message's thread (one line per gap, with links to the PRs). Nothing is posted for a dry run or
-for a run with no PR and no gap. The agent's text is untrusted: it is cleaned and cut before posting, and the PR links come
-from GitHub. The Slack reply needs the weekly report run to have saved its Slack message id (artifact
-`hub-coverage-slack-ts`); a report from before that existed gets only the issue comment, and the run says so in a warning.
-A failed post never fails the run.
+one comment on the weekly tracking issue (each gap, what the agent did and why) and one reply in the weekly Slack message's
+thread (one line per gap, with links to the PRs). Nothing is posted for a dry run, or for a run with no PR and no gap.
 
 **How it runs.** Two ways.
 
