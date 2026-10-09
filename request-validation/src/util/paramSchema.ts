@@ -75,6 +75,33 @@ export function buildValidValue(r: ResolvedParamSchema): string {
   return firstSatisfying([first, 'x', 'a', '1', 'a_1'], r) ?? first;
 }
 
+const END_NAME = /^(end|to|until|before)/i;
+const DAY_MS = 24 * 60 * 60 * 1000;
+const BASE_DATE_MS = Date.UTC(2025, 0, 1);
+
+/**
+ * Valid values for the `date` and `date-time` params of one location, one day apart and in range
+ * order: a start-like name (`startTime`, `from`) first, an end-like one (`endTime`, `to`) after it.
+ * A server that checks "endTime must be after startTime" rejects two equal placeholders, so each
+ * date param needs its own value. Declaration order breaks ties. A lone date param gets the same
+ * value `buildValidValue` gives it.
+ */
+export function orderedDateValues(params: ParameterModel[]): Map<string, string> {
+  const dates: { name: string; format: string; end: boolean }[] = [];
+  for (const p of params) {
+    const f = resolveParamSchema(p)?.format;
+    if (f === 'date-time' || f === 'date')
+      dates.push({ name: p.name, format: f, end: END_NAME.test(p.name) });
+  }
+  dates.sort((a, b) => Number(a.end) - Number(b.end)); // stable: declaration order within each group
+  const out = new Map<string, string>();
+  dates.forEach((d, i) => {
+    const iso = new Date(BASE_DATE_MS + i * DAY_MS).toISOString();
+    out.set(d.name, d.format === 'date' ? iso.slice(0, 10) : `${iso.slice(0, 19)}Z`);
+  });
+  return out;
+}
+
 /** The first candidate that meets the schema's length bounds and pattern, if any does. */
 function firstSatisfying(candidates: string[], r: ResolvedParamSchema): string | undefined {
   let re: RegExp | undefined;

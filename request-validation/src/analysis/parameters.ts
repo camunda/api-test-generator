@@ -1,6 +1,6 @@
 import type { OperationModel, ParameterModel, ValidationScenario } from '../model/types.js';
 import { INVALID_BY_FORMAT } from '../util/formatValues.js';
-import { buildValidValue, resolveParamSchema } from '../util/paramSchema.js';
+import { buildValidValue, orderedDateValues, resolveParamSchema } from '../util/paramSchema.js';
 import { makeId } from './common.js';
 
 interface Opts {
@@ -21,9 +21,11 @@ function collectQueryParams(op: OperationModel): ParameterModel[] {
  */
 function buildQueryParamMap(op: OperationModel): Record<string, string> {
   const q: Record<string, string> = {};
-  for (const p of collectQueryParams(op)) {
+  const query = collectQueryParams(op);
+  const dates = orderedDateValues(query);
+  for (const p of query) {
     const r = resolveParamSchema(p);
-    q[p.name] = r ? buildValidValue(r) : 'x';
+    q[p.name] = dates.get(p.name) ?? (r ? buildValidValue(r) : 'x');
   }
   return q;
 }
