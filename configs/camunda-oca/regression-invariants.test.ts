@@ -2951,6 +2951,56 @@ describeForThisConfig('bundled-spec invariants: 404 fake-ID emitter (#381 / #279
   });
 });
 
+describeForThisConfig('bundled-spec invariants: query params in param scenarios', () => {
+  it('no emitted scenario fills a typed or formatted query param with the generic token "x"', () => {
+    // A param scenario overwrites one query param with a bad value and fills the rest with
+    // placeholders. A placeholder `x` on a date-time, boolean or integer param is invalid, so the
+    // server rejects that param first and the test never reaches the one it names.
+    const dir = join(REPO_ROOT, 'generated', CONFIG_NAME, 'request-validation', 'unsecured');
+    if (!existsSync(dir)) {
+      throw new Error(
+        `Generated request-validation directory not found at ${dir}. ` +
+          `Run 'npm run generate:request-validation' (or 'npm run pipeline') first.`,
+      );
+    }
+    function isObject(v: unknown): v is Record<string, unknown> {
+      return typeof v === 'object' && v !== null && !Array.isArray(v);
+    }
+    const bundlePath = join(getSpecBundleDir(REPO_ROOT), 'rest-api.bundle.json');
+    const spec: unknown = JSON.parse(readFileSync(bundlePath, 'utf8'));
+    const paths = isObject(spec) && isObject(spec.paths) ? spec.paths : {};
+    // `path|param` for every query param whose schema is not a plain string.
+    const typed = new Set<string>();
+    for (const [path, item] of Object.entries(paths)) {
+      if (!isObject(item)) continue;
+      for (const op of Object.values(item)) {
+        if (!isObject(op) || !Array.isArray(op.parameters)) continue;
+        for (const p of op.parameters) {
+          if (!isObject(p) || p.in !== 'query' || typeof p.name !== 'string') continue;
+          const s = isObject(p.schema) ? p.schema : {};
+          const plainString = s.type === 'string' && s.format === undefined && !s.enum;
+          if (!plainString && s.type !== undefined) typed.add(`${path}|${p.name}`);
+        }
+      }
+    }
+    expect(typed.size, 'spec scan found typed query params').toBeGreaterThan(0);
+
+    const offenders: string[] = [];
+    const call = /buildUrl\(\s*'([^']+)',\s*undefined,\s*\{([^}]*)\}/g;
+    for (const f of readdirSync(dir)) {
+      if (!f.endsWith('.spec.ts')) continue;
+      const text = readFileSync(join(dir, f), 'utf8');
+      for (const m of text.matchAll(call)) {
+        const path = m[1] ?? '';
+        for (const kv of (m[2] ?? '').matchAll(/(\w+):\s*'x'/g)) {
+          if (typed.has(`${path}|${kv[1]}`)) offenders.push(`${f}: ${path} ${kv[1]}='x'`);
+        }
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+});
+
 describeForThisConfig('bundled-spec invariants: emitted request-validation suite (#129)', () => {
   it('emits zero case-only enum mutations when enumCaseInsensitive is true', () => {
     // The camunda-oca config sets `enumCaseInsensitive: true` in
