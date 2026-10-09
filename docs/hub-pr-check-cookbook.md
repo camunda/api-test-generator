@@ -34,7 +34,7 @@ does not yet understand a new endpoint, or that the test run itself had a proble
 A PR that is skipped gets no check and no status.
 
 **When it comments on your PR.** Rarely. Only when your own spec change broke the generator (a new or changed endpoint it
-does not handle yet): it leaves one comment, and edits it in place on later pushes. Every other result is a status plus
+does not handle yet): it leaves one comment and keeps updating that same comment, so you never get more than one. Every other result is a status plus
 a Slack alert, and a pass says nothing.
 
 **Does it open a fix PR?** No. The check only reads and reports, and opens issues: `Generator gap on camunda-hub#N` (assigned
