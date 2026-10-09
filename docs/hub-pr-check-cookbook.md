@@ -71,19 +71,13 @@ Still stuck? Ask in `#ask-qa` (tag `@test-automation-medic`) and include the run
 - **Generated suite:** the tests, written by the generator from the spec. Nobody edits them by hand.
 - **Generator gap:** the generator has no test, or a wrong test, for an endpoint. Not a Hub bug.
 - **Coverage gap:** an endpoint with no generated test at all (also called an *unmapped operation*).
-- **Medic:** a Slack group on call for a test area (`hub-medic` for Hub, `test-automation-medic` for the generator and pipeline). The alert pings the right one.
+- **Medic:** a Slack group on call for a test area (`hub-medic` for Hub and the generator, `test-automation-medic` only for shared-pipeline faults). Until the workflows are changed, some generator alerts still ping `test-automation-medic`.
 - **Classifier:** an automated step that reads the failure and picks one of the verdicts above. It is an AI agent and can be wrong; it is told to answer "unknown" rather than guess.
 - **Ontology:** the config files in `configs/camunda-hub/ontology/` that tell the generator how each resource is created, read, deleted and linked.
 - **Live check:** the `hub-pr-live-check` workflow, which runs the generated suite against a live Hub for pull requests to the generator repo itself. It skips pull requests from the automation account (the AI agents and the re-enable and spec-bump scripts); for those, a person reads the diff and runs the `hub-ondemand-test` workflow on the branch.
 - **Invariant tests:** tests in the generator repo that check the generated output against one pinned camunda-hub spec.
 - **Fingerprint:** a short label for exactly what failed, used so the same failure does not post twice (see "Who gets told what" in [maintainers/hub-pr-check-reference.md](maintainers/hub-pr-check-reference.md)).
 - **Evidence:** a failing test or an untested endpoint. "No evidence" means the run left no readable report.
-
-## Who owns what
-
-The Hub team owns the generator after the handover, and `hub-medic` is the on-call group. Until the workflows are changed,
-some generator alerts still ping `test-automation-medic` (see [handover follow-ups](maintainers/handover-follow-ups.md)).
-This check is **informational, not required**.
 
 ## Adding or changing an endpoint in Hub: do you need a generator PR?
 
