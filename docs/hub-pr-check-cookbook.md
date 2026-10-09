@@ -2,7 +2,7 @@
 
 > **Goal:** if the `api-test-generator/hub-suite` check on your camunda-hub PR is red, or a Slack alert names
 > your PR, you can tell in a few minutes whether it is your problem and what to do. "Start here" assumes
-> you know Hub, not how the generator works; its few terms (generator gap, classifier, fingerprint) are explained in "Words used" at the end. The sections after it are reference for people who maintain the check. The check is
+> you know Hub, not how the generator works; its few terms (generator gap, classifier, fingerprint) are explained in "Words used" at the end. The check is
 > **informational, not required**: a red result does not block merging.
 
 **Looking for something else?** This guide is only about the check on a single camunda-hub PR. For the nightly run, the spec-bump and re-enable alerts and the weekly report, see [how-it-works.md](how-it-works.md).
@@ -31,8 +31,6 @@ does not yet understand a new endpoint, or that the test run itself had a proble
 - PRs that target a `self-managed/*` branch;
 - PRs that change **only** frontend, e2e, docs, `.claude` or `.agents` files. Such a PR cannot affect the API. If it changes even one file elsewhere (backend, the API spec), the check runs.
 
-A PR that is skipped gets no check and no status.
-
 **When it comments on your PR.** Rarely. Only when your own spec change broke the generator (a new or changed endpoint it
 does not handle yet): it leaves one comment and keeps updating that same comment, so you never get more than one. Every other result is a status plus
 a Slack alert, and a pass says nothing.
@@ -42,7 +40,7 @@ to you when your spec change caused it) and `[hub-pr-check] Coverage gap on camu
 test. The fix is a generator PR, opened by a person (see [Adding or changing an endpoint in Hub](#adding-or-changing-an-endpoint-in-hub-do-you-need-a-generator-pr)) or, later, by the
 nightly triage agent for small, safe gaps.
 
-**How long it takes.** The check starts after Hub's image for your PR is built, and a run takes about 5 minutes. The status and the Slack alert appear when it finishes, not when it starts.
+**How long it takes.** The check starts after Hub's image for your PR is built, and a run takes about 5 minutes. The status and the Slack alert appear when it finishes, not when it starts. The run, its result and its reports are on the [hub-pr-check](https://github.com/camunda/api-test-generator/actions/workflows/hub-pr-check.yml) page.
 
 **If it is red, read the verdict line in the Slack alert (or the run summary). It says which case you are in:**
 
@@ -57,8 +55,6 @@ nightly triage agent for small, safe gaps.
 | Every test of **one new endpoint** fails with 404, and you added it behind a feature flag | Nobody's bug: the test Hub does not switch your flag on | Add the flag to `docker/docker-compose.hub.yml` **in the api-test-generator repo** (a PR there, then re-run the check), or suppress the endpoint with a reason and an issue. Details under "Common failure patterns" |
 
 Still stuck? Ask in `#ask-qa` (tag `@test-automation-medic`) and include the run link. Every alert carries the links you need.
-
-The run for your PR, with its result and reports, is on the [hub-pr-check](https://github.com/camunda/api-test-generator/actions/workflows/hub-pr-check.yml) page.
 
 ## Adding or changing an endpoint in Hub: do you need a generator PR?
 
@@ -76,7 +72,7 @@ cannot work out:
 - `do-not-close`, because a daily job (01:00 UTC) closes every open `nightly-api-fix` PR with no activity for a day. This
   also keeps your PR open while it waits for a delayed Hub PR.
 
-Then ask for review in `#camunda-hub-pr-e2e-results` (after the handover the Hub team reviews generator PRs).
+Then ask a Hub teammate to review it: the Hub team reviews generator PRs.
 
 **Testing it before your Hub PR merges.** Re-running the PR check does not test it: that runs the generator's `main`.
 Instead:
@@ -90,8 +86,7 @@ Instead:
   automatically, except PRs opened by the automation account (the AI agents and the re-enable and spec-bump scripts): for
   those, read the diff and run the suite by hand.
 - **On your machine, against your PR's own Hub.** Check out the Hub PR's commit next to this repo and start that PR's Hub
-  image. Commands: "Reproducing locally" in
-  [Reproducing locally](#reproducing-locally). It needs access to the container registry.
+  image. Commands: [Reproducing locally](#reproducing-locally). It needs access to the container registry.
 
 **When to merge it** depends on one thing: does the generator PR write the new endpoint's name (its `operationId`)?
 
@@ -123,9 +118,7 @@ If a test cannot pass yet, suppress it so CI is not blocked, and track it so it 
    gap is tracked by an issue in this repo, which the re-enable check cannot watch, so someone has to revisit it by hand.
 4. **Open the suppress PR with the two labels** from the section above.
 5. **It is a bridge.** When the Hub issue closes as fixed, the re-enable check opens a draft PR that removes the skip. If
-   Hub closed it as not planned, the skip stays; see the nightly cookbook.
-
----
+   Hub closed it as not planned, the skip stays; see [the nightly guide](hub-nightly-cookbook.md#the-re-enable-check-0400).
 
 ## Finding the cause of a red check
 
@@ -210,7 +203,6 @@ Terms used in this page and in the nightly guide.
 - **Medic:** a Slack group on call for a test area (`hub-medic` is the on-call group; which alerts ping whom today is in the status note of the [nightly guide](hub-nightly-cookbook.md)).
 - **Classifier:** an automated step that reads the failure and picks one of the verdicts above. It is an AI agent and can be wrong; it is told to answer "unknown" rather than guess.
 - **Ontology:** the config files in `configs/camunda-hub/ontology/` that tell the generator how each resource is created, read, deleted and linked.
-- **Live check:** the `hub-pr-live-check` workflow, which runs the generated suite against a live Hub for pull requests to the generator repo itself. It skips pull requests from the automation account (the AI agents and the re-enable and spec-bump scripts); for those, a person reads the diff and runs the `hub-ondemand-test` workflow on the branch.
+- **Live check:** the `hub-pr-live-check` workflow, which runs the generated suite against a live Hub for pull requests to the generator repo itself (see "Testing it" above).
 - **Invariant tests:** tests in the generator repo that check the generated output against one pinned camunda-hub spec.
 - **Fingerprint:** a short label for exactly what failed, the failing tests plus the endpoints with no test. The same fingerprint edits one Slack message instead of posting a new one.
-- **Evidence:** a failing test or an untested endpoint. "No evidence" means the run left no readable report.

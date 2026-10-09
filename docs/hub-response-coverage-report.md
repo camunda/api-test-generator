@@ -93,12 +93,12 @@ After the fix:
    ```
 
    Or run the "Hub response coverage" workflow from the Actions tab. It is a dry run by default and posts nothing; `hub_ref` picks the camunda-hub branch or commit to audit.
-2. Run `CONFIG=camunda-hub npx vitest run tests/request-validation configs/camunda-hub/regression-invariants.test.ts`. The report only reads the generated files; to see the new test pass against a real Hub, run the `hub-ondemand-test` workflow on your branch (Actions, Run workflow).
+2. Run `CONFIG=camunda-hub npx vitest run tests/request-validation configs/camunda-hub/regression-invariants.test.ts`. The report only reads the generated files; to see the new test pass against a real Hub, run the `hub-ondemand-test` workflow on your branch (steps: "Run it by hand" in [the nightly guide](hub-nightly-cookbook.md#run-it-by-hand)).
 3. Raise the matching number in `configs/camunda-hub/coverage-floors.json` in the same PR.
 4. If the fix needed a flag or a new resource, see [Adding or changing an endpoint in Hub](hub-pr-check-cookbook.md#adding-or-changing-an-endpoint-in-hub-do-you-need-a-generator-pr) for the labels.
 
 `AGENTS.md` has more on each config file, but it is written for AI agents and is long. If a step here is unclear, ask in
-`#ask-qa`.
+`#ask-qa` (tag `@test-automation-medic`).
 
 ### Floors
 
@@ -114,8 +114,7 @@ It is a helper: it never merges anything.
 **What it fixes.** Two kinds of gap:
 
 1. **A resource with no "create, read, delete" test** (the "Lifecycle tests (create, read, delete)" line in the Slack
-   message). The fix is to add the resource to `configs/camunda-hub/ontology/entity-kinds.json` so the generator writes
-   that test, and to raise the matching number in `coverage-floors.json`.
+   message). The fix is the one in "Closing a gap" above, plus raising the matching floor.
 2. **An endpoint with no 403 (forbidden) or 404 (not found) test.** The agent reads the cause first. If the only thing
    missing is a small config entry that the test setup already supports, it adds it. If the only thing missing is a test
    record that the setup could create through a Hub call the API spec describes (for example a workspace member), it may
@@ -152,7 +151,7 @@ happens instead depends on the kind of pull request.
 - **A lifecycle pull request that also edits the invariants test file** (code, not data) stays manual: read the diff, then
   run `hub-ondemand-test` on the branch, and only then mark the pull request ready.
 
-A pull request that sits unreviewed is closed by the same stale-PR clean-up as the nightly fix pull requests.
+A pull request with no activity for a day is closed by the daily stale-PR clean-up, like the nightly fix pull requests, unless it has the `do-not-close` label. So review it within a day, or add that label.
 
 **What it tells people.** After a real run, the `verify` job posts what the agent found, including the gaps that got no PR:
 one comment on the weekly tracking issue (the full record: each gap, what the agent did, its reason and proposal) and one

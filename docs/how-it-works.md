@@ -17,7 +17,7 @@ Hub's API description  →  tests written automatically  →  run against a real
 
 ## What you will see
 
-There are four things. Most weeks, three of them need nothing from you.
+There are four things. The weekly report and the agent PRs need you every week; the PR check and the nightly run only when something fails.
 
 | What | Where you see it | When | Is it yours? | Guide |
 |---|---|---|---|---|
@@ -26,15 +26,16 @@ There are four things. Most weeks, three of them need nothing from you.
 | **Weekly coverage report** | A post in the same channel | Monday, 05:00 UTC | Yes: it lists the API cases still not tested | [Coverage report guide](hub-response-coverage-report.md) |
 | **Coverage-fix PRs** | Small draft pull requests in this repo, opened by an AI agent | After the Monday report | Yes: you review them. A person always decides to merge | [Coverage report guide](hub-response-coverage-report.md) |
 
-Two more posts show up only when needed: a **spec-bump alert** (Hub's API changed since we last looked) and
-a **re-enable check** (a Hub bug we had worked around was fixed, so a skipped test can come back).
+Three more posts show up only when needed: a **spec-bump alert** (Hub's API changed since we last looked), a
+**re-enable check** (a Hub bug we had worked around was fixed, so a skipped test can come back) and a weekday
+**gap digest** (a merged Hub PR left a generator gap).
 
 ## When something happens, what do I do?
 
 | You see | Do this |
 |---|---|
 | Red PR check, alert says "likely a real regression" | It is probably your change. Read what the alert points to |
-| Red PR check, alert says "generator not handling a new endpoint" | Not a Hub bug. Ask in `#ask-qa` (tag `@test-automation-medic`) |
+| Red PR check, alert says "generator not handling a new endpoint" | Not a Hub bug, but you act first: open the generator PR (see the PR check guide). Stuck? Ask in `#ask-qa` (tag `@test-automation-medic`) |
 | Red PR check, alert says "infrastructure failure" | Not yours. Open the failed step, find the outside cause, ask if unsure |
 | Nightly post shows failures | Open the triage thread: one line per failure says whose it is |
 | No nightly post in the morning | The run or the posting broke, not Hub. See "If a morning has no nightly post" in the nightly guide |

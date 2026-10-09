@@ -28,11 +28,11 @@ what to do with the post. A PR nobody picks up just sits there.
 |---|---|---|---|
 | 02:00 | Posted every night. Two posts: **positive suite** and **negative suite**, each with a ✅ passed / ❌ failed count | Only if ❌ is above 0 | [nightly-camunda-hub](https://github.com/camunda/api-test-generator/actions/workflows/nightly-camunda-hub.yml) |
 | After the run | Posted every night. **Triage digest**, with "No failures tonight" when green, and links to the nightly run and the triage run. When there are failures, a thread under it has one line per failure | Only if the digest lists failures | [triage-camunda-hub-nightly](https://github.com/camunda/api-test-generator/actions/workflows/triage-camunda-hub-nightly.yml) |
-| 03:00 | **Spec-bump alert**, only when the spec changed (the pinned spec is behind Hub's latest), or when the check itself failed and cannot tell | Only the generator owner (the Hub team after the handover) | [spec-bump-check](https://github.com/camunda/api-test-generator/actions/workflows/spec-bump-check.yml) |
-| 04:00 | **Re-enable check**, only when a watched Hub bug closed: a skipped test can come back, or a skip that cannot come back (closed as not planned) needs a decision | Only the generator owner (the Hub team after the handover) | [hub-known-issue-reenable-check](https://github.com/camunda/api-test-generator/actions/workflows/hub-known-issue-reenable-check.yml) |
-| Monday 05:00 | Posted every week. **Weekly coverage report** | Only the generator owner (the Hub team after the handover) | [hub-response-coverage](https://github.com/camunda/api-test-generator/actions/workflows/hub-response-coverage.yml) (Run workflow starts a dry run) |
+| 03:00 | **Spec-bump alert**, only when the spec changed (the pinned spec is behind Hub's latest), or when the check itself failed and cannot tell | Yes: the Hub team (generator owner) | [spec-bump-check](https://github.com/camunda/api-test-generator/actions/workflows/spec-bump-check.yml) |
+| 04:00 | **Re-enable check**, only when a watched Hub bug closed: a skipped test can come back, or a skip that cannot come back (closed as not planned) needs a decision | Yes: the Hub team (generator owner) | [hub-known-issue-reenable-check](https://github.com/camunda/api-test-generator/actions/workflows/hub-known-issue-reenable-check.yml) |
+| Monday 05:00 | Posted every week. **Weekly coverage report** | Yes: the Hub team (generator owner) | [hub-response-coverage](https://github.com/camunda/api-test-generator/actions/workflows/hub-response-coverage.yml) (Run workflow starts a dry run) |
 
-The times are when each job **starts**, not when its post arrives. The spec-bump post comes about 2 minutes later; the nightly posts and the triage digest come after the run finishes, usually 20 to 25 minutes later (the nightly job is allowed 25).
+The times are when each job **starts**, not when its post arrives. The spec-bump post comes about 2 minutes later; the nightly posts and the triage digest come after the run finishes, usually 20 to 25 minutes later (the job's limit is 25 minutes).
 
 So a night with no spec-bump or re-enable post is normal. A night with no nightly post or no triage digest is not: see "When a post is missing" below.
 
@@ -76,7 +76,7 @@ Open [nightly-camunda-hub](https://github.com/camunda/api-test-generator/actions
 
 1. **No run around 02:00 UTC.** The schedule did not fire. Start one with "Run workflow".
 2. **The run is red with "Slack alert not posted".** The Slack token could not be read from Vault, or Slack rejected the
-   post. The tests may be fine. You cannot fix this from the Hub side: post the run link in `#ask-qa`. Every scheduled Hub
+   post. The tests may be fine. You cannot fix this from the Hub side: post the run link in `#ask-qa` (tag `@test-automation-medic`). Every scheduled Hub
    workflow (triage, spec-bump, re-enable, weekly report, gap digest) shows the same error.
 3. **The run is red for another reason.** Open the failing step.
 
@@ -92,7 +92,6 @@ Several actions below say "run the suite on a branch". Do it on GitHub:
 
 On your own machine you need Docker, Node 22, Python 3 and a camunda-hub clone next to this repo. The commands are under
 "Reproducing locally" in [hub-pr-check-cookbook.md](hub-pr-check-cookbook.md#reproducing-locally).
-
 
 ## The nightly posts (02:00)
 
@@ -164,7 +163,7 @@ invariant tests.
 
 ## The re-enable check (04:00)
 
-Nobody is pinged for this post, and the draft PR it opens has no reviewer. It is only a message in the channel at about 04:00 UTC, and it is silent on most days. A message that says "see the workflow run log" ends with an **Open the workflow run** link. Posts from before 7 October have no link; open the [workflow page](https://github.com/camunda/api-test-generator/actions/workflows/hub-known-issue-reenable-check.yml) instead.
+Nobody is pinged for this post, and the draft PR it opens has no reviewer. It is only a message in the channel at about 04:00 UTC, and it is silent on most days. Each message ends with an **Open the workflow run** link.
 
 Skipped tests point to a Hub bug. This job watches those bugs. When one closes, it tries to bring the tests back.
 
