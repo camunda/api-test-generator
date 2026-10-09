@@ -116,7 +116,7 @@ If a test cannot pass yet, suppress it so CI is not blocked, and track it so it 
    Entries that share a URL must share a summary.
 3. **Who opens the issue.** For a Hub bug, whoever suppresses it files the camunda-hub issue and links it. A generator
    gap is tracked by an issue in this repo, which the re-enable check cannot watch, so someone has to revisit it by hand.
-4. **Open the suppress PR with the two labels** from the section above.
+4. **Open the suppress PR with the two labels** from the section above. If skipping a test that currently counts makes the coverage check fail, lower the matching floor in `configs/camunda-hub/coverage-floors.json` in the same PR and link the Hub issue (see "Floors" in [the coverage guide](hub-response-coverage-report.md#floors)).
 5. **It is a bridge.** When the Hub issue closes as fixed, the re-enable check opens a draft PR that removes the skip. If
    Hub closed it as not planned, the skip stays; see [the nightly guide](hub-nightly-cookbook.md#the-re-enable-check-0400).
 
