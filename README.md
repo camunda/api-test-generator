@@ -28,7 +28,7 @@ never validated) and expect HTTP 200.
 │                          │               │ (negative-test generator)│
 │ Parses bundled spec,     │               │                          │
 │ extracts semantic types  │               │ Synthesizes 35 kinds of  │
-│ & operations             │               │ malformed-request tests  │
+│ & operations             │               │ negative scenario tests  │
 │ → operation-dependency-  │               │ expecting 4xx (some 200) │
 │   graph.json             │               │ → generated/<config>/    │
 └────────────┬─────────────┘               │   request-validation/    │
@@ -527,9 +527,9 @@ boundary, role-bundle layout, and emitter contract details.
 ### request-validation
 
 A spec-driven generator that synthesizes **negative** Playwright tests targeting
-request-validation surfaces — every test sends a deliberately malformed request
-and asserts the server refuses it (HTTP 400, or 401, 403 or 404 for the auth and not-found
-kinds); a few send an edge case the server accepts and assert HTTP 200. Covers 35 scenario kinds
+request-validation surfaces. Most tests send a deliberately malformed request and assert
+the server refuses it (HTTP 400, or 401, 403 or 404 for the auth and not-found kinds); a few send
+an edge case the server accepts and assert HTTP 200. Covers 35 scenario kinds
 including missing required fields (single + combinations), wrong primitive
 types, root-body type mismatches, `oneOf` ambiguity / no-match / cross-bleed,
 discriminator mismatches, enum / format / `multipleOf` / `uniqueItems` /
