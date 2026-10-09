@@ -98,13 +98,15 @@ cannot work out:
 
 Re-running the PR check does not test your generator PR: it runs the generator's `main`.
 
-**When to merge it** depends on what it contains:
+**When to merge it** depends on one thing: does the generator PR write the new endpoint's name (its `operationId`)?
 
-- **It does not name the new endpoint** (for example a feature flag in `docker/docker-compose.hub.yml`): merge it first. The
-  check is green from the first push and the nightly never fails.
-- **It names the new endpoint** (for example an entry in `conflict-replay.json`): merge it **after** your Hub PR, or at the
-  same time. Until the endpoint is in Hub's `main` spec, generation fails on an operation it does not know, so the nightly
-  would fail from the generator side.
+- **No** (for example it only turns on a feature flag in `docker/docker-compose.hub.yml`): merge it any time, even first.
+  A flag is just a setting passed to Hub, and nothing looks it up in the spec, so it is harmless until the endpoint exists.
+  The check is then green from the first push.
+- **Yes** (for example a line for it in `conflict-replay.json`): merge it **after** your Hub PR, or at the same time. The
+  generator looks that name up in Hub's `main` spec, and until your Hub PR merges the endpoint is not there, so generation
+  fails and the nightly goes red because of your generator PR. The PR check will not warn you, because it reads your
+  PR's own spec, which already has the endpoint.
 
 Then:
 
