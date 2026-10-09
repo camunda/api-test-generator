@@ -87,8 +87,8 @@ cannot work out:
 
 **Testing it.** You can test the generator PR before your Hub PR merges, in two ways:
 
-- **On GitHub, to check the generator side.** Run `hub-ondemand-test` on your generator branch and set `hub_ref` to your Hub
-  PR's branch. The tests are generated from your PR's spec with your generator fix. The Hub they run against is the latest
+- **On GitHub, to check the generator side.** Run `hub-ondemand-test` with **Use workflow from** set to your generator branch and `hub_ref` set to your Hub
+  PR's branch name (a camunda-hub branch, not a generator one). The tests are generated from your PR's spec with your generator fix. The Hub they run against is the latest
   published build of Hub's `main`, **not your PR**, so tests for a brand-new endpoint get 404 there. It shows that
   generation and the invariants work, not that the endpoint behaves as the tests expect. Steps: "Run it by hand" in
   [hub-nightly-cookbook.md](hub-nightly-cookbook.md).

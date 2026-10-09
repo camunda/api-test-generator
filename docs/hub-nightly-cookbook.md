@@ -86,8 +86,8 @@ While Slack is down you can still read the night's result: open the nightly run,
 
 Several actions below say "run the suite on a branch". Do it on GitHub:
 
-1. Open [hub-ondemand-test](https://github.com/camunda/api-test-generator/actions/workflows/hub-ondemand-test.yml), click **Run workflow**, and pick the branch you want to test.
-2. Leave the two inputs alone unless you need to: `hub_ref` (the camunda-hub branch or commit the spec is read from, default `main`) and `hub_image_tag` (the Hub image to run against, default `SNAPSHOT`).
+1. Open [hub-ondemand-test](https://github.com/camunda/api-test-generator/actions/workflows/hub-ondemand-test.yml), click **Run workflow**, and under **Use workflow from** pick the **api-test-generator** branch you want to test (your generator fix, or `main`).
+2. Leave the two inputs alone unless you need to: `hub_ref` (a **camunda-hub** branch name or commit, such as your Hub PR's branch: the spec is read from it; default `main`) and `hub_image_tag` (the Hub image to run against, default `SNAPSHOT`).
 3. Read the result in the run summary and the uploaded reports. This workflow posts nothing to Slack or TestRail.
 
 On your own machine you need Docker, Node 22, Python 3 and a camunda-hub clone next to this repo. The commands are under
