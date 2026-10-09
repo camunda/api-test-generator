@@ -82,7 +82,17 @@ and the **missing bad-request tests**. Find the endpoint's row, then use the tab
 
 After the fix:
 
-1. Regenerate and run the report with the commands in "Running it yourself" in the [internals page](maintainers/hub-coverage-report-internals.md), and check that the number moved.
+1. Regenerate and run the report, and check that the number moved. With `../camunda-hub` checked out and up to date:
+
+   ```bash
+   CONFIG=camunda-hub npm run fetch-spec
+   CONFIG=camunda-hub npm run testsuite:generate
+   CONFIG=camunda-hub npm run generate:request-validation
+   python3 scripts/e2e/hub_response_coverage.py --out /tmp/cov
+   cat /tmp/cov/slack.txt
+   ```
+
+   Or run the "Hub response coverage" workflow from the Actions tab. It is a dry run by default and posts nothing; `hub_ref` picks the camunda-hub branch or commit to audit.
 2. Run `CONFIG=camunda-hub npx vitest run tests/request-validation configs/camunda-hub/regression-invariants.test.ts`. The report only reads the generated files; to see the new test pass against a real Hub, run the `hub-ondemand-test` workflow on your branch (Actions, Run workflow).
 3. Raise the matching number in `configs/camunda-hub/coverage-floors.json` in the same PR.
 4. If the fix needed a flag or a new resource, see [Adding or changing an endpoint in Hub](hub-pr-check-cookbook.md#adding-or-changing-an-endpoint-in-hub-do-you-need-a-generator-pr) for the labels.
@@ -95,8 +105,6 @@ After the fix:
 `coverage-floors.json` pins the numbers this report shows. The Hub invariant `response coverage does not regress`
 runs the same script and fails a PR if a number drops below its floor, or if an endpoint has no test at all
 and is not listed in `zeroTestOperations` with a reason. A floor only goes up. Never lower one to make CI pass; add the missing test.
-
-Two more floors guard the generator itself, so that it cannot quietly stop producing a kind of test. How they work is in the [internals page](maintainers/hub-coverage-report-internals.md).
 
 ## The coverage-fix agent
 
@@ -166,6 +174,4 @@ A failed post never fails the run.
   switch it on again. No code change is needed. A manual run of the weekly report does not start it, and neither does a
   weekly report that failed (a failed Slack post counts as a failed report).
 
-**Limits.** The limits are checked by code, not by the agent. At most one pull request per API area, and a separate job checks from GitHub that the agent opened only what it was allowed to. Detail: [maintainers/hub-coverage-report-internals.md](maintainers/hub-coverage-report-internals.md).
-
-How the report job runs, running it by hand and changing it: [maintainers/hub-coverage-report-internals.md](maintainers/hub-coverage-report-internals.md).
+**Limits.** The limits are checked by code, not by the agent. At most one pull request per API area, and a separate job checks from GitHub that the agent opened only what it was allowed to.
