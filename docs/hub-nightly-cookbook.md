@@ -15,7 +15,7 @@ without the one assertion Hub cannot meet yet. So any number above 0 is news.
 
 > **Status, 8 October 2026:** the handover to the Hub team is in progress. The Hub team already owns everything in this
 > guide and `hub-medic` is the on-call group. The alert pings have not been switched yet: some generator alerts still go
-> to `test-automation-medic`. See [handover follow-ups](maintainers/handover-follow-ups.md).
+> to `test-automation-medic`. The change is tracked in [camunda/api-test-generator#712](https://github.com/camunda/api-test-generator/issues/712).
 
 **Who acts.** The Hub team (the **generator owner**) acts on the spec-bump, re-enable and weekly-report posts. **Nobody is
 pinged for these three**: they are plain posts in the channel, and the PRs and issues they open have no assignee or
