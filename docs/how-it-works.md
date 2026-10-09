@@ -71,8 +71,8 @@ channels each morning: PR-check alerts and the gap digest are in `#camunda-hub-p
 
 - **Generated suite:** the tests the generator writes from the spec. Nobody edits them by hand.
 - **Operation:** one API endpoint, as the spec names it (for example `getWorkspace`). The guides use "endpoint" and "operation" for the same thing.
-- **Generator gap:** the generator cannot handle something, so a test is wrong or missing. It is a **cause**, it can fail a test, and it is not a Hub bug. The fix is a generator PR, usually a config entry.
-- **Coverage gap / unmapped operation:** an endpoint, response or kind of bad request with no test yet. It is a **measurement**, it never fails a test, and it is a to-do, not an incident. A generator gap can cause one; a test skipped on purpose for a Hub bug is another cause.
+- **Generator gap:** the generator does not understand something in Hub's API, so a test it generated is **wrong** and fails. It is a **cause**, and it is not a Hub bug. The fix is a generator PR, usually a config entry.
+- **Coverage gap / unmapped operation:** a test is **missing**: an endpoint, response or kind of bad request with none yet. It is a **measurement**, it never fails a test, and it is a to-do, not an incident. A test can be missing because the generator could not build it, or because it was skipped on purpose for a Hub bug.
 - **Telling them apart:** a *failing* test points at a generator gap or a Hub bug. A *missing* test is a coverage gap.
 - **Coverage:** how many of the API's answers (success, 403, 404, bad request...) have a test.
 - **Pin:** the camunda-hub commit whose API description the invariant tests are checked against. The spec-bump alert moves it.
