@@ -18,6 +18,10 @@ Workflow: [`hub-response-coverage.yml`](../.github/workflows/hub-response-covera
 | One issue per API area `[hub-response-coverage] <Area>: missing response or bad-request tests` | A table of that area's endpoints and what each is missing |
 | Run summary and the `hub-coverage-report` artifact | The full per-endpoint table, `history.csv` (one row per scheduled run), `page.html` |
 
+The report job starts at 05:00 UTC on Monday, and the Slack message and issues appear when it finishes. The coverage-fix agent starts after that.
+
+**Who acts.** The Hub team. Nobody is pinged: the Slack message is a plain post, and the area issues have no assignee. Someone on the Hub team (the person on call as `hub-medic`) reads the channel on Monday and picks up the gaps and the agent's draft PRs.
+
 ### Reading the Slack message
 
 The numbers below are an example.
@@ -47,25 +51,14 @@ Across positive and negative tests
 Tracking issue · Area issues: ...
 ```
 
-When the coverage-fix agent has pull requests waiting for review, a reply appears **in the thread** of this message:
+When the coverage-fix agent has pull requests waiting for review, a reply appears **in the thread** of this message (a week without any such pull requests has no reply):
 
 ```
 🤖 Coverage-fix agent: 1 PR waiting for review. These were opened by the agent, not a person; please review before merging: #690 ...
 ```
 
 - "x of y" means: y endpoints document that response, x of them have a test that asserts it. Not every line counts endpoints: "Optional request fields" counts **fields** (63 of 68 fields), and the lifecycle lines count **resources** or **links**.
-- The thread reply, starting with the robot, appears only when the coverage-fix agent (see "The coverage-fix agent" below) has pull requests waiting for review. It says how many and links each one. A week without such PRs has no reply, and the main message never changes.
 - A number in brackets is the change since the previous scheduled report. Nothing is shown when it is unchanged or there is no previous report.
-- A "resource" is something the API lets you create, read by key and delete (files, folders, projects, and so on; one nested under a parent key counts too); it needs a
-  restore flow too if a delete is soft: the key path has a `.../restoration` endpoint and the collection has a
-  `.../recently-deleted/search` endpoint. A restoration endpoint alone does not count (restoring a version or a snapshot does not undelete anything). A lifecycle test is the generated test for it
-  (`generated/camunda-hub/playwright/templates/EntityLifecycle/<Resource>.lifecycle.spec.ts`, and `RestoreLifecycle/` for restore).
-  A resource with no such test is listed as missing. The lifecycle lines count whole journeys, so they do not show up in the per-endpoint issues.
-  A new resource needs an entry in `configs/camunda-hub/ontology/entity-kinds.json` to get its lifecycle tests.
-- An "add-and-remove link" is a POST on a nested path whose sub-path has a DELETE but cannot be read by key (workspace members:
-  `POST /workspaces/{key}/members`, `DELETE /workspaces/{key}/members/{email}`). It counts as covered when an edge in
-  `configs/camunda-hub/ontology/edges.json` names both operations (`establishedBy`, `revokedBy`) and its
-  `EdgeLifecycle/<Edge>.lifecycle.spec.ts` was generated. A new link is listed by its add operation until the edge is added.
 - "Endpoints with no test at all" are listed with the issue that explains each one, taken from the `knownIssue` URL on the endpoint's
   entry in `positive-suppress.json` or `request-validation.json`. An endpoint with no such entry is listed bare, which means nobody has explained it yet.
 - **What counts as covered.** A test that exists in the generated files and asserts that response. A test left out by a suppression or exclusion in the config (usually for a
@@ -73,90 +66,47 @@ When the coverage-fix agent has pull requests waiting for review, a reply appear
   the "Every kind of bad request" line, which treats a skip in two ways. A **kind** excluded in the config is
   taken out of what that endpoint needs, so the endpoint can still count as fully covered by its other kinds. An endpoint whose
   bad-request tests are **all** skipped or excluded is left out of both numbers.
-- The report's "Negative tests" section also counts 409 (a request that is wrong for the current state), although the generated 409 tests live in the positive suite, because they need setup calls first.
-- 500 responses are not counted. 403 is counted but not part of the "missing a test" roll-up (it is tracked separately).
-- "Every kind of bad request" counts kinds with at least one test (missing required field, wrong type, bad enum, and so on), not how many tests each kind has. A kind skipped on purpose is not counted as missing and does not count as tested; it only leaves the endpoint's list of needed kinds.
-  It is only as complete as the generator's own rules for when a kind applies, so for body-schema kinds treat it as an upper bound: the headline can overstate real coverage.
-
-## How it runs
-
-```
-Monday 05:00 UTC (or workflow_dispatch)
-  ├── clone camunda-hub main next to this repo, bundle its spec
-  ├── generate the positive and request-validation suites
-  ├── download the previous run's summary.json (for the brackets)
-  ├── hub_response_coverage.py  → summary.json, rows.json, matrix.md, slack.txt, issue.md, areas.json, history.csv
-  ├── per-area issues   (hub-coverage-area-issues.sh)   ← runs first, writes area-index.md
-  ├── tracking issue    (hub-coverage-summary-issue.sh) ← fills <!-- AREA_INDEX --> from area-index.md
-  ├── render page.html, upload the artifact, write the run summary
-  └── post to Slack
-```
-
-Issue rules:
-
-- The tracking issue is opened or rewritten while any endpoint is missing something, and closed once nothing is.
-- Each API area (the spec's first tag) with a gap gets its own issue: found by exact title in any state,
-  rewritten in place, reopened if a gap comes back, closed when the area is clean.
-- At most 10 brand-new area issues are opened per run. An area without an issue yet is listed in the tracking issue with its endpoints, and gets its issue on a later run.
-- The older manual epic #618 is not read or touched.
-
-The script exits non-zero if the generated test format no longer parses, so a format change fails the run instead of reporting zeros.
-
-## Running it yourself
-
-Dry run on GitHub (posts nothing): Actions → "Hub response coverage" → Run workflow. `dry_run` defaults to true.
-Untick it to open or update the issues and post to Slack. `hub_ref` picks the camunda-hub branch or SHA to audit.
-
-Locally, with `../camunda-hub` checked out and up to date:
-
-```bash
-CONFIG=camunda-hub npm run fetch-spec
-CONFIG=camunda-hub npm run testsuite:generate
-CONFIG=camunda-hub npm run generate:request-validation
-python3 scripts/e2e/hub_response_coverage.py --out /tmp/cov [--previous old/summary.json]
-cat /tmp/cov/slack.txt
-```
 
 ## Closing a gap
 
-This is maintainer work: it needs the generator, not just Hub. An area issue lists, per endpoint, the **missing responses**
+Some gaps need a generator change, not just a Hub setting. An area issue lists, per endpoint, the **missing responses**
 and the **missing bad-request tests**. Find the endpoint's row, then use the table for what it lacks.
 
 | The row says it is missing | What it means | Where to look, and the usual fix |
 |---|---|---|
 | **success** | No success test for the endpoint | First check `configs/camunda-hub/positive-suppress.json`: if it is listed, read its `reason`: it says whether this is a Hub limitation (the fix is on the Hub side), a generator gap (for example the planner cannot source an ID), or an operation left out on purpose. Do not assume it is Hub's. If it is not listed, the generator could not chain the calls the endpoint needs (an ID it cannot create). See `unmappedOperations` in `generated/camunda-hub/playwright/coverage.json`, then teach the generator how to create that resource in `configs/camunda-hub/ontology/` (`entity-kinds.json`, `runtime-states.json`) or the fixtures |
 | **400**, **401**, **403**, **404** | A bad-request, no-auth, forbidden or not-found test is missing | Generated when the operation is eligible and not excluded. First check `excludeOperations` in `configs/camunda-hub/request-validation.json` (the entry always has a `reason`; a Hub issue is optional, and some exclusions such as `purgeFile` and `addMember` have only a reason). If it is not excluded, it is not eligible: **403** needs a request that reaches the authorization check, so a valid fixture-backed request body and path (`resourceFixtures` in the same file; the rule is `isAuthDenyEligible` in `request-validation/src/analysis/authDeny.ts`), and **404** needs an ID the generator can make up (`isNotFoundEligible` in `request-validation/src/analysis/notFoundFakeId.ts`). The fix is then fixture modelling or the eligibility rule, not an exclusion. The modes `authAbsentMode`, `authDenyMode` and `notFoundMode` in the same file set how Hub is expected to answer. A 404 test needs an ID it can make up, so an endpoint with no path key needs the not-found generator extended (`notFoundFakeId.ts` and the emitter that writes its tests). Do not add a test file by hand: generation deletes the output folder every time, and the report only counts generated files |
-| **409** | A documented conflict is not tested (only a 409 the spec documents is counted) | Needs a state first. In `configs/camunda-hub/conflict-replay.json`, use `replay` when repeating the same call is enough to conflict (a duplicate create), or `sequences` for setup calls followed by the call that should answer 409 (for example restoring a file whose project was deleted). List it under `untested` with an issue if it cannot be provoked. The weekly report reads the latest Hub `main` spec, but the invariant tests use the pinned one (`spec-pin.json`), and they fail an entry for a 409 the pinned spec does not document: if the 409 is new, bump the pin first (see the README) |
+| **409** | A documented conflict is not tested (only a 409 the spec documents is counted) | Needs a state first. In `configs/camunda-hub/conflict-replay.json`, use `replay` when repeating the same call is enough to conflict (a duplicate create), or `sequences` for setup calls followed by the call that should answer 409 (for example restoring a file whose project was deleted). List it under `untested` with an issue if it cannot be provoked. The weekly report reads the latest Hub `main` spec, but the invariant tests use the pinned one (`spec-pin.json`), and they fail an entry for a 409 the pinned spec does not document: if the 409 is new, bump the pin first (see [the README](../README.md#bumping-the-spec-pin)) |
 | **a bad-request kind** (for example `allof-conflict`, `union`, `missing-body`) | The endpoint has no test of that kind | Generated from the spec's schema. For the body-shape kinds the report can list a kind that cannot be built for that endpoint, so first generate (see below) and look for the endpoint in `generated/camunda-hub/request-validation/COVERAGE.md`. If the kind applies but is not generated, the fix is in the generator's code (`request-validation/src/analysis/`, and `request-validation/scripts/generate.ts` decides which kinds count as applicable), not in config. If it does not apply it is an over-count: there is no switch today to mark a kind not applicable, so say so in the issue and leave it open |
 | **Lifecycle tests** (in the weekly Slack message, not in an area issue) | A resource or link has no create, read, delete flow | Add it to `configs/camunda-hub/ontology/entity-kinds.json` or `edges.json` |
 
 After the fix:
 
-1. Regenerate and run the report with the commands in "Running it yourself" above, and check that the number moved.
-2. Run `CONFIG=camunda-hub npx vitest run tests/request-validation configs/camunda-hub/regression-invariants.test.ts`. The report only reads the generated files; to see the new test pass against a real Hub, run the `hub-ondemand-test` workflow on your branch (Actions, Run workflow).
-3. Raise the matching number in `configs/camunda-hub/coverage-floors.json` in the same PR.
-4. If the fix needed a flag or a new resource, see "Adding or changing an endpoint in Hub" in the PR-check cookbook for the labels.
+1. Regenerate and run the report, and check that the number moved. With `../camunda-hub` checked out and up to date:
 
-`AGENTS.md` has more on each config file, but it is written for AI agents and is long. If a step here is unclear, ask in
-`#camunda-hub-pr-e2e-results`.
+   ```bash
+   CONFIG=camunda-hub npm run fetch-spec
+   CONFIG=camunda-hub npm run testsuite:generate
+   CONFIG=camunda-hub npm run generate:request-validation
+   python3 scripts/e2e/hub_response_coverage.py --out /tmp/cov
+   cat /tmp/cov/slack.txt
+   ```
+
+   Or run the "Hub response coverage" workflow from the Actions tab. It is a dry run by default and posts nothing; `hub_ref` picks the camunda-hub branch or commit to audit.
+2. Run `CONFIG=camunda-hub npx vitest run tests/request-validation configs/camunda-hub/regression-invariants.test.ts`. The report only reads the generated files; to see the new test pass against a real Hub, run the `hub-ondemand-test` workflow on your branch (steps: "Run it by hand" in [the nightly guide](hub-nightly-cookbook.md#run-it-by-hand)).
+3. Raise the matching number in `configs/camunda-hub/coverage-floors.json` in the same PR.
+4. If the fix needed a flag or a new resource, see [Adding or changing an endpoint in Hub](hub-pr-check-cookbook.md#adding-or-changing-an-endpoint-in-hub-do-you-need-a-generator-pr) for the labels.
+
+`AGENTS.md` has more on each config file. It is long: read only the section for the file you are changing. If a step here is unclear, ask in
+`#ask-qa` (tag `@test-automation-medic`).
 
 ### Floors
 
 `coverage-floors.json` pins the numbers this report shows. The Hub invariant `response coverage does not regress`
-runs the same script and fails a PR if a number drops below its floor, or if an endpoint has no test at all
+(in the `hub invariants` CI job of this repo, on every PR) runs the same script and fails a PR if a number drops below its floor, or if an endpoint has no test at all
 and is not listed in `zeroTestOperations` with a reason. A floor only goes up. Never lower one to make CI pass; add the missing test.
 
-One floor guards the generator itself: `requestKindEndpoints` keeps, for each kind of bad-request test the suite
-generates, how many endpoints have at least one test of that kind. The report names a kind as missing only when the
-generator can build it, so a generator that quietly stops producing a kind would not appear there; this floor makes
-that fail the build instead.
-
-A second floor, `requestScenarioTypes`, does the same for a type of test that the coverage data counts under another
-kind's name (a top-level wrong-type body test, `body-top-type-mismatch`, is counted as `type-mismatch`). It keeps the
-raw number of tests of that type, so that generator cannot disappear while the kind it is counted under keeps the same
-endpoints. Raise either floor in the same PR that makes more endpoints or tests get that kind; if a type counted under
-another kind appears without a floor, the build fails until one is added. The script needs `MANIFEST.json` (written
-with `COVERAGE.json` by the request-validation generator) and stops with an error if it is missing.
+**The one exception is a deliberate skip.** A test that is skipped for a tracked Hub bug is not counted as tested, so a suppress PR can push a number below its floor even though nothing is wrong. In that PR you may lower the floor by exactly what the skip removes. Say so in the description and link the Hub issue. When the test is re-enabled, raise the floor back in the same PR. Lower a floor for no other reason.
 
 ## The coverage-fix agent
 
@@ -166,8 +116,7 @@ It is a helper: it never merges anything.
 **What it fixes.** Two kinds of gap:
 
 1. **A resource with no "create, read, delete" test** (the "Lifecycle tests (create, read, delete)" line in the Slack
-   message). The fix is to add the resource to `configs/camunda-hub/ontology/entity-kinds.json` so the generator writes
-   that test, and to raise the matching number in `coverage-floors.json`.
+   message). The fix is the one in "Closing a gap" above, plus raising the matching floor.
 2. **An endpoint with no 403 (forbidden) or 404 (not found) test.** The agent reads the cause first. If the only thing
    missing is a small config entry that the test setup already supports, it adds it. If the only thing missing is a test
    record that the setup could create through a Hub call the API spec describes (for example a workspace member), it may
@@ -190,29 +139,23 @@ review"** that shows the check before and after. Read that section first.
 `fix/coverage-`, with the labels `nightly-api-fix`, `auto-generated` and `hub`. The body ends with
 "Found by the camunda-hub coverage-fix agent". The thread under the weekly Slack message lists the ones still open.
 
-**Who reviews them.** A person, always, like any other pull request. The native live Hub check (`hub-pr-live-check`)
-skips the agent's pull requests: it would run the agent's code with Hub access before anything had checked it. What
-happens instead depends on the kind of pull request.
+**Who reviews them.** A person, always. The usual live check (`hub-pr-live-check`) skips these pull requests on purpose: it
+would run the agent's code with Hub access before anything had checked it. What happens instead depends on the kind:
 
-- **Pull requests with constrained content** start by themselves. That is a 403/404 pull request (one fixture entry, the
-  floors, and the fixture block of the setup script) or a lifecycle pull request that changes only the floors and adds one
-  plain-data entry to `entity-kinds.json`. Once the `verify` job has checked them from GitHub, it pins the commit it checked
-  under a `hub-live-check/*` tag, starts `hub-ondemand-test` on that tag (not on the branch, which could move afterwards)
-  and comments the run link on the pull request. The run covers exactly that commit; a later push is not tested. Its result
-  is that run's status, not a check on the pull request. Read the diff and that run, and only then mark the pull request
-  ready. If the verify job fails, no live check starts.
-- **A lifecycle pull request that also edits the invariants test file** (code, not data) stays manual: read the diff, then
-  run `hub-ondemand-test` on the branch, and only then mark the pull request ready.
+- **A constrained pull request** (a 403/404 one that touches only a fixture entry, the floors and the fixture block of the
+  setup script, or a lifecycle one that touches only the floors and one plain-data entry in `entity-kinds.json`): once the
+  `verify` job has checked it, it starts `hub-ondemand-test` on that exact commit and comments the run link on the pull
+  request. Read the diff and that run, then mark the pull request ready. A later push is not tested.
+- **A lifecycle pull request that also edits the invariants test file** (code, not data): read the diff, run
+  `hub-ondemand-test` on the branch yourself ("Run it by hand" in [the nightly guide](hub-nightly-cookbook.md#run-it-by-hand)),
+  then mark it ready.
 
-A pull request that sits unreviewed is closed by the same stale-PR clean-up as the nightly fix pull requests.
+A pull request with no activity for a day is closed by the daily stale-PR clean-up, like the nightly fix pull requests,
+unless it has the `do-not-close` label. So review it within a day, or add that label.
 
 **What it tells people.** After a real run, the `verify` job posts what the agent found, including the gaps that got no PR:
-one comment on the weekly tracking issue (the full record: each gap, what the agent did, its reason and proposal) and one
-reply in the weekly Slack message's thread (one line per gap, with links to the PRs). Nothing is posted for a dry run or
-for a run with no PR and no gap. The agent's text is untrusted: it is cleaned and cut before posting, and the PR links come
-from GitHub. The Slack reply needs the weekly report run to have saved its Slack message id (artifact
-`hub-coverage-slack-ts`); a report from before that existed gets only the issue comment, and the run says so in a warning.
-A failed post never fails the run.
+one comment on the weekly tracking issue (each gap, what the agent did and why) and one reply in the weekly Slack message's
+thread (one line per gap, with links to the PRs). Nothing is posted for a dry run, or for a run with no PR and no gap.
 
 **How it runs.** Two ways.
 
@@ -226,16 +169,4 @@ A failed post never fails the run.
   switch it on again. No code change is needed. A manual run of the weekly report does not start it, and neither does a
   weekly report that failed (a failed Slack post counts as a failed report).
 
-**Limits, checked by code, not by the agent.** At most one pull request per API area (an open or recently merged pull
-request holds its area; one that was closed without merging does not, so a gap can be tried again), and none for a
-resource that another open fix pull request already covers. After every run a separate job checks, from GitHub, that the agent opened
-only what it was allowed to open, as drafts, with the right labels, and nothing else. The same job reads each pull
-request's changed files from GitHub: a lifecycle fix may only touch the entity list, the floors and the one adapted check; a
-403 or 404 fix may only add fixture entries to the request-validation config and raise one floor. Any other file, a
-changed exclusion, a lowered floor or a new "no test at all" entry fails the run.
-
-## Changing the report
-
-- Slack wording and layout: `slack()` in the script. Tests: `tests/request-validation/hub-gap-issue.test.ts` (stub `gh`, so no network).
-- Issue bodies: `issue_body()` and `area_issues()` in the script; the shell scripts only open, edit and close.
-- After a change, run a dry run and read `slack.txt` before merging.
+**Limits.** The limits are checked by code, not by the agent. At most one pull request per API area, and a separate job checks from GitHub that the agent opened only what it was allowed to.

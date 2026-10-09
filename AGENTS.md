@@ -297,7 +297,9 @@ The Hub invariant `response coverage does not regress` runs `scripts/e2e/hub_res
 report's own script, over the generated suites and fails if a number is below its floor, if an
 operation has no test at all, or if an operation listed in `zeroTestOperations` now has tests. A floor
 is one-way: a PR that closes a gap should raise it, a higher number never fails, and a floor is never
-lowered to make CI pass. A new operation with no test fails until it has one (or is listed with a reason).
+lowered to make CI pass. The one exception is a deliberate skip for a tracked Hub bug: a held test does not
+count as tested, so that suppress PR may lower the floor by exactly what the skip removes, with the Hub issue
+linked, and the PR that re-enables the test raises it back. A new operation with no test fails until it has one (or is listed with a reason).
 `requestKindEndpoints` in the same file holds, per scenario kind the negative suite generates, how many endpoints
 have at least one scenario of it. The report lists a kind as missing only when a generator can build it, so a
 generator that silently stops producing a kind would not show up there; this floor makes that fail CI. A kind the

@@ -8,10 +8,15 @@ malformed request and expect a refusal (HTTP 400, or 401, 403 or 404 for the aut
 a few send an edge case the server accepts (a pagination offset past the total, a search filter that is
 never validated) and expect HTTP 200.
 
-> **Owning or working with the camunda-hub suite?** Start with the cookbook that matches you:
-> [your PR check is red, or you are adding an endpoint](docs/hub-pr-check-cookbook.md) ·
-> [a message in the nightly Slack channel](docs/hub-nightly-cookbook.md) ·
-> [the weekly coverage report](docs/hub-response-coverage-report.md).
+> **Hub team? Start with [How it works](docs/how-it-works.md).** It is one page: what runs, what you will
+> see in Slack and on your PRs, what is yours to act on, and who owns what. The guides it links to are
+> for when you need detail: [PR check red or adding an endpoint](docs/hub-pr-check-cookbook.md) ·
+> [a message in the nightly channel](docs/hub-nightly-cookbook.md) ·
+> [the weekly coverage report and the fix agent](docs/hub-response-coverage-report.md).
+>
+> Questions or help: ask in `#ask-qa` and tag `@test-automation-medic`.
+>
+> **Everything below is for people changing the generator itself.** You do not need it to run or read the Hub checks.
 
 ## Architecture
 
