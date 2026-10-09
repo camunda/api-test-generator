@@ -71,7 +71,7 @@ Still stuck? Ask in `#ask-qa` (tag `@test-automation-medic`) and include the run
 - **Generated suite:** the tests, written by the generator from the spec. Nobody edits them by hand.
 - **Generator gap:** the generator has no test, or a wrong test, for an endpoint. Not a Hub bug.
 - **Coverage gap:** an endpoint with no generated test at all (also called an *unmapped operation*).
-- **Medic:** a Slack group on call for a test area (`hub-medic` for Hub and the generator, `test-automation-medic` only for shared-pipeline faults). Until the workflows are changed, some generator alerts still ping `test-automation-medic`.
+- **Medic:** a Slack group on call for a test area (`hub-medic` is the on-call group; which alerts ping whom today is in the status note of the [nightly guide](hub-nightly-cookbook.md)).
 - **Classifier:** an automated step that reads the failure and picks one of the verdicts above. It is an AI agent and can be wrong; it is told to answer "unknown" rather than guess.
 - **Ontology:** the config files in `configs/camunda-hub/ontology/` that tell the generator how each resource is created, read, deleted and linked.
 - **Live check:** the `hub-pr-live-check` workflow, which runs the generated suite against a live Hub for pull requests to the generator repo itself. It skips pull requests from the automation account (the AI agents and the re-enable and spec-bump scripts); for those, a person reads the diff and runs the `hub-ondemand-test` workflow on the branch.
