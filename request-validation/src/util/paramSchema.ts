@@ -1,4 +1,5 @@
 import type { ParameterModel } from '../model/types.js';
+import { VALID_BY_FORMAT } from './formatValues.js';
 
 /**
  * Minimal schema view used by the path/query parameter analysers. A
@@ -10,6 +11,7 @@ export interface SchemaFragment {
   pattern?: string;
   minLength?: number;
   maxLength?: number;
+  format?: string;
   enum?: unknown[];
   allOf?: SchemaFragment[];
 }
@@ -19,6 +21,7 @@ export interface ResolvedParamSchema {
   pattern?: string;
   minLength?: number;
   maxLength?: number;
+  format?: string;
   enumValues?: unknown[];
   type?: string | string[];
 }
@@ -43,6 +46,7 @@ export function resolveParamSchema(p: ParameterModel): ResolvedParamSchema | und
     if (typeof s.pattern === 'string' && out.pattern === undefined) out.pattern = s.pattern;
     if (typeof s.minLength === 'number' && out.minLength === undefined) out.minLength = s.minLength;
     if (typeof s.maxLength === 'number' && out.maxLength === undefined) out.maxLength = s.maxLength;
+    if (typeof s.format === 'string' && out.format === undefined) out.format = s.format;
     if (Array.isArray(s.enum) && !out.enumValues) out.enumValues = s.enum.slice();
     if (s.type !== undefined && out.type === undefined) out.type = s.type;
   }
@@ -62,8 +66,32 @@ export function buildValidValue(r: ResolvedParamSchema): string {
   if (r.pattern) {
     if (/^\^-?\[0-9]\+\$$/.test(r.pattern) || r.pattern === '^-?[0-9]+$') return '1';
   }
-  if (r.minLength && r.minLength > 1) return 'a'.repeat(r.minLength);
-  return 'x';
+  const t = Array.isArray(r.type) ? r.type[0] : r.type;
+  if (t === 'integer' || t === 'number') return '1';
+  if (t === 'boolean') return 'true';
+  const byFormat = r.format !== undefined ? VALID_BY_FORMAT[r.format] : undefined;
+  if (byFormat !== undefined) return byFormat;
+  const first = r.minLength && r.minLength > 1 ? 'a'.repeat(r.minLength) : 'x';
+  return firstSatisfying([first, 'x', 'a', '1', 'a_1'], r) ?? first;
+}
+
+/** The first candidate that meets the schema's length bounds and pattern, if any does. */
+function firstSatisfying(candidates: string[], r: ResolvedParamSchema): string | undefined {
+  let re: RegExp | undefined;
+  if (r.pattern) {
+    try {
+      re = new RegExp(r.pattern);
+    } catch {
+      // A pattern JavaScript cannot compile (e.g. a Java-only flag) cannot be checked here.
+      re = undefined;
+    }
+  }
+  return candidates.find(
+    (c) =>
+      (r.minLength === undefined || c.length >= r.minLength) &&
+      (r.maxLength === undefined || c.length <= r.maxLength) &&
+      (re === undefined || re.test(c)),
+  );
 }
 
 /**
