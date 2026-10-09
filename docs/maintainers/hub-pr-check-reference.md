@@ -25,6 +25,8 @@ camunda-hub PR (non-draft, not a fork, base not self-managed/*)
 
 ## Who gets told what
 
+The pings below are what the workflows do today. They change with [#712](https://github.com/camunda/api-test-generator/issues/712).
+
 | Outcome | Status | Slack (`#camunda-hub-pr-e2e-results`) | Comment on the camunda-hub PR | Issue in api-test-generator |
 |---|---|---|---|---|
 | Pass | `success` | no | no | none |
@@ -41,38 +43,27 @@ camunda-hub PR (non-draft, not a fork, base not self-managed/*)
 on camunda-hub#N` is opened (labels `missing-coverage` and `hub`, not assigned) and closed again once every endpoint
 has a test. It is separate from the `Generator gap` issue above.
 
-When the generator gap is caused by the PR's own spec change, an issue
-`[hub-pr-check] Generator gap on camunda-hub#N` is also opened in this repo. It is edited in place on later pushes and
-closes itself on a green run.
-
 **Assignment is best effort.** The issue is assigned to the camunda-hub PR's author only when that author is a plain GitHub
 login (bots such as `dependabot[bot]` are skipped) and has access to this repo. If GitHub rejects the login, the run logs a
 warning and the issue stays **unassigned**. The title always names the camunda-hub PR, so if you find no assignee, ask in
-`#camunda-hub-pr-e2e-results`. The `Coverage gap` issue is a different issue and is never assigned.
+`#ask-qa` (tag `@test-automation-medic`). The `Coverage gap` issue is a different issue and is never assigned.
 
 Every Slack reply lists the source PR and commit, then one line of links: the run, the camunda-hub run that triggered it, and this cookbook.
 
 ### Why a Slack message is sometimes edited instead of posted again
 
-A PR can get many pushes. To keep the channel readable, the alert for a PR is **edited** when it fails the same
-way again, and a **new** message is posted only when the failure is different. "The same way" is decided by the
-*fingerprint*: the list of failing tests plus the endpoints that have no test.
+To keep the channel readable, the alert for a PR is **edited** when it fails the same way again, and a **new** message is
+posted only when the failure changes. "The same way" is the *fingerprint*: the list of failing tests plus the endpoints
+that have no test. Alerts are grouped in one Slack thread per day, with one reply per PR and failure.
 
-Example for PR #28390:
+Example for PR #28390: a push fails `createFile` and `updateFolder`, so a new message is posted and the medic is pinged.
+The next push fails the same two, so the message is edited and nobody is pinged. A later push fails only `createFile`:
+the fingerprint changed, so a new message is posted and the medic is pinged again.
 
-1. A push fails `createFile` and `updateFolder`. A new message is posted and the medic is pinged.
-2. The next push still fails the same two tests. Same fingerprint, so the message is edited. No new ping.
-3. A later push fails only `createFile`. The fingerprint changed, so a new message is posted and the medic is pinged again.
-
-The rules, in short. Alerts are grouped in one Slack thread per day, with one reply per PR and failure:
-
-- **A failing test or an untested endpoint** (there is evidence): identified by its fingerprint, as above.
-- **Startup or pre-suite failure:** identified by its category. One reply per PR per day, paged once.
-- **No evidence** (the run left no readable report): these cannot be told apart from the previous push's,
-  and paging on every push is what flooded the channel. They share one reply per PR per day, edited with the
-  latest run, and nobody is pinged. If the same PR fails this way a 3rd time that day, one extra reply pings
-  `test-automation-medic`, because by then it is the pipeline, not the PR. The counter is stored in the reply
-  (`seen:N`) and counts failures that day, not only consecutive ones.
+A startup or pre-suite failure is identified by its category: one reply per PR per day, paged once. A failure with no
+readable report cannot be told apart from the previous push's, so those share one quiet reply per PR per day. If the same PR
+fails this way a 3rd time that day, one extra reply pings `test-automation-medic`, because by then it is the pipeline, not
+the PR. The count is stored in the reply (`seen:N`) and counts failures that day, not only consecutive ones.
 
 ## Debugging steps
 
