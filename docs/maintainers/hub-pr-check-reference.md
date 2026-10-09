@@ -23,20 +23,6 @@ camunda-hub PR (non-draft, not a fork, base not self-managed/*)
                     └── report       commit status + PR comment (rarely) + Slack
 ```
 
-## Reading a result
-
-| You see | Meaning | First thing to check |
-|---|---|---|
-| No `api-test-generator/hub-suite` status at all | Usually skipped: draft PR, fork, `self-managed/*` base, or the path gate. Not proof of a skip: the status is also missing if the reporter could not get its App token | The "Trigger api-test-generator hub suite" job summary on the PR (RUN or SKIPPED) |
-| `success` | Every generated test passed | Nothing. Coverage gaps alone are also reported `success`; the description lists them |
-| `success` with `coverage gap: …` | Tests pass, but some operations have no generated test | The tracking issue `[hub-pr-check] Coverage gap on camunda-hub#N` |
-| `failure`, Slack says **startup** | The PR image never became ready | The run's "Wait for Hub to be ready" step |
-| `failure`, Slack says **presuite** | A setup step failed before the suites (checkout, clone, install, registry login, image pull) | The failed step in the run; not a Hub or PR problem |
-| `failure`, **generator-gap** | api-test-generator does not handle this endpoint shape yet | Spec diff for the named operations; then the ontology/scenario templates |
-| `failure`, **product**, high confidence | A specific code change in the PR plausibly caused it | The cited controller/handler change in the PR |
-| `failure`, **infra / unknown** | Environmental, or not enough evidence | Reports in the `hub-suite-reports` artifact |
-| `failure`, **flaky** | An intermittent failure: a test or Hub defect that has to be diagnosed, not retried away | Passed and failed attempts in the `hub-suite-reports` artifact (see "Debugging steps" below) |
-
 ## Who gets told what
 
 | Outcome | Status | Slack (`#camunda-hub-pr-e2e-results`) | Comment on the camunda-hub PR | Issue in api-test-generator |
