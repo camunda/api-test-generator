@@ -144,3 +144,10 @@ describe('re-enable check: suite-wide issues closed as not planned', () => {
     expect(fixed.message).toContain('To re-enable');
   });
 });
+
+describe('re-enable check Slack message: ping', () => {
+  it('pings hub-medic when there is something to report, and stays silent otherwise', () => {
+    expect(format([suiteWide('COMPLETED')])).toContain('<!subteam^S014VK4482H|hub-medic>');
+    expect(format([]).trim()).toBe('');
+  });
+});

@@ -170,3 +170,49 @@ describe('triage Slack summary: recent-change counter', () => {
     expect(text).not.toContain('no Hub bug filed');
   });
 });
+
+describe('triage Slack thread: who is pinged', () => {
+  const HUB_MEDIC = '<!subteam^S014VK4482H|hub-medic>';
+  const issue = `${HUB}/issues/1`;
+  const pr = 'https://github.com/camunda/api-test-generator/pull/1';
+  const pings = (text: string) => text.split(HUB_MEDIC).length - 1;
+
+  it('pings hub-medic once when a new Hub issue was filed', () => {
+    const text = threadLine('', { action: 'file', issue_url: issue });
+    expect(pings(text)).toBe(1);
+  });
+
+  it('pings hub-medic, and only once, for a fix PR or a suppress PR', () => {
+    expect(pings(threadLine('', { action: 'fix-pr', fix_pr_url: pr }))).toBe(1);
+    expect(
+      pings(threadLine('', { action: 'report-only', known_issue: true, suppress_pr_url: pr })),
+    ).toBe(1);
+    // filed and suppressed on the same finding: still one mention
+    expect(pings(threadLine('', { action: 'file', issue_url: issue, suppress_pr_url: pr }))).toBe(
+      1,
+    );
+  });
+
+  it('pings hub-medic when the agent could not classify the failure', () => {
+    const text = threadLine('', { category: 'infrastructure', confidence: 'low' });
+    expect(pings(text)).toBe(1);
+  });
+
+  it('does not ping for an already-known recurrence with no PR', () => {
+    const text = threadLine('', { action: 'report-only', known_issue: true });
+    expect(pings(text)).toBe(0);
+  });
+
+  it('never mentions test-automation-medic', () => {
+    for (const extra of [
+      { action: 'file', issue_url: issue },
+      { action: 'fix-pr', fix_pr_url: pr },
+      { action: 'report-only', suppress_pr_url: pr },
+      { category: 'infrastructure', confidence: 'low' },
+    ]) {
+      const text = threadLine('', extra);
+      expect(text).not.toContain('S09UF0EV0HG');
+      expect(text).not.toContain('test-automation-medic');
+    }
+  });
+});

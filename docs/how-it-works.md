@@ -59,11 +59,13 @@ The Hub team:
 - keeps the Hub settings in `configs/camunda-hub/`. Most coverage gaps are fixed there, and the coverage-fix agent handles many of them;
 - changes the generator when a gap needs new behaviour. The agent only reports those, and a person opens the change. The code is in `request-validation/`, `path-analyser/` and `materializer/`, and [AGENTS.md](../AGENTS.md) lists the rules a change must follow.
 
-**Pings are not switched yet.** Some generator alerts still go to `test-automation-medic` instead of `hub-medic`, and three
-posts ping nobody (the spec-bump alert, the re-enable check, the weekly report). The change is tracked in
-[#712](https://github.com/camunda/api-test-generator/issues/712). Until then, whoever is on call as `hub-medic` reads both Slack
-channels each morning: PR-check alerts and the gap digest are in `#camunda-hub-pr-e2e-results`, everything else is in
-`#camunda-hub-nightly-test-results`.
+**Who gets pinged.** `hub-medic` is pinged for every alert: a failed PR check, a newly filed Hub issue, a fix or suppress PR
+that needs review, the spec-bump alert, the re-enable check, and the weekly report when it lists gaps.
+`test-automation-medic` is also pinged only when a PR check fails before the tests start (a setup problem such as a clone
+token or registry login) or keeps failing with no evidence. Every PR to this repo requests a review from
+`@camunda/hub-backend` (see `.github/CODEOWNERS`). The daily gap digest and the coverage-fix agent's thread reply ping nobody
+by name, so whoever is on call as `hub-medic` reads both Slack channels each morning: PR-check alerts and the gap digest
+are in `#camunda-hub-pr-e2e-results`, everything else is in `#camunda-hub-nightly-test-results`.
 
 **Questions or help:** ask in `#ask-qa` and tag `@test-automation-medic`. The enablement team answers there, but nothing here depends on a reply.
 

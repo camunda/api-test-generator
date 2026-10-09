@@ -1253,16 +1253,13 @@ jobs:
           else
             headline=":red_circle: *Generated Hub Suite Failed on a camunda-hub PR*"
           fi
-          # product ALSO pings hub-medic — it's their pipeline (this PR) that
-          # a confirmed regression implicates, same "whoever owns the broken
-          # thing" routing every AlwaysGreen variant we looked at uses. BUT
-          # only at confidence "high" — the prompt's own rule #4 now requires
-          # a specific causal link to this PR before it may say "product" at
-          # high confidence; anything less means classify itself couldn't
-          # rule out a standing, pre-existing bug unrelated to this PR. A
-          # medium/low-confidence guess still isn't worth paging a human over
-          # (defense-in-depth alongside the prompt hardening, not a
-          # replacement for it — the LLM can still misjudge).
+          # The Hub team owns both Hub and the generator, so every alert pings hub-medic.
+          # test-automation-medic is added only where the cause is shared pipeline
+          # setup (checkout, clone token, registry login) that the Hub team cannot
+          # fix, which is the "presuite" case and the 3-failures-no-evidence
+          # escalation below. A "product" verdict still carries its confidence in
+          # the message; the prompt's rule #4 requires a specific causal link to
+          # this PR before it may say "product" at high confidence.
           # classify is skipped when the suites never ran, so CATEGORY is empty.
           if [ "$HUB_START_FAILED" = "true" ]; then
             CATEGORY=startup
@@ -1272,31 +1269,27 @@ jobs:
           case "$CATEGORY" in
             startup)
               verdict="The Hub PR image did not start or become ready, so no tests ran. Check the run's \"Wait for Hub to be ready\" step for the container's startup error."
-              ping="${hub_medic} ${ta_medic}"
+              ping="${hub_medic}"
               ;;
             presuite)
               verdict="The run failed before the suites started, in a setup step (checkout, clone, install, registry login or image pull) rather than in Hub itself. Check the run to see which step."
-              ping="${ta_medic}"
+              ping="${hub_medic} ${ta_medic}"
               ;;
             product)
               verdict="Likely a real regression from this PR (confidence: ${CONFIDENCE}). ${SUMMARY}"
-              if [ "$CONFIDENCE" = "high" ]; then
-                ping="${hub_medic} ${ta_medic}"
-              else
-                ping="${ta_medic}"
-              fi
+              ping="${hub_medic}"
               ;;
             generator-gap)
               verdict="Likely api-test-generator not yet handling a new/changed endpoint shape, not a hub bug (confidence: ${CONFIDENCE}). ${SUMMARY}"
-              ping="${ta_medic}"
+              ping="${hub_medic}"
               ;;
             infra)
               verdict="Looks like an infrastructure failure, not a regression (confidence: ${CONFIDENCE}). ${SUMMARY}"
-              ping="${ta_medic}"
+              ping="${hub_medic}"
               ;;
             flaky)
               verdict="Looks flaky, not a regression (confidence: ${CONFIDENCE}). ${SUMMARY}"
-              ping="${ta_medic}"
+              ping="${hub_medic}"
               ;;
             unknown)
               # Rule #4's hardening made this category more likely to fire —
@@ -1308,7 +1301,7 @@ jobs:
               # hedge below, which forces a reader to open the run just to
               # see a one-line diagnostic that was already computed.
               verdict="Could not confirm this is a real regression from this PR (confidence: ${CONFIDENCE}). ${SUMMARY}"
-              ping="${ta_medic}"
+              ping="${hub_medic}"
               ;;
             *)
               # Unreachable in practice — the parse step's own enum
@@ -1316,7 +1309,7 @@ jobs:
               # cases above by the time it gets here. Kept as a defensive
               # fallback in case that guarantee is ever weakened upstream.
               verdict="Could be a real regression from this PR, an unhandled case in api-test-generator for a new/changed endpoint (unmapped operation, unmodelled schema shape), or infra/flakiness — check the run to tell which before this merges."
-              ping="${ta_medic}"
+              ping="${hub_medic}"
               ;;
           esac
 
@@ -1401,7 +1394,7 @@ jobs:
           echo "mode=${mode}" >> "$GITHUB_OUTPUT"
 
           if [ "$mode" = "streak" ]; then
-            closing="_No test evidence was produced, so nobody is pinged yet. If it fails like this 3 times today on this PR, test-automation-medic is pinged._"
+            closing="_No test evidence was produced, so nobody is pinged yet. If it fails like this 3 times today on this PR, hub-medic and test-automation-medic are pinged._"
           else
             closing="${ping} please take a look."
           fi
@@ -1488,10 +1481,11 @@ jobs:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
+          hub_medic='<!subteam^S014VK4482H|hub-medic>'
           ta_medic='<!subteam^S09UF0EV0HG|test-automation-medic>'
           pr_ref="${PR_NUMBER:+<https://github.com/camunda/camunda-hub/pull/${PR_NUMBER}|#${PR_NUMBER}>}"
-          printf ':rotating_light: *Generated hub suite keeps failing without any test evidence* — camunda-hub PR %s has failed 3 times today and none of those runs left evidence of a failing test. That points at the pipeline (Hub start, report upload, run summary or the runner) rather than at the PR. <%s|Latest run>\n\n%s please take a look.\n' \
-            "${pr_ref:-(PR number unavailable)}" "$RUN_URL" "$ta_medic" > "${RUNNER_TEMP}/escalation.txt"
+          printf ':rotating_light: *Generated hub suite keeps failing without any test evidence* — camunda-hub PR %s has failed 3 times today and none of those runs left evidence of a failing test. That points at the pipeline (Hub start, report upload, run summary or the runner) rather than at the PR. <%s|Latest run>\n\n%s %s please take a look.\n' \
+            "${pr_ref:-(PR number unavailable)}" "$RUN_URL" "$hub_medic" "$ta_medic" > "${RUNNER_TEMP}/escalation.txt"
           node scripts/triage/slack-thread.ts \
             --channel "#camunda-hub-pr-e2e-results" \
             --date "$(date -u +%Y-%m-%d)" \
