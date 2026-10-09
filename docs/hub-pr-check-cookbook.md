@@ -25,8 +25,13 @@ does not yet understand a new endpoint, or that the test run itself had a proble
 | No status at all | Skipped on purpose (draft PR, fork, docs-only change) | Nothing |
 | Red (`failure`) | Something failed | Follow the steps below |
 
-**Which PRs get the check.** Every camunda-hub PR that is not a draft, not from a fork, does not target a `self-managed/*`
-branch, and changes more than frontend, e2e, docs, `.claude` or `.agents` files. Any other PR gets no check and no status.
+**Which PRs get the check.** Every camunda-hub PR, except:
+
+- drafts and PRs from forks;
+- PRs that target a `self-managed/*` branch;
+- PRs that change **only** frontend, e2e, docs, `.claude` or `.agents` files. Such a PR cannot affect the API. If it changes even one file elsewhere (backend, the API spec), the check runs.
+
+A PR that is skipped gets no check and no status.
 
 **When it comments on your PR.** Rarely. Only when your own spec change broke the generator (a new or changed endpoint it
 does not handle yet): it leaves one comment, and edits it in place on later pushes. Every other result is a status plus
