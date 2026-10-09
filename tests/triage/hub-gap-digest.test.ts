@@ -214,6 +214,34 @@ describe('collectGapIssues', () => {
     expect(r.truncated).toBe(false);
   });
 
+  // The endpoint returns pull requests too, so a full page past the cap can hold no issue at all.
+  const fullOfPrs = (): ApiIssue[] =>
+    Array.from({ length: 100 }, (_, k) => apiIssue(5000 + k, { pull_request: {} }));
+
+  it('is truncated when an issue sits behind a full page of pull requests past the cap', async () => {
+    const r = await collectGapIssues(async (page) => {
+      if (page === 6) return fullOfPrs();
+      if (page === 7) return [apiIssue(901)];
+      return pagesOf(500)(page);
+    });
+    expect(r.issues).toHaveLength(500);
+    expect(r.truncated).toBe(true);
+  });
+
+  it('is complete when full pages of pull requests past the cap end in a short page', async () => {
+    const r = await collectGapIssues(async (page) => {
+      if (page === 6) return fullOfPrs();
+      if (page === 7) return [apiIssue(901, { pull_request: {} })];
+      return pagesOf(500)(page);
+    });
+    expect(r.truncated).toBe(false);
+  });
+
+  it('is truncated when it cannot show completeness within the probe limit', async () => {
+    const r = await collectGapIssues(async (page) => (page > 5 ? fullOfPrs() : pagesOf(500)(page)));
+    expect(r.truncated).toBe(true);
+  });
+
   it('leaves pull requests out of the issues it returns', async () => {
     const r = await collectGapIssues(async () => [apiIssue(1), apiIssue(2, { pull_request: {} })]);
     expect(r.issues.map((i) => i.number)).toEqual([1]);

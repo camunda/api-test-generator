@@ -128,9 +128,15 @@ function toGapIssues(batch: ApiIssue[]): GapIssue[] {
     }));
 }
 
-/** Reads up to MAX_PAGES pages of open gap issues. `truncated` is true only when an issue exists past
- * the cap: a full last page proves only that there are at least MAX_PAGES * PAGE_SIZE, so the next
- * page is probed before anything is reported as unread. `fetchPage` is injectable for tests. */
+/** Pages probed past the cap before giving up on proving the read complete. */
+const MAX_PROBE_PAGES = 5;
+
+/** Reads up to MAX_PAGES pages of open gap issues. A full last page proves only that there are at
+ * least MAX_PAGES * PAGE_SIZE results, and the endpoint also returns pull requests, so the pages past
+ * the cap are probed until an issue is found (`truncated`) or a short page ends the list (complete).
+ * If MAX_PROBE_PAGES full pages hold no issue, completeness cannot be shown and it counts as
+ * truncated, so the run fails rather than staying green over an unproven read. `fetchPage` is
+ * injectable for tests. */
 export async function collectGapIssues(
   fetchPage: (page: number) => Promise<ApiIssue[]>,
 ): Promise<{ issues: GapIssue[]; truncated: boolean }> {
@@ -140,8 +146,12 @@ export async function collectGapIssues(
     out.push(...toGapIssues(batch));
     if (batch.length < PAGE_SIZE) return { issues: out, truncated: false };
   }
-  const beyond = await fetchPage(MAX_PAGES + 1);
-  return { issues: out, truncated: toGapIssues(beyond).length > 0 };
+  for (let extra = 1; extra <= MAX_PROBE_PAGES; extra++) {
+    const beyond = await fetchPage(MAX_PAGES + extra);
+    if (toGapIssues(beyond).length > 0) return { issues: out, truncated: true };
+    if (beyond.length < PAGE_SIZE) return { issues: out, truncated: false };
+  }
+  return { issues: out, truncated: true };
 }
 
 function openGapIssues(
