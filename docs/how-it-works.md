@@ -40,6 +40,7 @@ a **re-enable check** (a Hub bug we had worked around was fixed, so a skipped te
 | No nightly post in the morning | The run or the posting broke, not Hub. See "If a morning has no nightly post" in the nightly guide |
 | Spec-bump alert | Hub's API changed. The bot has already opened a PR that updates the pinned spec: review it and merge it |
 | Re-enable check | A Hub bug was fixed. Bring the test back, or decide on a bug closed as not planned |
+| A weekday post in `#camunda-hub-pr-e2e-results` listing generator gaps | A merged Hub PR left a generator gap. Open each issue and finish the generator PR |
 | Weekly report lists gaps | Read the "what to do" column. Some are Hub bugs, some are generator gaps |
 | A draft PR from the coverage-fix agent | Read its "In plain words" section first. Review it like any PR |
 | Not sure | Ask in `#ask-qa` (tag `@test-automation-medic`) and include the run link |
