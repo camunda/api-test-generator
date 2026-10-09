@@ -19,4 +19,4 @@ See `.env.example` for the full list of supported environment variables.
 
 ## What this suite covers
 
-Negative request-validation scenarios — every test sends an intentionally malformed request and asserts the server responds with HTTP 400. Coverage details are in `COVERAGE.md`.
+Negative request-validation scenarios — most tests send an intentionally malformed request and assert a refusal (HTTP 400, or 401, 403 or 404 for the auth and not-found kinds). A few send an edge case the server accepts (a pagination offset past the total, a search filter that is never validated) and assert HTTP 200. Coverage details are in `COVERAGE.md`.

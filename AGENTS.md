@@ -20,8 +20,8 @@ REST API by analysing the upstream OpenAPI spec. Two suites are emitted:
 
 - **Positive** scenarios (happy paths, dependency chains, oneOf variants,
   artifact deployments) via `path-analyser`.
-- **Negative** request-validation tests (HTTP 400 expectations across ~24
-  malformed-request kinds) via `request-validation`.
+- **Negative** request-validation tests (HTTP 400, 401, 403 and 404 refusals, plus a few
+  accepted edge cases that expect 200, across 35 scenario kinds) via `request-validation`.
 
 Inputs flow through the processing pipeline `semantic-graph-extractor`
 → `path-analyser` → `materializer` (with `request-validation` as a

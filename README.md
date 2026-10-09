@@ -3,8 +3,10 @@
 Generates Playwright integration test suites from the Camunda REST API OpenAPI specification.
 Analyses the spec's semantic type annotations (`x-semantic-type`) to build an operation
 dependency graph, then emits scenario-driven test files with full request/response synthesis.
-Also emits **negative request-validation tests** (intended HTTP 400) covering ~24 distinct
-malformed-request scenario kinds.
+Also emits **negative request-validation tests** covering 35 distinct scenario kinds. Most send a
+malformed request and expect a refusal (HTTP 400, or 401, 403 or 404 for the auth and not-found kinds);
+a few send an edge case the server accepts (a pagination offset past the total, a search filter that is
+never validated) and expect HTTP 200.
 
 > **Owning or working with the camunda-hub suite?** Start with the cookbook that matches you:
 > [your PR check is red, or you are adding an endpoint](docs/hub-pr-check-cookbook.md) ·
@@ -25,9 +27,9 @@ malformed-request scenario kinds.
 │ semantic-graph-extractor │               │   request-validation     │
 │                          │               │ (negative-test generator)│
 │ Parses bundled spec,     │               │                          │
-│ extracts semantic types  │               │ Synthesizes ~24 kinds of │
-│ & operations             │               │ malformed-request tests  │
-│ → operation-dependency-  │               │ expecting HTTP 400       │
+│ extracts semantic types  │               │ Synthesizes 35 kinds of  │
+│ & operations             │               │ negative scenario tests  │
+│ → operation-dependency-  │               │ expecting 4xx (some 200) │
 │   graph.json             │               │ → generated/<config>/    │
 └────────────┬─────────────┘               │   request-validation/    │
              │                             │   *.spec.ts              │
@@ -525,8 +527,9 @@ boundary, role-bundle layout, and emitter contract details.
 ### request-validation
 
 A spec-driven generator that synthesizes **negative** Playwright tests targeting
-request-validation surfaces — every test sends a deliberately malformed request
-and asserts the server responds with HTTP 400. Covers ~24 scenario kinds
+request-validation surfaces. Most tests send a deliberately malformed request and assert
+the server refuses it (HTTP 400, or 401, 403 or 404 for the auth and not-found kinds); a few send
+an edge case the server accepts and assert HTTP 200. Covers 35 scenario kinds
 including missing required fields (single + combinations), wrong primitive
 types, root-body type mismatches, `oneOf` ambiguity / no-match / cross-bleed,
 discriminator mismatches, enum / format / `multipleOf` / `uniqueItems` /
