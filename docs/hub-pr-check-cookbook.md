@@ -25,6 +25,18 @@ does not yet understand a new endpoint, or that the test run itself had a proble
 | No status at all | Skipped on purpose (draft PR, fork, docs-only change) | Nothing |
 | Red (`failure`) | Something failed | Follow the steps below |
 
+**Which PRs get the check.** Every camunda-hub PR that is not a draft, not from a fork, does not target a `self-managed/*`
+branch, and changes more than frontend, e2e, docs, `.claude` or `.agents` files. Any other PR gets no check and no status.
+
+**When it comments on your PR.** Rarely. Only when your own spec change broke the generator (a new or changed endpoint it
+does not handle yet): it leaves one comment, and edits it in place on later pushes. Every other result is a status plus
+a Slack alert, and a pass says nothing.
+
+**Does it open a fix PR?** No. The check only reads and reports, and opens issues: `Generator gap on camunda-hub#N` (assigned
+to you when your spec change caused it) and `[hub-pr-check] Coverage gap on camunda-hub#N` when an endpoint has no generated
+test. The fix is a generator PR, opened by a person (see "Adding or changing an endpoint in Hub" below) or, later, by the
+nightly triage agent for small, safe gaps.
+
 **How long it takes.** The check starts after Hub's image for your PR is built, and a run takes about 5 minutes. The status and the Slack alert appear when it finishes, not when it starts.
 
 **If it is red, read the verdict line in the Slack alert (or the run summary). It says which case you are in:**
