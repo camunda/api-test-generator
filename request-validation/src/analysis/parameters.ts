@@ -198,7 +198,12 @@ export function generateParamEnumViolation(
         path: op.path,
         type: 'param-enum-violation',
         target: `${p.in}.${p.name}`,
-        params: buildParams(op.path, { extraQuery: { [p.name]: String(invalid) } }),
+        // Path tokens and every other query param stay valid, so the 400 can only come from the enum.
+        params: {
+          ...buildParams(op.path, {}),
+          ...buildQueryParamMap(op),
+          [p.name]: String(invalid),
+        },
         expectedStatus: 400,
         description: `Enum violation for ${p.in} parameter ${p.name}`,
         headersAuth: true,
