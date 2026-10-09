@@ -212,5 +212,3 @@ More terms (medic, ontology, fingerprint, invariant tests, live check) are in th
 - **Skip:** a test left out on purpose because of a tracked Hub limitation, with an issue link. It can stay after the issue closes, when Hub will not fix it. A **suite-wide skip** is not tied to one endpoint.
 - **Partly checked:** the test runs, but one assertion (the error-body shape) is not made.
 - **Unmapped operation / coverage gap:** an endpoint with no generated test at all.
-
-What the workflows depend on (Vault, Slack token, registry login): [maintainers/workflow-dependencies.md](maintainers/workflow-dependencies.md).
