@@ -58,13 +58,7 @@ nightly triage agent for small, safe gaps.
 
 Still stuck? Ask in `#ask-qa` (tag `@test-automation-medic`) and include the run link. Every alert carries the links you need.
 
-**Where to look (GitHub Actions pages, in `camunda/api-test-generator`)**
-
-| Page | Shows |
-|---|---|
-| [hub-pr-check](https://github.com/camunda/api-test-generator/actions/workflows/hub-pr-check.yml) | The check that runs on every camunda-hub PR: every run, its result, and the reports. Start here for a red check |
-| [hub-pr-live-check](https://github.com/camunda/api-test-generator/actions/workflows/hub-pr-live-check.yml) | The live-Hub run on pull requests to *this* repo (changes to the generator itself). Not on camunda-hub PRs, and not on PRs opened by the automation account (the AI agents and the re-enable and spec-bump scripts): for those, read the diff and run `hub-ondemand-test` on the branch |
-| [hub-ondemand-test](https://github.com/camunda/api-test-generator/actions/workflows/hub-ondemand-test.yml) | Run the generated suite by hand for any branch of this repo. Steps: "Run it by hand" in [hub-nightly-cookbook.md](hub-nightly-cookbook.md) |
+The run for your PR, with its result and reports, is on the [hub-pr-check](https://github.com/camunda/api-test-generator/actions/workflows/hub-pr-check.yml) page.
 
 **Words used in this page and in the nightly cookbook**
 
@@ -99,6 +93,11 @@ first push and the nightly never fails. Then:
    - `do-not-close` is needed because a daily job (01:00 UTC) **closes every open `nightly-api-fix` PR that has had no
      activity for a day**. Without `do-not-close`, a PR that waits for review overnight can be closed on you.
 2. Ask for review in `#camunda-hub-pr-e2e-results`. After the handover the Hub team reviews generator PRs.
+
+**Testing your generator PR.** A PR to this repo gets the [hub-pr-live-check](https://github.com/camunda/api-test-generator/actions/workflows/hub-pr-live-check.yml)
+automatically, which runs the generated suite against a live Hub. It skips PRs opened by the automation account (the AI
+agents and the re-enable and spec-bump scripts). For those, read the diff and run the suite by hand: see
+"Run it by hand" in [hub-nightly-cookbook.md](hub-nightly-cookbook.md) (workflow [hub-ondemand-test](https://github.com/camunda/api-test-generator/actions/workflows/hub-ondemand-test.yml)).
 
 **If the nightly fails before your PR merges,** the triage agent may open its own fix PR for the same endpoint. That is the
 backstop, not a mistake by anyone. Keep whichever merges first and close the other. Whoever is on call for the nightly
