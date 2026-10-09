@@ -39,7 +39,7 @@ a Slack alert, and a pass says nothing.
 
 **Does it open a fix PR?** No. The check only reads and reports, and opens issues: `Generator gap on camunda-hub#N` (assigned
 to you when your spec change caused it) and `[hub-pr-check] Coverage gap on camunda-hub#N` when an endpoint has no generated
-test. The fix is a generator PR, opened by a person (see "Adding or changing an endpoint in Hub" below) or, later, by the
+test. The fix is a generator PR, opened by a person (see [Adding or changing an endpoint in Hub](#adding-or-changing-an-endpoint-in-hub-do-you-need-a-generator-pr)) or, later, by the
 nightly triage agent for small, safe gaps.
 
 **How long it takes.** The check starts after Hub's image for your PR is built, and a run takes about 5 minutes. The status and the Slack alert appear when it finishes, not when it starts.

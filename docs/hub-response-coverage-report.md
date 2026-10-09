@@ -85,7 +85,7 @@ After the fix:
 1. Regenerate and run the report with the commands in "Running it yourself" in the [internals page](maintainers/hub-coverage-report-internals.md), and check that the number moved.
 2. Run `CONFIG=camunda-hub npx vitest run tests/request-validation configs/camunda-hub/regression-invariants.test.ts`. The report only reads the generated files; to see the new test pass against a real Hub, run the `hub-ondemand-test` workflow on your branch (Actions, Run workflow).
 3. Raise the matching number in `configs/camunda-hub/coverage-floors.json` in the same PR.
-4. If the fix needed a flag or a new resource, see "Adding or changing an endpoint in Hub" in the PR-check cookbook for the labels.
+4. If the fix needed a flag or a new resource, see [Adding or changing an endpoint in Hub](hub-pr-check-cookbook.md#adding-or-changing-an-endpoint-in-hub-do-you-need-a-generator-pr) for the labels.
 
 `AGENTS.md` has more on each config file, but it is written for AI agents and is long. If a step here is unclear, ask in
 `#ask-qa`.
