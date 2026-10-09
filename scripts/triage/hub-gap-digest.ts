@@ -112,9 +112,15 @@ async function api<T>(url: string, token: string, init?: RequestInit): Promise<T
   return (await resp.json()) as T;
 }
 
-async function openGapIssues(repo: string, token: string): Promise<GapIssue[]> {
+const MAX_PAGES = 5;
+
+/** `truncated` is true when the page cap was reached with a full last page, so some issues were never read. */
+async function openGapIssues(
+  repo: string,
+  token: string,
+): Promise<{ issues: GapIssue[]; truncated: boolean }> {
   const out: GapIssue[] = [];
-  for (let page = 1; page <= 5; page++) {
+  for (let page = 1; page <= MAX_PAGES; page++) {
     const batch = await api<ApiIssue[]>(
       `https://api.github.com/repos/${repo}/issues?labels=generator-gap&state=open&per_page=100&page=${page}`,
       token,
@@ -129,9 +135,9 @@ async function openGapIssues(repo: string, token: string): Promise<GapIssue[]> {
         assignee: i.assignee?.login ?? '',
       });
     }
-    if (batch.length < 100) break;
+    if (batch.length < 100) return { issues: out, truncated: false };
   }
-  return out;
+  return { issues: out, truncated: true };
 }
 
 async function hubPrState(
@@ -168,6 +174,38 @@ export async function postDigest(
   if (!resp.ok) throw new Error(`Slack post failed: ${resp.error}`);
 }
 
+export interface Resolved {
+  items: Item[];
+  /** One line per issue the digest could not judge. Each one is a silent omission if not reported. */
+  failed: string[];
+}
+
+/** Looks up each gap issue's camunda-hub PR. An issue whose PR cannot be read, or whose title names
+ * no PR, is not guessed at (it can neither nag nor close), but it is reported in `failed` so the run
+ * fails rather than printing "nothing overdue" over a partial read. `lookup` is injectable for tests. */
+export async function resolveItems(
+  issues: GapIssue[],
+  lookup: (pr: number) => Promise<{ state: HubPrState; mergedAt: string }>,
+): Promise<Resolved> {
+  const items: Item[] = [];
+  const failed: string[] = [];
+  for (const issue of issues) {
+    const hubPr = parseHubPr(issue.title);
+    if (hubPr === null) {
+      failed.push(`api-test-generator#${issue.number}: no camunda-hub PR number in its title`);
+      continue;
+    }
+    try {
+      const { state, mergedAt } = await lookup(hubPr);
+      items.push({ ...issue, hubPr, hubState: state, mergedAt });
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      failed.push(`camunda-hub#${hubPr} (api-test-generator#${issue.number}): ${reason}`);
+    }
+  }
+  return { items, failed };
+}
+
 async function main(): Promise<void> {
   const repo = env('GITHUB_REPOSITORY') || 'camunda/api-test-generator';
   const dryRun = env('DRY_RUN') === 'true';
@@ -175,18 +213,15 @@ async function main(): Promise<void> {
   const hubToken = env('HUB_TOKEN');
   if (!ghToken || !hubToken) throw new Error('GITHUB_TOKEN and HUB_TOKEN are required');
 
-  const items: Item[] = [];
-  for (const issue of await openGapIssues(repo, ghToken)) {
-    const hubPr = parseHubPr(issue.title);
-    if (hubPr === null) continue;
-    try {
-      const { state, mergedAt } = await hubPrState(hubPr, hubToken);
-      items.push({ ...issue, hubPr, hubState: state, mergedAt });
-    } catch (err) {
-      // An unreadable PR is left out rather than guessed at, so it can neither nag nor close.
-      console.error(`::warning::camunda-hub#${hubPr}: ${err instanceof Error ? err.message : err}`);
-    }
+  // Every problem is collected and reported at the end. The run still posts and closes what it
+  // could read, then fails, so a partial read is never mistaken for a clean one.
+  const problems: string[] = [];
+  const { issues, truncated } = await openGapIssues(repo, ghToken);
+  if (truncated) {
+    problems.push(`more than ${MAX_PAGES * 100} open generator-gap issues; the rest were not read`);
   }
+  const { items, failed } = await resolveItems(issues, (pr) => hubPrState(pr, hubToken));
+  problems.push(...failed);
 
   const digest = buildDigest(items, new Date());
 
@@ -207,15 +242,27 @@ async function main(): Promise<void> {
 
   if (digest.text === '') {
     console.log('Nothing overdue; staying silent.');
-    return;
+  } else {
+    console.log(digest.text);
+    const slackToken = env('SLACK_TOKEN');
+    if (dryRun) {
+      console.log('Dry run: not posting.');
+    } else if (!slackToken) {
+      problems.push('overdue PRs found but SLACK_TOKEN is empty, so the digest was not posted');
+    } else {
+      await postDigest(
+        digest.text,
+        slackToken,
+        env('SLACK_CHANNEL') || '#camunda-hub-pr-e2e-results',
+      );
+    }
   }
-  console.log(digest.text);
-  const slackToken = env('SLACK_TOKEN');
-  if (dryRun || !slackToken) {
-    console.log(dryRun ? 'Dry run: not posting.' : '::warning::SLACK_TOKEN is empty; not posting.');
-    return;
+
+  // A dry run still fails on problems: it is how a manual check shows a partial read.
+  if (problems.length > 0) {
+    for (const p of problems) console.error(`::error title=Digest incomplete::${p}`);
+    throw new Error(`Digest incomplete: ${problems.length} problem(s), see the errors above`);
   }
-  await postDigest(digest.text, slackToken, env('SLACK_CHANNEL') || '#camunda-hub-pr-e2e-results');
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) await main();
