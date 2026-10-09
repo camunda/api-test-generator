@@ -204,7 +204,7 @@ How to read the message, how to close a gap, and what the agent does and never d
 
 ## Words used
 
-More terms (medic, ontology, fingerprint, invariant tests, live check) are in the glossary of [hub-pr-check-cookbook.md](hub-pr-check-cookbook.md). The config files and keys named in this guide are in [maintainers/config-files.md](maintainers/config-files.md).
+More terms (medic, ontology, fingerprint, invariant tests, live check) are in the glossary of [hub-pr-check-cookbook.md](hub-pr-check-cookbook.md).
 
 - **Operation:** one API endpoint, as the spec names it (for example `getWorkspace`). The guide says "endpoint" and "operation" for the same thing.
 - **Fix PR / suppress PR:** a draft PR the triage agent opens in this repo. A fix PR corrects a wrong generated test. A suppress PR switches a test off until a Hub bug is fixed. It carries the same labels as a fix PR; its branch is named `fix/nightly-triage-suppress-…`.
