@@ -88,6 +88,20 @@ describe('param scenarios: parameters other than the target are valid', () => {
     }
   }
 
+  it('keeps endTime after startTime whenever neither is the target', () => {
+    // The server rejects an equal or reversed pair with "The endTime must be after startTime",
+    // so two valid-looking date placeholders can still fail on each other.
+    for (const [kind, scenarios] of Object.entries(kinds)) {
+      for (const s of scenarios) {
+        const start = s.params?.startTime;
+        const end = s.params?.endTime;
+        if (start === undefined || end === undefined) continue;
+        if (Number.isNaN(Date.parse(start)) || Number.isNaN(Date.parse(end))) continue;
+        expect(Date.parse(end), `${kind}: ${s.target}`).toBeGreaterThan(Date.parse(start));
+      }
+    }
+  });
+
   it('does not emit a type-mismatch scenario for a string whose format cannot be checked', () => {
     // `TenantId` is a custom format. A query value is always a string, so any valid TenantId
     // would be accepted and the test would get 200, not 400.

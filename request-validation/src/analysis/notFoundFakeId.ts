@@ -10,6 +10,7 @@ import { isMultipartOnly } from '../util/multipartSkip.js';
 import {
   buildValidValue,
   isUrlCollapsingPathSegment,
+  orderedDateValues,
   type ResolvedParamSchema,
   resolveParamSchema,
 } from '../util/paramSchema.js';
@@ -240,10 +241,11 @@ export function generateNotFoundFakeId(ops: OperationModel[], opts: Opts): Valid
     if (!allFaked) continue;
     // Populate required query params with valid placeholders so the request
     // doesn't fail with an unrelated 400.
-    for (const q of op.parameters) {
-      if (q.in !== 'query' || !q.required) continue;
+    const requiredQuery = op.parameters.filter((q) => q.in === 'query' && q.required);
+    const dates = orderedDateValues(requiredQuery);
+    for (const q of requiredQuery) {
       const r = resolveParamSchema(q);
-      params[q.name] = r ? buildValidValue(r) : 'x';
+      params[q.name] = dates.get(q.name) ?? (r ? buildValidValue(r) : 'x');
     }
     const target = pathParams.map((p) => p.name).join('+');
     out.push({
