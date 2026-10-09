@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
+  type ApiIssue,
   buildDigest,
+  collectGapIssues,
   type DigestDeps,
   type GapIssue,
   type Item,
@@ -159,6 +161,70 @@ describe('resolveItems', () => {
     const r = await resolveItems([gap({})], async () => ({ state: 'open', mergedAt: '' }));
     expect(r.failed).toEqual([]);
     expect(r.items[0]?.hubState).toBe('open');
+  });
+});
+
+// Five full pages prove only that there are at least 500 issues, not that any was left unread, so the
+// page after the cap is probed. Reporting truncation on exactly 500 would fail every daily run.
+describe('collectGapIssues', () => {
+  const apiIssue = (number: number, over: Partial<ApiIssue> = {}): ApiIssue => ({
+    number,
+    html_url: `https://github.com/camunda/api-test-generator/issues/${number}`,
+    title: `Generator gap on camunda-hub#${number}`,
+    created_at: '2026-10-05T07:00:00Z',
+    assignee: null,
+    ...over,
+  });
+  // `total` issues, served 100 per page, numbered from 1.
+  const pagesOf =
+    (total: number) =>
+    async (page: number): Promise<ApiIssue[]> => {
+      const from = (page - 1) * 100 + 1;
+      const to = Math.min(page * 100, total);
+      return from > to ? [] : Array.from({ length: to - from + 1 }, (_, k) => apiIssue(from + k));
+    };
+
+  it('stops at a short page without reading further', async () => {
+    const asked: number[] = [];
+    const r = await collectGapIssues(async (page) => {
+      asked.push(page);
+      return pagesOf(150)(page);
+    });
+    expect(r.issues).toHaveLength(150);
+    expect(r.truncated).toBe(false);
+    expect(asked).toEqual([1, 2]);
+  });
+
+  it('is not truncated when there are exactly 500 issues', async () => {
+    const r = await collectGapIssues(pagesOf(500));
+    expect(r.issues).toHaveLength(500);
+    expect(r.truncated).toBe(false);
+  });
+
+  it('is truncated when an issue exists past the 500th', async () => {
+    const r = await collectGapIssues(pagesOf(501));
+    expect(r.issues).toHaveLength(500);
+    expect(r.truncated).toBe(true);
+  });
+
+  it('is not truncated when the page past the cap holds only pull requests', async () => {
+    const r = await collectGapIssues(async (page) =>
+      page === 6 ? [apiIssue(900, { pull_request: {} })] : pagesOf(500)(page),
+    );
+    expect(r.truncated).toBe(false);
+  });
+
+  it('leaves pull requests out of the issues it returns', async () => {
+    const r = await collectGapIssues(async () => [apiIssue(1), apiIssue(2, { pull_request: {} })]);
+    expect(r.issues.map((i) => i.number)).toEqual([1]);
+  });
+
+  it('reads the assignee login, or an empty string when unassigned', async () => {
+    const r = await collectGapIssues(async () => [
+      apiIssue(1, { assignee: { login: 'alice' } }),
+      apiIssue(2),
+    ]);
+    expect(r.issues.map((i) => i.assignee)).toEqual(['alice', '']);
   });
 });
 

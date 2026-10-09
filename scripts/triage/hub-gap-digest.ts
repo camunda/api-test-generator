@@ -83,7 +83,7 @@ export function buildDigest(items: Item[], now: Date): Digest {
 
 // ---- I/O -------------------------------------------------------------------------------
 
-interface ApiIssue {
+export interface ApiIssue {
   number: number;
   html_url: string;
   title: string;
@@ -114,30 +114,46 @@ async function api<T>(url: string, token: string, init?: RequestInit): Promise<T
 
 const MAX_PAGES = 5;
 
-/** `truncated` is true when the page cap was reached with a full last page, so some issues were never read. */
-async function openGapIssues(
-  repo: string,
-  token: string,
+const PAGE_SIZE = 100;
+
+function toGapIssues(batch: ApiIssue[]): GapIssue[] {
+  return batch
+    .filter((i) => !i.pull_request)
+    .map((i) => ({
+      number: i.number,
+      url: i.html_url,
+      title: i.title,
+      createdAt: i.created_at,
+      assignee: i.assignee?.login ?? '',
+    }));
+}
+
+/** Reads up to MAX_PAGES pages of open gap issues. `truncated` is true only when an issue exists past
+ * the cap: a full last page proves only that there are at least MAX_PAGES * PAGE_SIZE, so the next
+ * page is probed before anything is reported as unread. `fetchPage` is injectable for tests. */
+export async function collectGapIssues(
+  fetchPage: (page: number) => Promise<ApiIssue[]>,
 ): Promise<{ issues: GapIssue[]; truncated: boolean }> {
   const out: GapIssue[] = [];
   for (let page = 1; page <= MAX_PAGES; page++) {
-    const batch = await api<ApiIssue[]>(
-      `https://api.github.com/repos/${repo}/issues?labels=generator-gap&state=open&per_page=100&page=${page}`,
-      token,
-    );
-    for (const i of batch) {
-      if (i.pull_request) continue;
-      out.push({
-        number: i.number,
-        url: i.html_url,
-        title: i.title,
-        createdAt: i.created_at,
-        assignee: i.assignee?.login ?? '',
-      });
-    }
-    if (batch.length < 100) return { issues: out, truncated: false };
+    const batch = await fetchPage(page);
+    out.push(...toGapIssues(batch));
+    if (batch.length < PAGE_SIZE) return { issues: out, truncated: false };
   }
-  return { issues: out, truncated: true };
+  const beyond = await fetchPage(MAX_PAGES + 1);
+  return { issues: out, truncated: toGapIssues(beyond).length > 0 };
+}
+
+function openGapIssues(
+  repo: string,
+  token: string,
+): Promise<{ issues: GapIssue[]; truncated: boolean }> {
+  return collectGapIssues((page) =>
+    api<ApiIssue[]>(
+      `https://api.github.com/repos/${repo}/issues?labels=generator-gap&state=open&per_page=${PAGE_SIZE}&page=${page}`,
+      token,
+    ),
+  );
 }
 
 async function hubPrState(
