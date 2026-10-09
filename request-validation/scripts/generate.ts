@@ -574,6 +574,7 @@ async function main() {
         ...generateParamTypeMismatch(model.operations, {
           capPerOperation: 10,
           onlyOperations: opts.onlyOperations,
+          unenforcedStringFormats: rvConfig.unenforcedStringFormats,
         }),
       );
     }
@@ -1366,7 +1367,8 @@ async function main() {
       // call (parameters.ts), so a path parameter or a plain string no longer makes an operation
       // look as if it were missing a check the generator cannot build.
       if (isParamMissingEligible(op)) applicable.add('param-missing');
-      if (isParamTypeMismatchEligible(op)) applicable.add('param-type-mismatch');
+      if (isParamTypeMismatchEligible(op, rvConfig.unenforcedStringFormats))
+        applicable.add('param-type-mismatch');
       if (isParamEnumViolationEligible(op)) applicable.add('param-enum-violation');
       // param-constraint-violation reuses the exact eligibility check
       // paramConstraintViolations.ts's own generator calls (resolveParamSchema,

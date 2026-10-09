@@ -3,6 +3,7 @@ import { type CapabilityGateInfo, isBlankValue } from '../util/capabilityGate.js
 import {
   buildValidValue,
   isUrlCollapsingPathSegment,
+  orderedDateValues,
   type ResolvedParamSchema,
   resolveParamSchema,
 } from '../util/paramSchema.js';
@@ -149,9 +150,11 @@ export function generateParamConstraintViolations(
       const gate = !p.required ? opts.capabilityGates?.get(p.name) : undefined;
       // Use valid placeholders for all params first
       const validMap: Record<string, string> = {};
-      for (const pp of op.parameters.filter((pp) => pp.in === p.in)) {
+      const sameIn = op.parameters.filter((pp) => pp.in === p.in);
+      const dates = orderedDateValues(sameIn);
+      for (const pp of sameIn) {
         const rr = resolveParamSchema(pp);
-        if (rr) validMap[pp.name] = buildValidValue(rr);
+        if (rr) validMap[pp.name] = dates.get(pp.name) ?? buildValidValue(rr);
       }
       for (const v of violations) {
         if (opts.capPerOperation && produced >= opts.capPerOperation) break;
