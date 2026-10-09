@@ -69,4 +69,4 @@ Which alerts ping whom today: see the status note in the [nightly guide](hub-nig
 - **Pin:** the exact version of Hub's API description the tests are built from.
 - **Medic:** a Slack group on call for a test area.
 
-Deeper detail for maintainers is in [docs/maintainers/](maintainers/). Want to change how the generator works? See the [README](../README.md) and [AGENTS.md](../AGENTS.md).
+Want to change how the generator works? See the [README](../README.md) and [AGENTS.md](../AGENTS.md).

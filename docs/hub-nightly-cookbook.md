@@ -91,7 +91,7 @@ Several actions below say "run the suite on a branch". Do it on GitHub:
 3. Read the result in the run summary and the uploaded reports. This workflow posts nothing to Slack or TestRail.
 
 On your own machine you need Docker, Node 22, Python 3 and a camunda-hub clone next to this repo. The commands are under
-"Reproducing locally" in [maintainers/hub-pr-check-reference.md](maintainers/hub-pr-check-reference.md).
+"Reproducing locally" in [hub-pr-check-cookbook.md](hub-pr-check-cookbook.md#reproducing-locally).
 
 
 ## The nightly posts (02:00)

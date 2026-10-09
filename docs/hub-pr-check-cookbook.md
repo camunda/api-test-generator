@@ -51,9 +51,9 @@ nightly triage agent for small, safe gaps.
 | "infrastructure failure" | Not yours, not Hub's. The run itself had a problem | Open the failed step in the run and read the error first. Find the outside cause (registry login, image pull, runner) and get it fixed or confirmed fixed; then re-run to check (see "Re-run without a new push" below). Do not re-run to hope it passes. If you cannot name a cause, ask in `#ask-qa` (tag `@test-automation-medic`) with the run link |
 | "looks flaky" | A real defect that comes and goes, not something to retry until green: a race or bad wait in a test, or a race or missed signal in Hub | Do not just re-run. Open the failing test in the run's report and look at the passed and failed attempts. If it is a Hub race, it is yours; if the test is at fault, ask in `#ask-qa` (tag `@test-automation-medic`) |
 | "Hub PR image did not start" | Possibly yours: Hub did not become ready | Open the run, find the step "Wait for Hub to be ready", read the startup error |
-| "api-test-generator not yet handling a new/changed endpoint" | The generator's, not a Hub bug | **You act first.** When your spec change caused it, an issue `Generator gap on camunda-hub#N` is opened, and assigned to you if GitHub allows it. `hub-medic` is the backup (see the note under "Who gets told what" in the [maintainer reference](maintainers/hub-pr-check-reference.md)). Ask in `#ask-qa` (tag `@test-automation-medic`) for help |
+| "api-test-generator not yet handling a new/changed endpoint" | The generator's, not a Hub bug | **You act first.** When your spec change caused it, an issue `Generator gap on camunda-hub#N` is opened, and assigned to you if GitHub allows it. `hub-medic` is the backup. Ask in `#ask-qa` (tag `@test-automation-medic`) for help |
 | "Likely a real regression from this PR" | Probably yours | Read the change the alert points to. The tests are right and Hub now answers differently |
-| "Could not confirm" | Unknown | Open the failing test in the run's report (steps below) |
+| "Could not confirm" | Unknown | Open the failing test in the run's report (see "Finding the cause" below) |
 | Every test of **one new endpoint** fails with 404, and you added it behind a feature flag | Nobody's bug: the test Hub does not switch your flag on | Add the flag to `docker/docker-compose.hub.yml` **in the api-test-generator repo** (a PR there, then re-run the check), or suppress the endpoint with a reason and an issue. Details under "Common failure patterns" |
 
 Still stuck? Ask in `#ask-qa` (tag `@test-automation-medic`) and include the run link. Every alert carries the links you need.
@@ -91,7 +91,7 @@ Instead:
   those, read the diff and run the suite by hand.
 - **On your machine, against your PR's own Hub.** Check out the Hub PR's commit next to this repo and start that PR's Hub
   image. Commands: "Reproducing locally" in
-  [maintainers/hub-pr-check-reference.md](maintainers/hub-pr-check-reference.md). It needs access to the container registry.
+  [Reproducing locally](#reproducing-locally). It needs access to the container registry.
 
 **When to merge it** depends on one thing: does the generator PR write the new endpoint's name (its `operationId`)?
 
@@ -127,15 +127,40 @@ If a test cannot pass yet, suppress it so CI is not blocked, and track it so it 
 
 ---
 
-# More detail
+## Finding the cause of a red check
 
-These are for people who find the cause of a red check. Reading how the check is built, who gets which Slack message, and how to debug or reproduce a run lives in [maintainers/hub-pr-check-reference.md](maintainers/hub-pr-check-reference.md).
+1. **Open the run** from the status's "Details" link. The run summary has the PR number, commit, image and a link back to
+   the camunda-hub run.
+2. **Download the `hub-suite-reports` artifact:** `pw-positive.json`, `pw-secured.json`, `pw-rbac.json` and `pw-*.stderr.log`.
+   If there are only logs, Playwright died before writing a report: read the stderr log, not the PR.
+3. **Find the failing tests.** A spec with `ok: false` failed. Its `results[].status` lists every attempt: a passed attempt
+   means it is flaky (Playwright exits 0 when a retry passes, so a retry alone never fails the run). The negative suite
+   attaches `request.json` and `response.json` inline: that exchange is the real evidence.
+4. **Compare with the spec.** The PR's spec is `restapi/public-api/src/main/resources/openapi/v2` in camunda-hub. Diff it
+   against the PR's base, not `main`.
+   - The operation is **new or changed** by the PR and the test does not fit the new shape: a generator gap.
+   - The operation is **unchanged** and still wrong: either the PR broke it through shared code, or it was always broken.
+     Call it a regression only with a specific change in the PR's code that explains it.
+5. **Check whether it is already tracked:** see "Can't fix it now?" above.
 
 ## Re-run without a new push
 
 Run the workflow `trigger-api-test-generator.yml` in camunda-hub by hand (Actions, then Run workflow) with the
 PR's `pr_number` and `source_sha`. This bypasses the path gate and the draft skip. Or run `hub-ondemand-test.yml`
 in api-test-generator against any branch.
+
+## Reproducing locally
+
+You need Docker, Node 22, Python 3 and access to the container registry (to pull the PR's image). The scripts expect the
+camunda-hub clone at `../camunda-hub`, and the first command **switches its branch**: save your work there first.
+
+```bash
+git -C ../camunda-hub checkout <PR sha>
+HUB_MODE=prebuilt HUB_IMAGE_TAG=pr-<sha> ./docker/start-hub.sh start
+STEPS="generate run" RV_PROFILES="secured rbac" ./scripts/e2e/run-hub.sh
+```
+
+Do not call `npx playwright` directly: it skips the `POS_FIXTURE_*` settings that `run-hub.sh` sets.
 
 ## Common failure patterns
 
@@ -149,40 +174,28 @@ in api-test-generator against any branch.
 - **Changed response shape.** Generated assertions expect the old schema. Generator gap.
 - **One broad acceptance failure on an untouched endpoint** (handler accepts any malformed input).
   Usually long-standing, not caused by this PR. Check `git log` of the controller before blaming.
-- **No reports at all.** Hub or Playwright died early. Startup/presuite, not the PR.
-- **A test passed on retry.** Playwright exits 0 when a retry passes, so this alone does not fail
-  the run. If the run failed, something else did.
 
 ## Things that look wrong but are not
 
-- *Green despite a coverage gap:* intentional. A missing test is not a failing test, and you cannot fix it from the Hub
-  PR (the fix is in the generator). The gap stays visible in the status description, a tracking issue
-  `[hub-pr-check] Coverage gap on camunda-hub#N` and Slack (yellow). If your own spec change caused it, you also get a
-  `Generator gap` issue and a comment on the PR. The repo-wide view is the weekly report:
-  [hub-response-coverage-report.md](hub-response-coverage-report.md).
-- *Red but "not a Hub bug":* the check is informational, not required, while reliability proves out.
+- *Green despite a coverage gap:* intentional. A missing test is not a failing test, and the fix is in the generator, not
+  your Hub PR. The gap stays visible in the status description, the `Coverage gap` issue and Slack (yellow). The repo-wide
+  view is the weekly report: [hub-response-coverage-report.md](hub-response-coverage-report.md).
 - *Slack edited instead of a new message:* the PR failed the same way again (same failing tests), so its message was updated and nobody was pinged again. A new message is posted only when the failure changes.
 - *The classifier said `unknown`:* it is told to prefer that over guessing `product`, because
   `product` at high confidence pages hub-medic.
 
 ## Keeping track of pending generator fixes
 
-- **Where:** open issues with the `generator-gap` label. There is **one issue per camunda-hub PR**, not one per
-  endpoint: the title names the PR (`[hub-pr-check] Generator gap on camunda-hub#N`) and the body lists every
-  endpoint that needs work. It is opened only when the PR's own spec change caused the gap.
-- **Who:** the author of that camunda-hub PR, assigned automatically when possible (not for bots, and not for an author without
-  access to this repo; then it stays unassigned). Reassign freely, it will not be overwritten.
-- **Not the same as the weekly report.** The weekly coverage report opens an index issue plus one issue per API
-  area. Those are repo-wide, not tied to any PR or author, so they are **not assigned**. The generator owner (the Hub
-  team after the handover) has to pick them up (see [hub-response-coverage-report.md](hub-response-coverage-report.md)).
-- **Daily nudge:** `hub-generator-gap-digest.yml` posts to `#camunda-hub-pr-e2e-results` on weekdays
-  at 07:00 UTC, listing issues whose camunda-hub PR has merged and whose issue is still open,
-  oldest merge first. Silent when there is nothing overdue.
-- **Cleanup:** an issue closes by itself on a green run, or when that PR is closed without merging.
-  If the gap comes back on a later push, the same issue is reopened.
-  The PR comment is marked resolved on a green run too. A failed run that is merely classified
-  differently proves nothing about the earlier gap, so it changes neither.
-- **Try it without posting:** run the digest workflow by hand (it is a dry run by default).
+- **Where:** open issues with the `generator-gap` label. There is **one issue per camunda-hub PR**, not one per endpoint:
+  the title names the PR (`[hub-pr-check] Generator gap on camunda-hub#N`) and the body lists every endpoint that needs work.
+  It is opened only when the PR's own spec change caused the gap, and assigned to the PR's author when possible (not for
+  bots or authors without access to this repo; reassign freely).
+- **Daily nudge:** `hub-generator-gap-digest.yml` posts to `#camunda-hub-pr-e2e-results` on weekdays at 07:00 UTC, listing
+  issues whose camunda-hub PR has merged and whose issue is still open, oldest first. Silent when nothing is overdue.
+- **Cleanup:** the issue closes by itself on a green run, or when its PR is closed without merging, and reopens if the gap
+  comes back. The PR comment is marked resolved on a green run too.
+- **Not the same as the weekly report.** Its index and area issues are repo-wide, not tied to a PR, and **not assigned**: the
+  Hub team picks them up (see [hub-response-coverage-report.md](hub-response-coverage-report.md)).
 
 ## Words used
 
