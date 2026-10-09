@@ -148,7 +148,7 @@ Hub's latest spec. The headline says what changed:
 | Headline | Meaning |
 |---|---|
 | **op-surface drift** vs the pin, with 🆕 added and 🗑️ removed operations | Endpoints were added or removed upstream |
-| **coverage regression** | A new endpoint has no generated test (🚫 *missing coverage*, blocks auto-adopt) |
+| **coverage regression** | A new endpoint has no generated test (🚫 *missing coverage*; the bot will not open a bump PR until it is fixed) |
 | **spec pin is behind** latest | The spec changed in small ways (fields), no endpoint churn |
 
 The last line says what to do:
@@ -204,8 +204,7 @@ How to read the message, how to close a gap, and what the agent does and never d
 
 ## Words used
 
-More terms (medic, ontology, fingerprint, op-surface drift, auto-adopt, lifecycle test and the config files) are in the
-[glossary](maintainers/glossary.md) and in the glossary of [hub-pr-check-cookbook.md](hub-pr-check-cookbook.md).
+More terms (medic, ontology, fingerprint, invariant tests, live check) are in the glossary of [hub-pr-check-cookbook.md](hub-pr-check-cookbook.md). The config files and keys named in this guide are in [maintainers/config-files.md](maintainers/config-files.md).
 
 - **Operation:** one API endpoint, as the spec names it (for example `getWorkspace`). The guide says "endpoint" and "operation" for the same thing.
 - **Fix PR / suppress PR:** a draft PR the triage agent opens in this repo. A fix PR corrects a wrong generated test. A suppress PR switches a test off until a Hub bug is fixed. It carries the same labels as a fix PR; its branch is named `fix/nightly-triage-suppress-…`.
