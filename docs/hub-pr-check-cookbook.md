@@ -2,7 +2,7 @@
 
 > **Goal:** if the `api-test-generator/hub-suite` check on your camunda-hub PR is red, or a Slack alert names
 > your PR, you can tell in a few minutes whether it is your problem and what to do. "Start here" assumes
-> you know Hub, not how the generator works; its few terms (generator gap, classifier, fingerprint) are explained in "Words used". The sections after it are reference for people who maintain the check. The check is
+> you know Hub, not how the generator works; its few terms (generator gap, classifier, fingerprint) are explained in "Words used" at the end. The sections after it are reference for people who maintain the check. The check is
 > **informational, not required**: a red result does not block merging.
 
 **Looking for something else?** This guide is only about the check on a single camunda-hub PR. For the nightly run, the spec-bump and re-enable alerts and the weekly report, see [how-it-works.md](how-it-works.md).
@@ -60,19 +60,6 @@ Still stuck? Ask in `#ask-qa` (tag `@test-automation-medic`) and include the run
 
 The run for your PR, with its result and reports, is on the [hub-pr-check](https://github.com/camunda/api-test-generator/actions/workflows/hub-pr-check.yml) page.
 
-**Words used in this page and in the nightly cookbook**
-
-- **Generated suite:** the tests, written by the generator from the spec. Nobody edits them by hand.
-- **Generator gap:** the generator has no test, or a wrong test, for an endpoint. Not a Hub bug.
-- **Coverage gap:** an endpoint with no generated test at all (also called an *unmapped operation*).
-- **Medic:** a Slack group on call for a test area (`hub-medic` is the on-call group; which alerts ping whom today is in the status note of the [nightly guide](hub-nightly-cookbook.md)).
-- **Classifier:** an automated step that reads the failure and picks one of the verdicts above. It is an AI agent and can be wrong; it is told to answer "unknown" rather than guess.
-- **Ontology:** the config files in `configs/camunda-hub/ontology/` that tell the generator how each resource is created, read, deleted and linked.
-- **Live check:** the `hub-pr-live-check` workflow, which runs the generated suite against a live Hub for pull requests to the generator repo itself. It skips pull requests from the automation account (the AI agents and the re-enable and spec-bump scripts); for those, a person reads the diff and runs the `hub-ondemand-test` workflow on the branch.
-- **Invariant tests:** tests in the generator repo that check the generated output against one pinned camunda-hub spec.
-- **Fingerprint:** a short label for exactly what failed, used so the same failure does not post twice (see "Who gets told what" in [maintainers/hub-pr-check-reference.md](maintainers/hub-pr-check-reference.md)).
-- **Evidence:** a failing test or an untested endpoint. "No evidence" means the run left no readable report.
-
 ## Adding or changing an endpoint in Hub: do you need a generator PR?
 
 **Usually no.** For a normal new endpoint the generator writes the success, bad-request, 401, 403 and 404 tests by itself, and
@@ -83,20 +70,28 @@ cannot work out:
 - a **state-dependent 409 or 400** that needs setup calls (`conflict-replay.json`);
 - a **new kind of resource** that should get a create, read, delete flow test (`ontology/entity-kinds.json`).
 
-**If you need one, open it at the same time as your Hub PR.**
+**If you need one, open it at the same time as your Hub PR, and add both labels:**
 
-**Testing it.** You can test the generator PR before your Hub PR merges, in two ways:
+- `nightly-api-fix`, so the nightly's triage sees your PR and links to it instead of opening a duplicate that races yours.
+- `do-not-close`, because a daily job (01:00 UTC) closes every open `nightly-api-fix` PR with no activity for a day. This
+  also keeps your PR open while it waits for a delayed Hub PR.
 
-- **On GitHub, to check the generator side.** Run `hub-ondemand-test` with **Use workflow from** set to your generator branch and `hub_ref` set to your Hub
-  PR's branch name (a camunda-hub branch, not a generator one). The tests are generated from your PR's spec with your generator fix. The Hub they run against is the latest
-  published build of Hub's `main`, **not your PR**, so tests for a brand-new endpoint get 404 there. It shows that
-  generation and the invariants work, not that the endpoint behaves as the tests expect. Steps: "Run it by hand" in
-  [hub-nightly-cookbook.md](hub-nightly-cookbook.md).
-- **On your machine, to check against your PR's own Hub.** Check out the Hub PR's commit next to this repo and start the
-  Hub image for that PR. Commands: "Reproducing locally" in
+Then ask for review in `#camunda-hub-pr-e2e-results` (after the handover the Hub team reviews generator PRs).
+
+**Testing it before your Hub PR merges.** Re-running the PR check does not test it: that runs the generator's `main`.
+Instead:
+
+- **On GitHub, to check the generator side.** Run `hub-ondemand-test` with **Use workflow from** set to your generator
+  branch and `hub_ref` set to your Hub PR's branch name (a camunda-hub branch, not a generator one). The tests come from
+  your PR's spec and your generator fix, but run against the latest published Hub `main`, **not your PR**, so tests for a
+  brand-new endpoint get 404 there. It shows that generation and the invariants work, not that the endpoint behaves as
+  expected. Steps: "Run it by hand" in [hub-nightly-cookbook.md](hub-nightly-cookbook.md). A PR to this repo also gets
+  [hub-pr-live-check](https://github.com/camunda/api-test-generator/actions/workflows/hub-pr-live-check.yml)
+  automatically, except PRs opened by the automation account (the AI agents and the re-enable and spec-bump scripts): for
+  those, read the diff and run the suite by hand.
+- **On your machine, against your PR's own Hub.** Check out the Hub PR's commit next to this repo and start that PR's Hub
+  image. Commands: "Reproducing locally" in
   [maintainers/hub-pr-check-reference.md](maintainers/hub-pr-check-reference.md). It needs access to the container registry.
-
-Re-running the PR check does not test your generator PR: it runs the generator's `main`.
 
 **When to merge it** depends on one thing: does the generator PR write the new endpoint's name (its `operationId`)?
 
@@ -106,30 +101,12 @@ Re-running the PR check does not test your generator PR: it runs the generator's
 - **Yes** (for example a line for it in `conflict-replay.json`): merge it **after** your Hub PR, or at the same time. The
   generator looks that name up in Hub's `main` spec, and until your Hub PR merges the endpoint is not there, so generation
   fails and the nightly goes red because of your generator PR. The PR check will not warn you, because it reads your
-  PR's own spec, which already has the endpoint.
-
-Then:
-
-1. **Add both labels to the generator PR: `nightly-api-fix` and `do-not-close`.**
-   - `nightly-api-fix` lets the nightly's triage see your PR. If the nightly runs before yours merges, the triage looks for
-     open PRs with that label that already cover the endpoint, and links to yours instead of opening its own. Without
-     the label it cannot see your PR, and you get a duplicate (the two race, and the loser is closed).
-   - `do-not-close` is needed because a daily job (01:00 UTC) **closes every open `nightly-api-fix` PR that has had no
-     activity for a day**. Without `do-not-close`, a PR that waits for review overnight can be closed on you.
-2. Ask for review in `#camunda-hub-pr-e2e-results`. After the handover the Hub team reviews generator PRs.
-
-**Testing your generator PR.** A PR to this repo gets the [hub-pr-live-check](https://github.com/camunda/api-test-generator/actions/workflows/hub-pr-live-check.yml)
-automatically, which runs the generated suite against a live Hub. It skips PRs opened by the automation account (the AI
-agents and the re-enable and spec-bump scripts). For those, read the diff and run the suite by hand: see
-"Run it by hand" in [hub-nightly-cookbook.md](hub-nightly-cookbook.md) (workflow [hub-ondemand-test](https://github.com/camunda/api-test-generator/actions/workflows/hub-ondemand-test.yml)).
+  PR's own spec, which already has the endpoint. If your Hub PR is delayed, leave the generator PR open and merge it
+  right after.
 
 **If the nightly fails before your PR merges,** the triage agent may open its own fix PR for the same endpoint. That is the
-backstop, not a mistake by anyone. Keep whichever merges first and close the other. Whoever is on call for the nightly
-(`hub-medic` after the handover) watches the nightly; you do not need to wait for them to start the generator PR.
-
-**If your Hub PR is delayed,** the generator PR can wait. Keep both labels: `do-not-close` stops the daily job from closing
-it while it waits. If it names the new endpoint, do not merge it early (see above); merge it right after the Hub PR merges.
-If the Hub PR is delayed so long that the nightly is already failing, see the paragraph above.
+backstop, not a mistake by anyone. Keep whichever merges first and close the other. You do not need to wait for
+`hub-medic` to start the generator PR.
 
 ## Can't fix it now? Suppress it as a bridge, and track it
 
@@ -162,14 +139,11 @@ in api-test-generator against any branch.
 
 ## Common failure patterns
 
-- **A new endpoint behind a feature flag fails with 404s.** The generator tests every operation in the spec, whether or not its
-  flag is on. Hub under test is started with a fixed list of flags, set in this repo's `docker/docker-compose.hub.yml`, not
-  by your PR. If your flag is not in that list, the endpoint is not registered and answers 404, so its success and
-  bad-request tests all fail (the nightly fails the same way until it is fixed). It is not a Hub bug. Fix it by adding the
-  flag to `docker/docker-compose.hub.yml` in this repo (the environment variable name must match how Hub reads the
-  property; see the comments in that file), or, if the endpoint should not be tested yet, by suppressing it with a reason
-  and a tracking issue. The alert may call it a generator gap or a product failure; check for 404 on every test of that
-  endpoint first.
+- **A new endpoint behind a feature flag fails with 404s.** The test Hub starts with a fixed list of flags, set in this repo's
+  `docker/docker-compose.hub.yml`, not by your PR. If your flag is not in it, the endpoint answers 404 and all its tests
+  fail (the nightly too). It is not a Hub bug. Add the flag there (the variable name must match how Hub reads the
+  property), or suppress the endpoint with a reason and a tracking issue. The alert may call it a generator gap or a
+  product failure: check for 404 on every test of that endpoint first.
 - **New endpoint, nothing generated.** Operation is in `unmappedOperations`. The ontology and
   scenario templates do not cover it yet. Not a Hub bug; the coverage-gap issue tracks it.
 - **Changed response shape.** Generated assertions expect the old schema. Generator gap.
@@ -181,16 +155,13 @@ in api-test-generator against any branch.
 
 ## Things that look wrong but are not
 
-- *No status on my PR:* drafts, forks, `self-managed/*` bases and docs/frontend-only PRs are
-  skipped by design. There is nothing to do.
-- *Green despite a coverage gap:* intentional. A missing test is not a failing test, and the author of the
-  camunda-hub PR cannot fix it (the fix is in the generator), so the check stays green while the gap is made
-  visible: the status description, a tracking issue `[hub-pr-check] Coverage gap on camunda-hub#N`, and Slack
-  (yellow headline). When the PR's own spec change caused the gap, it also gets a separate `Generator gap` issue
-  (assigned to the PR author when possible) and a comment on the PR. The repo-wide view of missing tests (not tied to one PR) is the weekly
-  report, see [hub-response-coverage-report.md](hub-response-coverage-report.md).
+- *Green despite a coverage gap:* intentional. A missing test is not a failing test, and you cannot fix it from the Hub
+  PR (the fix is in the generator). The gap stays visible in the status description, a tracking issue
+  `[hub-pr-check] Coverage gap on camunda-hub#N` and Slack (yellow). If your own spec change caused it, you also get a
+  `Generator gap` issue and a comment on the PR. The repo-wide view is the weekly report:
+  [hub-response-coverage-report.md](hub-response-coverage-report.md).
 - *Red but "not a Hub bug":* the check is informational, not required, while reliability proves out.
-- *Slack edited instead of a new message:* the PR failed the same way again, so its message was updated. See "Why a Slack message is sometimes edited instead of posted again" above.
+- *Slack edited instead of a new message:* the PR failed the same way again, so its message was updated. Details: "Why a Slack message is sometimes edited instead of posted again" in [maintainers/hub-pr-check-reference.md](maintainers/hub-pr-check-reference.md).
 - *The classifier said `unknown`:* it is told to prefer that over guessing `product`, because
   `product` at high confidence pages hub-medic.
 
@@ -212,3 +183,18 @@ in api-test-generator against any branch.
   The PR comment is marked resolved on a green run too. A failed run that is merely classified
   differently proves nothing about the earlier gap, so it changes neither.
 - **Try it without posting:** run the digest workflow by hand (it is a dry run by default).
+
+## Words used
+
+Terms used in this page and in the nightly guide.
+
+- **Generated suite:** the tests, written by the generator from the spec. Nobody edits them by hand.
+- **Generator gap:** the generator has no test, or a wrong test, for an endpoint. Not a Hub bug.
+- **Coverage gap:** an endpoint with no generated test at all (also called an *unmapped operation*).
+- **Medic:** a Slack group on call for a test area (`hub-medic` is the on-call group; which alerts ping whom today is in the status note of the [nightly guide](hub-nightly-cookbook.md)).
+- **Classifier:** an automated step that reads the failure and picks one of the verdicts above. It is an AI agent and can be wrong; it is told to answer "unknown" rather than guess.
+- **Ontology:** the config files in `configs/camunda-hub/ontology/` that tell the generator how each resource is created, read, deleted and linked.
+- **Live check:** the `hub-pr-live-check` workflow, which runs the generated suite against a live Hub for pull requests to the generator repo itself. It skips pull requests from the automation account (the AI agents and the re-enable and spec-bump scripts); for those, a person reads the diff and runs the `hub-ondemand-test` workflow on the branch.
+- **Invariant tests:** tests in the generator repo that check the generated output against one pinned camunda-hub spec.
+- **Fingerprint:** a short label for exactly what failed, used so the same failure does not post twice (see "Who gets told what" in [maintainers/hub-pr-check-reference.md](maintainers/hub-pr-check-reference.md)).
+- **Evidence:** a failing test or an untested endpoint. "No evidence" means the run left no readable report.
