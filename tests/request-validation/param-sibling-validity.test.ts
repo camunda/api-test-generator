@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { generateParamConstraintViolations } from '../../request-validation/src/analysis/paramConstraintViolations.js';
 import {
+  generateParamEnumViolation,
   generateParamMissing,
   generateParamTypeMismatch,
 } from '../../request-validation/src/analysis/parameters.js';
@@ -9,6 +10,7 @@ import type {
   ParameterModel,
   ValidationScenario,
 } from '../../request-validation/src/model/types.js';
+import { buildValidValue } from '../../request-validation/src/util/paramSchema.js';
 
 /**
  * A param scenario puts one bad value on its target parameter and fills every other parameter with a
@@ -63,7 +65,12 @@ function invalidSiblings(op: OperationModel, s: ValidationScenario): string[] {
   for (const p of op.parameters) {
     if (p.name === target) continue;
     const value = s.params?.[p.name];
-    if (value === undefined) continue; // an omitted optional sibling is valid
+    if (value === undefined) {
+      // An omitted optional sibling is valid; an omitted required one makes the server answer 400
+      // for the missing parameter instead of the target.
+      if (p.required) bad.push(`${p.name} is required but missing`);
+      continue;
+    }
     const why = violation(p, String(value));
     if (why) bad.push(`${p.name}=${String(value)} (${why})`);
   }
@@ -107,5 +114,44 @@ describe('param scenarios: parameters other than the target are valid', () => {
     // would be accepted and the test would get 200, not 400.
     const targets = generateParamTypeMismatch([usageMetrics], {}).map((s) => s.target);
     expect(targets).not.toContain('query.tenantId');
+  });
+});
+
+describe('param-enum-violation: the other params are valid too', () => {
+  // A required date-time next to an enum target. Without the baseline the request omits `startTime`
+  // and the server answers 400 for the missing parameter, not for the enum.
+  const withEnum: OperationModel = {
+    operationId: 'listThings',
+    method: 'GET',
+    path: '/things/{id}',
+    tags: [],
+    parameters: [
+      { name: 'id', in: 'path', required: true, schema: { type: 'string' } },
+      param('startTime', true, { type: 'string', format: 'date-time' }),
+      param('endTime', false, { type: 'string', format: 'date-time' }),
+      param('status', false, { type: 'string', enum: ['OPEN', 'CLOSED'] }),
+    ],
+  };
+
+  it('sends a valid value for every other query param, and keeps the path placeholder', () => {
+    const scenarios = generateParamEnumViolation([withEnum], {});
+    expect(scenarios.map((s) => s.target)).toEqual(['query.status']);
+    for (const s of scenarios) {
+      expect(invalidSiblings(withEnum, s)).toEqual([]);
+      expect(s.params?.id).toBe('1');
+      expect(s.params?.status).toBe('OPEN_X');
+    }
+  });
+});
+
+describe('buildValidValue: the value satisfies the schema pattern', () => {
+  it.each([
+    ['^[A-Z]+$', undefined],
+    ['^[a-z]{3}$', 3],
+    ['^[0-9]+-[0-9]+$', undefined],
+    ['^\\d*\\*$', undefined],
+  ])('pattern %s', (pattern, minLength) => {
+    const value = buildValidValue({ schema: {}, type: 'string', pattern, minLength });
+    expect(new RegExp(pattern).test(value), `got '${value}'`).toBe(true);
   });
 });

@@ -72,7 +72,25 @@ export function buildValidValue(r: ResolvedParamSchema): string {
   const byFormat = r.format !== undefined ? VALID_BY_FORMAT[r.format] : undefined;
   if (byFormat !== undefined) return byFormat;
   const first = r.minLength && r.minLength > 1 ? 'a'.repeat(r.minLength) : 'x';
-  return firstSatisfying([first, 'x', 'a', '1', 'a_1'], r) ?? first;
+  // Cover the pattern shapes in the bundled specs: lowercase, uppercase, digits, `1-1` keys and
+  // `1*` prefix wildcards. If none fits, `first` is returned and the scenario sends it as is.
+  const candidates = [
+    first,
+    'x',
+    'a',
+    '1',
+    'a_1',
+    'A',
+    'AA',
+    'A1',
+    'test',
+    '0',
+    'a-b',
+    '1-1',
+    '*',
+    '1*',
+  ];
+  return firstSatisfying(candidates, r) ?? first;
 }
 
 const END_NAME = /^(end|to|until|before)/i;

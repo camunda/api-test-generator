@@ -2986,7 +2986,8 @@ describeForThisConfig('bundled-spec invariants: query params in param scenarios'
     expect(typed.size, 'spec scan found typed query params').toBeGreaterThan(0);
 
     const offenders: string[] = [];
-    const call = /buildUrl\(\s*'([^']+)',\s*undefined,\s*\{([^}]*)\}/g;
+    // Slot 2 is `undefined` for a route without path params and an object for a keyed route.
+    const call = /buildUrl\(\s*'([^']+)',\s*(?:undefined|\{[^}]*\}),\s*\{([^}]*)\}/g;
     for (const f of readdirSync(dir)) {
       if (!f.endsWith('.spec.ts')) continue;
       const text = readFileSync(join(dir, f), 'utf8');
