@@ -83,8 +83,15 @@ cannot work out:
 - a **state-dependent 409 or 400** that needs setup calls (`conflict-replay.json`);
 - a **new kind of resource** that should get a create, read, delete flow test (`ontology/entity-kinds.json`).
 
-**If you need one, open it at the same time as your Hub PR.** Ideally it merges first, so the check is green from the
-first push and the nightly never fails. Then:
+**If you need one, open it at the same time as your Hub PR.** When to merge it depends on what it contains:
+
+- **It does not name the new endpoint** (for example a feature flag in `docker/docker-compose.hub.yml`): merge it first. The
+  check is green from the first push and the nightly never fails.
+- **It names the new endpoint** (for example an entry in `conflict-replay.json`): merge it **after** your Hub PR, or at the
+  same time. Until the endpoint is in Hub's `main` spec, generation fails on an operation it does not know, so the nightly
+  would fail from the generator side.
+
+Then:
 
 1. **Add both labels to the generator PR: `nightly-api-fix` and `do-not-close`.**
    - `nightly-api-fix` lets the nightly's triage see your PR. If the nightly runs before yours merges, the triage looks for
@@ -102,6 +109,10 @@ agents and the re-enable and spec-bump scripts). For those, read the diff and ru
 **If the nightly fails before your PR merges,** the triage agent may open its own fix PR for the same endpoint. That is the
 backstop, not a mistake by anyone. Keep whichever merges first and close the other. Whoever is on call for the nightly
 (`hub-medic` after the handover) watches the nightly; you do not need to wait for them to start the generator PR.
+
+**If your Hub PR is delayed,** the generator PR can wait. Keep both labels: `do-not-close` stops the daily job from closing
+it while it waits. If it names the new endpoint, do not merge it early (see above); merge it right after the Hub PR merges.
+If the Hub PR is delayed so long that the nightly is already failing, see the paragraph above.
 
 ## Can't fix it now? Suppress it as a bridge, and track it
 
