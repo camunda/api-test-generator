@@ -304,6 +304,8 @@ interface VariantScenario {
   variantKey?: string;
   hasEventuallyConsistent?: boolean;
   populatesSubShape?: { rootPath: string; leafPaths: string[]; leafSemantics?: string[] };
+  /** semantic type -> the operationId that produces it in this chain. */
+  productionMap?: Record<string, string>;
   operations: { operationId: string }[];
 }
 interface VariantScenarioFile {
@@ -1938,6 +1940,130 @@ describeForThisConfig('bundled-spec invariants: planner variant output (#37)', (
         }
       }
     }
+    expect(offenders).toEqual([]);
+  });
+
+  it('no variant chain contains a warm-up step whose only contribution is a self-produced optional semantic nothing downstream requires (Item 9)', () => {
+    // The defect this pins: every paginated search AUTHORITATIVELY returns the
+    // standard `page` envelope's cursors (`page.startCursor` / `page.endCursor`,
+    // `provider: true`) and OPTIONALLY accepts them (`page.before` /
+    // `page.after`). `tryProducerChainVariant`'s `buildAdditional` therefore
+    // collected `{StartCursor, EndCursor}` from the chosen producer's own
+    // optional inputs and handed them to BFS as hard `additionalNeeded`. BFS
+    // then scheduled an EARLIER producer for a value the chain already yields
+    // one step later, picking the first cursor producer in spec-path order:
+    // `searchAgentDefinitions` — the alphabetically-first paginated resource
+    // and the one with no create operation, so its page can never become
+    // non-empty and the emitted `await_eventually` wait for items never
+    // resolves. 9 of P3's 10 pass->fail live regressions were this.
+    //
+    // Class-scoped, not instance-scoped: the assertion is the fix's own rule
+    // ("a producer's authoritative output is not a need") generalised over the
+    // whole bundled spec. No semantic name and no operationId is
+    // special-cased, so it also catches the same mistake on any other
+    // self-produced optional semantic (a filter echo, a tenant id, ...).
+    //
+    // Deliberately NOT flagged: a step that supplies something a LATER step or
+    // the endpoint genuinely REQUIRES (a real prerequisite such as
+    // `createDeployment` -> `createProcessInstance`), and a step that produces
+    // the variant's own leaf semantic (the leaf producer must be scheduled
+    // even when it already produces that value — that is the load-bearing
+    // `searchAgentInstances` filtering by `agentDefinitionKey` case).
+    if (!existsSync(VARIANT_SCENARIOS_DIR)) return; // no variants generated yet
+
+    /** 2xx/3xx response semantics: what an operation authoritatively returns. */
+    function responseSemanticsOf(opId: string): Set<string> {
+      const out = new Set<string>();
+      for (const [statusCode, entries] of Object.entries(
+        findOperation(opId).responseSemanticTypes ?? {},
+      )) {
+        if (!statusCode.startsWith('2') && !statusCode.startsWith('3')) continue;
+        for (const e of entries) out.add(e.semanticType);
+      }
+      return out;
+    }
+    /** Semantics an operation accepts but does not need. */
+    function optionalInputsOf(opId: string): Set<string> {
+      const op = findOperation(opId);
+      const out = new Set<string>();
+      for (const e of op.requestBodySemanticTypes ?? []) {
+        if (!e.required) out.add(e.semanticType);
+      }
+      for (const p of op.parameters ?? []) {
+        if (!p.required && p.semanticType) out.add(p.semanticType);
+      }
+      return out;
+    }
+    /** Semantics an operation cannot be called without. */
+    function requiredInputsOf(opId: string): Set<string> {
+      const op = findOperation(opId);
+      const out = new Set<string>();
+      for (const e of op.requestBodySemanticTypes ?? []) {
+        if (e.required) out.add(e.semanticType);
+      }
+      for (const p of op.parameters ?? []) {
+        if (p.required && p.semanticType) out.add(p.semanticType);
+      }
+      return out;
+    }
+
+    const offenders: {
+      file: string;
+      scenario: string;
+      step: string;
+      contributesOnly: string[];
+    }[] = [];
+
+    for (const f of readdirSync(VARIANT_SCENARIOS_DIR)) {
+      if (!f.endsWith('-scenarios.json')) continue;
+      // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+      const file = JSON.parse(
+        readFileSync(join(VARIANT_SCENARIOS_DIR, f), 'utf8'),
+      ) as VariantScenarioFile;
+      const endpointOpId = file.endpoint.operationId;
+
+      for (const sc of file.scenarios) {
+        const ops = sc.operations.map((o) => o.operationId);
+        const productionMap = sc.productionMap ?? {};
+        const leafSemantics = new Set(sc.populatesSubShape?.leafSemantics ?? []);
+
+        // The final step is the endpoint call under test, never a warm-up.
+        for (let i = 0; i < ops.length - 1; i++) {
+          const step = ops[i];
+          if (step === endpointOpId) continue;
+
+          const contributes = new Set(
+            Object.entries(productionMap)
+              .filter(([, producer]) => producer === step)
+              .map(([semantic]) => semantic),
+          );
+          if (contributes.size === 0) continue;
+          // The leaf's own producer is load-bearing by definition.
+          if ([...contributes].some((s) => leafSemantics.has(s))) continue;
+
+          const selfProducedOptional = new Set(
+            [...responseSemanticsOf(step)].filter((s) => optionalInputsOf(step).has(s)),
+          );
+          // Everything it adds is a value its own call already returns.
+          if (![...contributes].every((s) => selfProducedOptional.has(s))) continue;
+
+          const requiredDownstream = new Set<string>();
+          for (const later of [...ops.slice(i + 1), endpointOpId]) {
+            for (const s of requiredInputsOf(later)) requiredDownstream.add(s);
+          }
+          // ...and nothing later in the chain actually needs it.
+          if ([...contributes].some((s) => requiredDownstream.has(s))) continue;
+
+          offenders.push({
+            file: f,
+            scenario: sc.id,
+            step,
+            contributesOnly: [...contributes].sort(),
+          });
+        }
+      }
+    }
+
     expect(offenders).toEqual([]);
   });
 });
