@@ -11071,6 +11071,99 @@ describeForThisConfig('bundled-spec invariants: emitted Python SDK suite (#133)'
       'Python request URLs must resolve against the API root exactly for serverOverride operations (Item 5A)',
     ).toEqual([]);
   });
+
+  it('no emitted Python request body can serialise an explicit JSON null from an unbound placeholder (Item 6a)', () => {
+    if (!existsSync(PYTHON_SDK_DIR)) {
+      throw new Error(
+        `Python SDK output directory not found at ${PYTHON_SDK_DIR}. Run 'npm run codegen:all' (or 'npm run testsuite:generate') first.`,
+      );
+    }
+    // The defect CLASS, not the cursor instance: a whole-string `${var}` body
+    // placeholder renders inline as a bare `ctx.get('var')`, which is None when
+    // the binding was never produced — and None serialises to an explicit JSON
+    // null. The broker treats an explicit null as a *present but unusable*
+    // value, not an absent one: `{"page":{"after":null}}` is 400 "At least one
+    // of [from, after, before, limit] is required", and so is `{"page":{}}`,
+    // while `{}` is 200. So the emitted literal must be wrapped in
+    // `prune_nulls(...)`, which drops the null AND any container it thereby
+    // emptied. Asserted for EVERY body/data assignment in EVERY suite, so a
+    // regression on any binding (cursor, key, tenant, …) is caught — not just
+    // on `page.after`.
+    //
+    // The concatenated placeholder form is deliberately excluded: it renders as
+    // `(str(ctx.get('x')) if ctx.get('x') is not None else '')`, which degrades
+    // to '' and can never be None. Those occurrences of `ctx.get(` are stripped
+    // first so they cannot be mistaken for a bare binding.
+    const CONCATENATED_GUARD_RE =
+      /\(str\(ctx\.get\('[^']*'\)\) if ctx\.get\('[^']*'\) is not None else ''\)/g;
+    const ASSIGNMENT_RE = /^\s+(body|data)_(\d+) = (.*)$/;
+    const files = readdirSync(PYTHON_SDK_DIR).filter(
+      (f) => f.startsWith('test_') && f.endsWith('.py'),
+    );
+    const offenders: string[] = [];
+    let wrappedBodies = 0;
+    let cursorBodies = 0;
+    for (const file of files) {
+      const src = readFileSync(join(PYTHON_SDK_DIR, file), 'utf8');
+      for (const line of src.split('\n')) {
+        const m = ASSIGNMENT_RE.exec(line);
+        if (m === null) continue;
+        const kind = String(m[1]);
+        const num = String(m[2]);
+        const rhs = String(m[3]);
+        const isWrapped = rhs.startsWith('prune_nulls(');
+        if (isWrapped) {
+          wrappedBodies += 1;
+          if (/'page': \{'(?:after|before)':/.test(rhs)) cursorBodies += 1;
+        }
+        // Strip the concatenated guard, then any surviving `ctx.get(` is a bare
+        // whole-string binding that can resolve to None.
+        const bare = rhs.replaceAll(CONCATENATED_GUARD_RE, '');
+        if (bare.includes('ctx.get(') && !isWrapped) {
+          offenders.push(
+            `${file} ${kind}_${num}: an inline ctx.get() binding can serialise an explicit JSON null but the body is not wrapped in prune_nulls() — ${rhs.trim()}`,
+          );
+        }
+        // Over-application is a defect too: wrapping a literal with no bare
+        // binding is dead code that churns the diff and obscures the real wraps.
+        if (isWrapped && !bare.includes('ctx.get(')) {
+          offenders.push(
+            `${file} ${kind}_${num}: wrapped in prune_nulls() but no inline binding can be None — ${rhs.trim()}`,
+          );
+        }
+      }
+      // Import/wrap consistency: a wrap without the import is a runtime
+      // NameError that fails every test in the file; an import without a wrap
+      // is dead code.
+      const uses = src.includes('prune_nulls(');
+      const imports = src.includes('from support.prune import prune_nulls');
+      if (uses && !imports) {
+        offenders.push(`${file}: uses prune_nulls() but does not import it`);
+      }
+      if (imports && !uses) {
+        offenders.push(`${file}: imports prune_nulls but never uses it`);
+      }
+    }
+    // Offenders first: on a real regression the list names the exact file and
+    // body, which is the useful signal. The non-vacuity guards below then catch
+    // the opposite failure — the invariant passing because there is nothing
+    // left to check (e.g. the planner stopped emitting cursor variants).
+    expect(
+      offenders,
+      'Every emitted Python body whose inline binding can resolve to None must be wrapped in prune_nulls(), and no body that cannot must be (Item 6a)',
+    ).toEqual([]);
+    // Non-vacuity: the bundled spec's cursor variants must actually exercise
+    // this. If the planner stopped emitting `${endCursorVar}`/`${startCursorVar}`
+    // bodies the invariant would pass while guarding nothing.
+    expect(
+      cursorBodies,
+      'Expected emitted cursor bodies (page.after/page.before) to check; the planner may have stopped emitting cursor variants.',
+    ).toBeGreaterThan(0);
+    expect(
+      wrappedBodies,
+      'Expected at least one prune_nulls-wrapped body; the emitter may have stopped wrapping null-capable placeholders.',
+    ).toBeGreaterThan(0);
+  });
 });
 
 describeForThisConfig('bundled-spec invariants: emitted JS SDK suite (#131)', () => {
