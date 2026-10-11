@@ -269,6 +269,13 @@ interface OperationNode {
   operationId: string;
   method: string;
   path: string;
+  /**
+   * The path item's own OpenAPI `servers` override, when it differs from the
+   * document root server — set by the extractor's `resolveServerOverride` for
+   * the cluster-admin paths, which are served at the API root rather than
+   * under `/v2`.
+   */
+  serverOverride?: string;
   parameters?: ParameterEntry[];
   requestBodySemanticTypes?: SemanticTypeEntry[];
   responseSemanticTypes?: Record<string, SemanticTypeEntry[]>;
@@ -10986,6 +10993,82 @@ describeForThisConfig('bundled-spec invariants: emitted Python SDK suite (#133)'
     expect(
       missing,
       'Planned scenarios exist but no Python SDK test file was materialized for these operationIds',
+    ).toEqual([]);
+  });
+
+  it('every emitted Python request URL for a serverOverride operation resolves against the API root, not the /v2 base (Item 5A)', () => {
+    if (!existsSync(PYTHON_SDK_DIR)) {
+      throw new Error(
+        `Python SDK output directory not found at ${PYTHON_SDK_DIR}. Run 'npm run codegen:all' (or 'npm run testsuite:generate') first.`,
+      );
+    }
+    const graph = loadGraph();
+    // The set of operations whose path item declares its own OpenAPI
+    // `servers` override (cluster-admin: served at the API root, not under
+    // `/v2`). Derived from the graph, never hardcoded to a path prefix, so a
+    // future path-item override on any operation is covered by the same rule.
+    const overrideOps = new Set(
+      graph.operations.filter((o) => o.serverOverride !== undefined).map((o) => o.operationId),
+    );
+    // Guard against the invariant silently passing because the graph drifted
+    // (e.g. the extractor stopped emitting serverOverride). The bundled spec
+    // has exactly 22 cluster-admin operations.
+    expect(
+      overrideOps.size,
+      'Expected the bundled spec to carry serverOverride operations (cluster-admin); the extractor may have stopped emitting the field.',
+    ).toBeGreaterThan(0);
+
+    const files = readdirSync(PYTHON_SDK_DIR).filter(
+      (f) => f.startsWith('test_') && f.endsWith('.py'),
+    );
+    // Per file, walk the `# Step N: <opId>` comments and the `url_N = f'...'`
+    // assignment that follows each, and assert the base matches the operation's
+    // override status. An override op MUST be absolute (`{root_base_url()}`);
+    // a non-override op MUST NOT be (catches over-application, which would
+    // send ordinary `/v2` requests to the root and 404 them).
+    const offenders: string[] = [];
+    let checkedOverrideSteps = 0;
+    for (const file of files) {
+      const src = readFileSync(join(PYTHON_SDK_DIR, file), 'utf8');
+      const stepOp = new Map<number, string>();
+      for (const m of src.matchAll(/# Step (\d+): (\S+)/g)) {
+        stepOp.set(Number(m[1]), String(m[2]));
+      }
+      for (const m of src.matchAll(/url_(\d+) = f'([^']*)'/g)) {
+        const n = Number(m[1]);
+        const urlExpr = String(m[2]);
+        const opId = stepOp.get(n);
+        if (opId === undefined) continue;
+        const isAbsolute = urlExpr.startsWith('{root_base_url()}');
+        if (overrideOps.has(opId)) {
+          checkedOverrideSteps += 1;
+          if (!isAbsolute) {
+            offenders.push(
+              `${file} url_${n} (${opId}): serverOverride operation emitted relative to the /v2 base — '${urlExpr}'`,
+            );
+          }
+        } else if (isAbsolute) {
+          offenders.push(
+            `${file} url_${n} (${opId}): non-override operation wrongly emitted against the API root — '${urlExpr}'`,
+          );
+        }
+      }
+      // A file that routes any step to the root must import the helper, else
+      // the emitted NameError would fail every test in it at runtime.
+      if (
+        src.includes('{root_base_url()}') &&
+        !src.includes('from support.base_url import root_base_url')
+      ) {
+        offenders.push(`${file}: uses root_base_url() but does not import it`);
+      }
+    }
+    expect(
+      checkedOverrideSteps,
+      'Expected at least one emitted serverOverride request step to check; the emitter may have stopped emitting cluster-admin URLs.',
+    ).toBeGreaterThan(0);
+    expect(
+      offenders,
+      'Python request URLs must resolve against the API root exactly for serverOverride operations (Item 5A)',
     ).toEqual([]);
   });
 });

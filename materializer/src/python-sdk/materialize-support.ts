@@ -171,6 +171,11 @@ poetry run pytest -m asyncio -v
 The generated tests execute real HTTP calls through \`httpx.AsyncClient\`.
 
 - \`CAMUNDA_BASE_URL\` (default: \`http://localhost:8080/v2\`)
+- \`CAMUNDA_ROOT_URL\` (optional) -- the API ROOT, used only by operations whose
+  path item declares its own OpenAPI \`servers\` override and is therefore served
+  outside \`/v2\` (the cluster-admin API at \`{host}:{port}/cluster/v2/...\`).
+  Defaults to \`CAMUNDA_BASE_URL\` with a trailing \`/v2\` stripped, so it normally
+  needs no setting. Mirrors the Playwright suite's \`API_ROOT_URL\`.
 - \`CAMUNDA_TIMEOUT_SECONDS\` (default: \`30\`)
 - \`BEARER_TOKEN\` (optional) -- sent as \`Authorization: Bearer <token>\` on every
   request, for secured clusters. Matches the Playwright/JS SDK suites' own
@@ -341,6 +346,53 @@ def seed_binding(name: str, unique: bool = False) -> str:
     if name.lower().endswith('id') or name.lower().endswith('key'):
         return f'{name}-{digest}'
     return f'{name}-{digest}'
+`,
+    },
+
+    {
+      relativePath: 'support/base_url.py',
+      content: `"""
+Resolve the API ROOT base URL for operations served outside the default '/v2' base.
+
+Some path items declare their own OpenAPI 'servers' override — the Orchestration
+Cluster REST API's cluster-admin operations are served at
+'{host}:{port}/cluster/v2/...' rather than under the document root's
+'{host}:{port}/v2'. The extractor records that as 'OperationRef.serverOverride',
+the planner carries it on 'RequestStep', and the emitter prefixes such a step's
+URL with 'root_base_url()' so httpx resolves it against the root instead of
+re-prefixing '/v2'.
+
+Mirrors materializer/src/playwright/support/env.ts's 'buildBaseUrl(true)',
+including its precedence, so both suites target the same host for the same
+operation.
+"""
+
+from __future__ import annotations
+
+import os
+import re
+
+
+def root_base_url() -> str:
+    """
+    Return the API root base URL, always ending with '/'.
+
+    Precedence (same as playwright's buildBaseUrl(true)):
+      1. CAMUNDA_ROOT_URL, when set.
+      2. CAMUNDA_BASE_URL with a trailing '/v2' stripped.
+      3. 'http://localhost:8080'.
+
+    The trailing '/' matters: emitted request URLs keep no leading '/', so per
+    RFC 3986 they EXTEND this path rather than replacing it. Without the slash
+    the last path segment would be dropped.
+    """
+    explicit = os.getenv("CAMUNDA_ROOT_URL")
+    if explicit:
+        root = explicit
+    else:
+        base = os.getenv("CAMUNDA_BASE_URL", "http://localhost:8080/v2")
+        root = re.sub(r"/v2/?$", "", base)
+    return root if root.endswith("/") else root + "/"
 `,
     },
 
