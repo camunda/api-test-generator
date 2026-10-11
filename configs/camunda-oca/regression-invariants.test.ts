@@ -17,6 +17,7 @@ import {
   getVariantOutputDir,
 } from '../../path-analyser/src/configResolver.js';
 import { loadGlobalContextSeedsAbox } from '../../path-analyser/src/ontology/loader.js';
+import { PENDING_BINDING } from '../../path-analyser/src/types.js';
 import { loadRequestValidationConfig } from '../../request-validation/src/config.js';
 
 /**
@@ -4668,21 +4669,32 @@ describeForThisConfig(
             binding,
             `${op.operationId}: ${semantic} variant must bind ${varName}`,
           ).toBeDefined();
-          // PR 4 note: the binding may be either
-          //   - `fc:cma:<sem>:<suffix>` — variant fallback path
-          //     (`bindSemanticInput` for clientMintedAttribute), used
-          //     when the producer-chain BFS could not satisfy the leaf;
-          //   - `__PENDING__` — variant producer-chain path, where the
-          //     value is extracted at runtime from a search step in the
-          //     chain;
-          //   - `<sem>_<suffix>` — variant fallback path for
-          //     non-clientMintedAttribute classifications (only
-          //     reached when the semantic is not clientMinted; included
-          //     here for completeness even though clientMintedAttribute
-          //     semantics never take this branch).
-          // Asserting any of these specifically would couple this
-          // invariant to the BFS outcome rather than to the suite-
-          // partition contract.
+          // PR 4 note: this invariant deliberately does not assert the
+          // binding's VALUE — doing so would couple it to the BFS
+          // outcome rather than to the suite-partition contract it
+          // exists to guard. That axis is owned by the sibling block
+          // 'no clientMintedAttribute binding is left __PENDING__'
+          // below, which checks the value for every emitted scenario.
+          //
+          // For reference, the shapes a binding can take:
+          //   - `fc:cma:<sem>:<suffix>` — the minted value
+          //     (`bindSemanticInput` for clientMintedAttribute). This is
+          //     the ONLY acceptable outcome for a clientMintedAttribute
+          //     semantic: it has no runtime producer by declaration, so
+          //     nothing can ever extract it.
+          //   - `<sem>_<suffix>` — variant fallback for
+          //     non-clientMintedAttribute classifications (never reached
+          //     here; listed for completeness).
+          //   - `__PENDING__` — "an upstream chain step extracts this at
+          //     runtime". This comment historically documented it as an
+          //     acceptable outcome of the variant producer-chain path,
+          //     which was the cover for the tag-'null' defect: a
+          //     clientMintedAttribute leaf was chained onto a
+          //     `provider: false` response echo that never sent the
+          //     value, so the binding stayed `__PENDING__` and the
+          //     emitter sent `null`. It is now unreachable for a
+          //     clientMintedAttribute semantic, and the block below
+          //     fails the run if one reappears.
         });
 
         it(`${semantic} :: ${op.operationId}: emitted variant spec references ctx.${varName} (#162 PR 4)`, () => {
@@ -4751,6 +4763,128 @@ describeForThisConfig(
         });
       }
     }
+  },
+);
+
+describeForThisConfig(
+  'bundled-spec invariants: no clientMintedAttribute binding is left __PENDING__',
+  () => {
+    // A `clientMintedAttribute` semantic (`kind: 'attribute'` +
+    // `clientMinted: true` in the ABox) has no authoritative producer BY
+    // DECLARATION, so `bindSemanticInput` — the chokepoint the ontology
+    // `$comment` names — mints a deterministic `fc:cma:<sem>:<suffix>`
+    // value for it. A `__PENDING__` binding means "an upstream step in
+    // this chain extracts the value at runtime", which can never happen
+    // for a semantic nothing produces. The emitter then substitutes
+    // `null` into the request body and the broker 400s, e.g.
+    // "The provided tag 'null' is not valid."
+    //
+    // How it happened (the defect this guards): `generateOptionalSubShape
+    // Variants` resolves producer candidates as
+    // `authoritative.length > 0 ? authoritative : inclusive`. For `Tag`,
+    // `producersByType` is empty (correct — client-minted) but the
+    // INCLUSIVE index `responseProducersByType` is non-empty, because six
+    // ops echo tags back in their 200 responses with `provider: false`
+    // (`createProcessInstance.tags[]`, `searchProcessInstances.items[].tags[]`,
+    // `getUserTask.tags[]`, …). A chain built around such an echo extracts
+    // from a response where the producer never SENT a tag, so the binding
+    // stayed `__PENDING__`. Measured at the fix commit: 24 of 30
+    // clientMintedAttribute leaf bindings were `__PENDING__` (17 of them
+    // `Tag`, matching 17 live tag-null 400s exactly).
+    //
+    // Class-scoped: the semantic list is derived from the ABox, and every
+    // scenario in BOTH emitted suites is scanned, so this covers Tag,
+    // BusinessId, HistoryItemId, LoopIterationId and any future
+    // clientMintedAttribute semantic — and any planner path that leaves
+    // one unbound, not just the producer-candidate selection site.
+    //
+    // The sibling block above ('clientMintedAttribute setter sites')
+    // deliberately does NOT assert the binding's value — it guards the
+    // suite-partition contract instead. It used to document `__PENDING__`
+    // as an acceptable outcome of the variant producer-chain path; that
+    // documentation was the bug's cover and has been corrected. This
+    // invariant owns the value axis: for a client-minted semantic there
+    // is no runtime producer, so `__PENDING__` is never acceptable.
+
+    interface SemanticTypeDecl {
+      name?: string;
+      kind?: string;
+      clientMinted?: boolean;
+    }
+
+    function clientMintedVarNames(): Map<string, string> {
+      // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+      const abox = JSON.parse(
+        readFileSync(join(REPO_ROOT, 'configs', CONFIG_NAME, 'ontology', 'semantics.json'), 'utf8'),
+      ) as { semanticTypes?: SemanticTypeDecl[] };
+      const map = new Map<string, string>();
+      for (const spec of abox.semanticTypes ?? []) {
+        if (spec?.kind !== 'attribute' || spec?.clientMinted !== true) continue;
+        if (typeof spec.name !== 'string' || spec.name.length === 0) continue;
+        // `<camelCase(sem)>Var` — the varName convention `bindSemanticInput`
+        // and every emitter rely on.
+        const varName = `${spec.name.charAt(0).toLowerCase()}${spec.name.slice(1)}Var`;
+        map.set(varName, spec.name);
+      }
+      return map;
+    }
+
+    const CLIENT_MINTED_VARS = clientMintedVarNames();
+
+    it('the ABox declares at least one clientMintedAttribute semantic (guard against a vacuous pass)', () => {
+      expect(
+        CLIENT_MINTED_VARS.size,
+        `expected at least one kind:'attribute' + clientMinted:true semantic in configs/${CONFIG_NAME}/ontology/semantics.json`,
+      ).toBeGreaterThan(0);
+    });
+
+    it('no scenario in either emitted suite binds a clientMintedAttribute semantic to __PENDING__', () => {
+      const offenders: {
+        suite: string;
+        file: string;
+        scenario: string;
+        binding: string;
+        semantic: string;
+      }[] = [];
+      let scanned = 0;
+      const suites: [string, string][] = [
+        ['variant-output', VARIANT_SCENARIOS_DIR],
+        ['feature-output', FEATURE_SCENARIOS_DIR],
+      ];
+      for (const [suite, dir] of suites) {
+        if (!existsSync(dir)) continue;
+        for (const f of readdirSync(dir)) {
+          if (!f.endsWith('-scenarios.json')) continue;
+          // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+          const parsed = JSON.parse(readFileSync(join(dir, f), 'utf8')) as {
+            scenarios?: { id?: string; bindings?: Record<string, unknown> }[];
+          };
+          for (const scenario of parsed.scenarios ?? []) {
+            for (const [varName, value] of Object.entries(scenario.bindings ?? {})) {
+              const semantic = CLIENT_MINTED_VARS.get(varName);
+              if (!semantic) continue;
+              scanned += 1;
+              if (value !== PENDING_BINDING) continue;
+              offenders.push({
+                suite,
+                file: f,
+                scenario: scenario.id ?? '<unknown>',
+                binding: varName,
+                semantic,
+              });
+            }
+          }
+        }
+      }
+      expect(
+        scanned,
+        'expected at least one clientMintedAttribute binding across the emitted suites — the scan found none, so this invariant would pass vacuously',
+      ).toBeGreaterThan(0);
+      expect(
+        offenders,
+        `a clientMintedAttribute semantic has no runtime producer, so its binding must be minted (fc:cma:…), never ${PENDING_BINDING}; the emitter would send null and the broker 400s`,
+      ).toEqual([]);
+    });
   },
 );
 

@@ -1,4 +1,4 @@
-import { bindSemanticInput } from './bindSemanticInput.js';
+import { bindSemanticInput, classifySemantic } from './bindSemanticInput.js';
 import { deterministicSuffix } from './deterministicSuffix.js';
 import { buildBpmnModelSpec, buildModelSpec, findModelSpec } from './modelSpecBuilders.js';
 import { getModelKindForSemantic } from './ontology/artifactModelKinds.js';
@@ -2226,16 +2226,35 @@ export function generateOptionalSubShapeVariants(
       // a bare endpoint scenario plus the populatesSubShape annotation
       // so the materializer still fills the body and the variant suite
       // covers the leaf.
-      const producerChain = producerCandidates.length
-        ? tryProducerChainVariant({
-            graph,
-            endpoint,
-            endpointOpId,
-            opts,
-            leaf,
-            producerCandidates,
-          })
-        : undefined;
+      //
+      // A `clientMintedAttribute` leaf must be MINTED, never sourced from a
+      // producer chain. Such a semantic has no authoritative producer BY
+      // DECLARATION (`kind: 'attribute'` + `clientMinted: true`), so
+      // `producersByType` is empty and `producerCandidates` above falls back
+      // to the INCLUSIVE index — which also lists non-authoritative
+      // `provider: false` response echoes. For `Tag` that index is non-empty
+      // (`createProcessInstance.tags[]`, `searchProcessInstances.items[].tags[]`,
+      // `getUserTask.tags[]`, …), so a chain won and extracted from a response
+      // where the producer never SENT a tag: the extract yielded nothing, the
+      // binding stayed `__PENDING__`, and the emitter sent `null` — broker 400
+      // "The provided tag 'null' is not valid". Routing the leaf to the
+      // bare-endpoint fallback below re-uses the `bindSemanticInput`
+      // chokepoint the ontology `$comment` already names as the value's
+      // source. Class-scoped by construction: it covers every
+      // clientMintedAttribute semantic (Tag, BusinessId, HistoryItemId,
+      // LoopIterationId) and any future one, not just `Tag`.
+      const leafIsClientMinted = classifySemantic(leaf.semantic, graph) === 'clientMintedAttribute';
+      const producerChain =
+        producerCandidates.length && !leafIsClientMinted
+          ? tryProducerChainVariant({
+              graph,
+              endpoint,
+              endpointOpId,
+              opts,
+              leaf,
+              producerCandidates,
+            })
+          : undefined;
 
       let scenario: EndpointScenario | undefined;
       if (producerChain) {
