@@ -397,6 +397,92 @@ def root_base_url() -> str:
     },
 
     {
+      relativePath: 'support/prune.py',
+      content: `"""
+Drop request-body fields whose '\${...}' binding resolved to null.
+
+A whole-string placeholder in a request body renders inline as
+'ctx.get("someVar")'. When the producer step never bound that variable — the
+normal case for a cursor, because a single-page response has no
+'page.endCursor' to extract — the value is None and the body serialises an
+EXPLICIT JSON null:
+
+    {"page": {"after": null}}
+
+The broker rejects that. An explicit null is a *present but unusable* cursor,
+not an absent one, so '/decision-instances/search' answers 400 "At least one of
+[from, after, before, limit] is required". Omitting the key alone is not enough
+either: '{"page": {}}' is also 400, while '{}' is 200. Hence this helper removes
+the null AND any container that became empty as a result.
+
+Containers that were ALREADY empty in the generated template are preserved
+verbatim — they are deliberate, meaningful values (e.g. 'updateJob.changeset =
+{}', 'resolveIncidentsBatchOperation.filter = {}'), not pruning artefacts. Only
+a container that was non-empty before pruning and is empty afterwards is
+dropped.
+
+Emptying a list drops it too rather than leaving '[]', because an empty list is
+not uniformly accepted: 'filter.tags = []' is 200, but
+'filter.elementInstanceKeys = []' and 'filter.tenantIds = []' are both 400, and
+'filter.$or = [{}]' is a 500.
+
+Falsy-but-bound values (0, False, '') are never pruned; only None is.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+# Sentinel meaning "this value was pruned away", so a legitimately stored None
+# can never be confused with an absent one.
+_DROPPED = object()
+
+
+def _prune(value: Any) -> Any:
+    if isinstance(value, dict):
+        kept: dict[Any, Any] = {}
+        for key, item in value.items():
+            pruned = _prune(item)
+            if pruned is _DROPPED:
+                continue
+            kept[key] = pruned
+        # Non-empty before, empty after -> the container only existed to hold
+        # values that were all pruned, so it goes too.
+        if value and not kept:
+            return _DROPPED
+        return kept
+    if isinstance(value, list):
+        items: list[Any] = []
+        for item in value:
+            pruned = _prune(item)
+            if pruned is _DROPPED:
+                continue
+            items.append(pruned)
+        if value and not items:
+            return _DROPPED
+        return items
+    if value is None:
+        return _DROPPED
+    return value
+
+
+def prune_nulls(value: Any) -> Any:
+    """
+    Return 'value' with null leaves removed, cascading into containers that
+    thereby became empty.
+
+    At the top level a fully-pruned body becomes the empty container of the
+    same kind ('{}' / '[]'), which the broker accepts, rather than leaking the
+    internal sentinel.
+    """
+    pruned = _prune(value)
+    if pruned is not _DROPPED:
+        return pruned
+    return [] if isinstance(value, list) else {}
+`,
+    },
+
+    {
       relativePath: 'support/await_eventually.py',
       content: `"""
 Poll an eventually-consistent read until the broker's secondary storage has caught up.

@@ -160,6 +160,35 @@ const EMBEDDED_PLACEHOLDER_RE = /\$\{([^}]+)\}/g;
 // — reusing a `g`-flagged RegExp's own `.test()` mutates its `lastIndex`,
 // corrupting later calls against a different string.
 const HAS_PLACEHOLDER_RE = /\$\{[^}]+\}/;
+// A WHOLE-STRING placeholder: the entire value is `${var}`, so it renders as a
+// bare `ctx.get('var')` and is therefore `None` when the binding was never
+// produced. The concatenated form ('proc-${a}-x') renders as a '+' chain whose
+// parts degrade to '' and can never be None, so it is deliberately NOT matched
+// here — wrapping those bodies would be pure churn.
+const WHOLE_STRING_PLACEHOLDER_RE = /^\$\{([^}]+)\}$/;
+
+/**
+ * True when `value` contains at least one whole-string `${var}` binding (at any
+ * nesting depth, including inside arrays) that could resolve to None at
+ * runtime. `${RANDOM}` is excluded: it is a planner-minted literal seed token,
+ * not a ctx binding, and always renders as the literal string.
+ *
+ * Used to decide whether a rendered body literal needs `prune_nulls(...)`
+ * around it (Item 6a).
+ */
+function hasNullCapablePlaceholder(value: unknown): boolean {
+  if (typeof value === 'string') {
+    const whole = WHOLE_STRING_PLACEHOLDER_RE.exec(value);
+    return whole !== null && whole[1] !== 'RANDOM';
+  }
+  if (Array.isArray(value)) {
+    return value.some((item) => hasNullCapablePlaceholder(item));
+  }
+  if (isRecord(value)) {
+    return Object.values(value).some((item) => hasNullCapablePlaceholder(item));
+  }
+  return false;
+}
 
 /**
  * Render a string that may contain one or more embedded `${var}` bindings
@@ -272,17 +301,26 @@ function renderPythonDictAssignment(
   record: Record<string, unknown>,
   omitWhenUnboundFieldNames: ReadonlySet<string>,
 ): string[] {
-  const inlineEntries: string[] = [];
-  const deferred: { fieldName: string; binding: string }[] = [];
-  for (const [fieldName, fieldValue] of Object.entries(record)) {
-    const whole = typeof fieldValue === 'string' ? /^\$\{([^}]+)\}$/.exec(fieldValue) : null;
-    if (whole && omitWhenUnboundFieldNames.has(fieldName)) {
-      deferred.push({ fieldName, binding: whole[1] });
-      continue;
-    }
-    inlineEntries.push(`'${fieldName}': ${renderPythonValue(fieldValue)}`);
-  }
-  const lines = [`    ${varName} = {${inlineEntries.join(', ')}}`];
+  const { inline, deferred } = splitInlineAndDeferred(record, omitWhenUnboundFieldNames);
+  const inlineEntries = inline.map(
+    ([fieldName, fieldValue]) => `'${fieldName}': ${renderPythonValue(fieldValue)}`,
+  );
+  // Item 6a: a whole-string `${var}` binding renders inline as `ctx.get('var')`,
+  // which is None when the producer never bound it — and an explicit JSON null
+  // in a body is a *present but unusable* value the broker rejects (a null
+  // cursor is 400 "At least one of [from, after, before, limit] is required").
+  // `prune_nulls` drops those nulls and any container they thereby emptied.
+  //
+  // Only the INLINE values are considered: a field deferred to the
+  // `omitWhenUnbound` block below is already null-guarded by its own
+  // `if __x_val is not None`, so counting it would wrap a literal that can
+  // never produce a null (e.g. a multipart `fields` template consisting solely
+  // of `tenantId` renders `data_N = {}`). Wrapping only when the template can
+  // actually produce a null keeps every other body byte-identical. The deferred
+  // assignments still work: `prune_nulls` returns a dict to mutate.
+  const literal = `{${inlineEntries.join(', ')}}`;
+  const needsPrune = hasNullCapablePlaceholder(inline.map(([, v]) => v));
+  const lines = [`    ${varName} = ${needsPrune ? `prune_nulls(${literal})` : literal}`];
   for (const { fieldName, binding } of deferred) {
     const local = `__${toSnakeCase(fieldName)}_val`;
     lines.push(`    ${local} = ctx.get('${binding}')`);
@@ -290,6 +328,77 @@ function renderPythonDictAssignment(
     lines.push(`        ${varName}['${fieldName}'] = ${local}`);
   }
   return lines;
+}
+
+/**
+ * Split a record template's fields into those rendered INLINE in the literal
+ * and those DEFERRED to a runtime-conditional `omitWhenUnbound` assignment.
+ *
+ * Single source of truth for both the emitted literal and the null-prune
+ * decision, so the two can never disagree about which fields are inline.
+ */
+function splitInlineAndDeferred(
+  record: Record<string, unknown>,
+  omitWhenUnboundFieldNames: ReadonlySet<string>,
+): {
+  inline: [string, unknown][];
+  deferred: { fieldName: string; binding: string }[];
+} {
+  const inline: [string, unknown][] = [];
+  const deferred: { fieldName: string; binding: string }[] = [];
+  for (const [fieldName, fieldValue] of Object.entries(record)) {
+    const whole =
+      typeof fieldValue === 'string' ? WHOLE_STRING_PLACEHOLDER_RE.exec(fieldValue) : null;
+    if (whole !== null && omitWhenUnboundFieldNames.has(fieldName)) {
+      deferred.push({ fieldName, binding: whole[1] });
+      continue;
+    }
+    inline.push([fieldName, fieldValue]);
+  }
+  return { inline, deferred };
+}
+
+/**
+ * Whether rendering `step`'s payload will wrap the literal in `prune_nulls`,
+ * i.e. whether any value it emits INLINE can resolve to None at runtime.
+ *
+ * This is the single source of truth for both the per-step wrap decision and
+ * the suite-level `from support.prune import prune_nulls` import, so the two
+ * can never disagree (an import emitted for a suite that never wraps is dead
+ * code; a wrap without the import is a runtime NameError that fails every test
+ * in the file).
+ *
+ * Fields deferred to the `omitWhenUnbound` block are excluded — they are
+ * already null-guarded by their own `if __x_val is not None`.
+ */
+function stepPayloadNeedsPrune(
+  step: RequestStep,
+  omitWhenUnboundFieldNames: ReadonlySet<string>,
+): boolean {
+  const payload =
+    step.bodyKind === 'multipart'
+      ? (step.multipartTemplate ?? step.bodyTemplate)
+      : step.bodyTemplate;
+  if (payload === undefined) return false;
+  if (step.bodyKind === 'multipart' && isRecord(payload)) {
+    // Only `fields` is considered. `files` is rendered by
+    // `renderPythonMultipartFiles`, which never wraps its values in
+    // `prune_nulls` (a file entry is a `(filename, bytes)` tuple or a
+    // `resolve_fixture(...)` call, not a JSON value), so counting a placeholder
+    // there would emit the import for a suite that never calls the helper —
+    // dead code the Layer-3 invariant reports as an unused import.
+    const fields = payload.fields;
+    const inlineFields = isRecord(fields)
+      ? splitInlineAndDeferred(fields, omitWhenUnboundFieldNames).inline.map(([, v]) => v)
+      : fields;
+    return hasNullCapablePlaceholder(inlineFields);
+  }
+  if (isRecord(payload)) {
+    return hasNullCapablePlaceholder(
+      splitInlineAndDeferred(payload, omitWhenUnboundFieldNames).inline.map(([, v]) => v),
+    );
+  }
+  return hasNullCapablePlaceholder(payload);
 }
 
 /**
@@ -415,6 +524,20 @@ export function renderPythonSuite(
   );
   if (needsRootBaseUrl) {
     lines.push('from support.base_url import root_base_url');
+  }
+  // Item 6a: a body whose template contains a whole-string `${var}` binding can
+  // serialise an explicit JSON null when that binding was never produced (the
+  // normal case for a cursor on a single-page response), which the broker
+  // rejects. Such bodies are wrapped in `prune_nulls(...)`. Import the helper
+  // only when some step actually needs it, so suites without a null-capable
+  // placeholder stay byte-identical.
+  const needsPruneNulls = collection.scenarios.some((scenario) =>
+    (scenario.requestPlan ?? []).some((step) =>
+      stepPayloadNeedsPrune(step, omitWhenUnboundFieldNames),
+    ),
+  );
+  if (needsPruneNulls) {
+    lines.push('from support.prune import prune_nulls');
   }
   if (hasMultipartStep) {
     lines.push('from support.fixtures import resolve_fixture');
@@ -670,8 +793,16 @@ function renderPythonRequestStep(
       );
       requestArgs.push(`json=body_${stepNum}`);
     } else {
+      // Item 6a: same null-pruning rule as the dict path above, applied to a
+      // non-record body (an array or scalar template). No bundled template
+      // currently takes this shape with a placeholder, but the rule is about
+      // the class "a body that can serialise an explicit null", not about the
+      // dict case, so it is enforced here too rather than left to drift.
       const bodyExpr = renderPythonBody(payloadTemplate, {});
-      lines.push(`    body_${stepNum} = ${bodyExpr}`);
+      const wrapped = hasNullCapablePlaceholder(payloadTemplate)
+        ? `prune_nulls(${bodyExpr})`
+        : bodyExpr;
+      lines.push(`    body_${stepNum} = ${wrapped}`);
       requestArgs.push(`json=body_${stepNum}`);
     }
   }
