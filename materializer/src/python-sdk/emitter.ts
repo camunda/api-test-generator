@@ -103,6 +103,7 @@ export function pythonSuiteFileName(
 export function buildPythonUrlExpression(
   pathTemplate: string,
   _pathParams?: { name: string; var: string }[],
+  serverOverride?: string,
 ): string {
   // Strip the leading '/': httpx.AsyncClient.base_url carries its own path
   // segment (e.g. 'http://localhost:8080/v2/'), and per RFC 3986 relative
@@ -122,7 +123,27 @@ export function buildPythonUrlExpression(
     // param-name placeholder text (Copilot PR #574 review).
     return `{ctx.get("${varName}") if ctx.get("${varName}") is not None else "${paramName}"}`;
   });
-  return `f'${result}'`;
+  // Item 5A: an operation whose path item declares its own OpenAPI `servers`
+  // override is NOT served under the client's `/v2` base — the cluster-admin
+  // API lives at `{host}:{port}/cluster/v2/...`. Resolving such a path
+  // relatively against `base_url` yields `/v2/cluster/v2/...` → 404 "No
+  // endpoint". Prefix it with the API root instead, which makes the URL
+  // ABSOLUTE; httpx passes an absolute url through `_merge_url` untouched, so
+  // no second client fixture is needed. `root_base_url()` mirrors playwright's
+  // `buildBaseUrl(true)` precedence.
+  //
+  // `!== undefined`, never a truthiness check: an OpenAPI `servers[].url` can
+  // legitimately be the empty string (relative to the current host), which is
+  // a real override and must not be conflated with "no override" — the same
+  // distinction playwright's `resolveScenarioServerOverride` makes.
+  //
+  // Resolution is per STEP (the caller passes `step.serverOverride`), not per
+  // test. Python emits one `url_N` per step, so a scenario mixing override and
+  // non-override steps routes each request to its own base correctly — the
+  // hazard that forces playwright's scenario-level resolver to throw does not
+  // apply here.
+  const prefix = serverOverride !== undefined ? '{root_base_url()}' : '';
+  return `f'${prefix}${result}'`;
 }
 
 /**
@@ -384,6 +405,17 @@ export function renderPythonSuite(
       const bindings = scenario.bindings ?? {};
       return Object.entries(bindings).some(([k, v]) => v !== '__PENDING__' && unique.has(k));
     });
+  // Item 5A: a step whose operation declares a path-level OpenAPI `servers`
+  // override is served outside the client's `/v2` base (cluster-admin), so its
+  // URL is built absolute against the API root via `root_base_url()`. Import
+  // the helper only when some step actually needs it, so every suite without
+  // such a step stays byte-identical to before.
+  const needsRootBaseUrl = collection.scenarios.some((scenario) =>
+    (scenario.requestPlan ?? []).some((step) => step.serverOverride !== undefined),
+  );
+  if (needsRootBaseUrl) {
+    lines.push('from support.base_url import root_base_url');
+  }
   if (hasMultipartStep) {
     lines.push('from support.fixtures import resolve_fixture');
   }
@@ -589,7 +621,11 @@ function renderPythonRequestStep(
   lines.push(`    # Step ${stepNum}: ${step.operationId}`);
 
   if (step.pathTemplate) {
-    const urlExpr = buildPythonUrlExpression(step.pathTemplate, step.pathParams);
+    const urlExpr = buildPythonUrlExpression(
+      step.pathTemplate,
+      step.pathParams,
+      step.serverOverride,
+    );
     lines.push(`    url_${stepNum} = ${urlExpr}`);
     requestArgs.push(`url_${stepNum}`);
   }
