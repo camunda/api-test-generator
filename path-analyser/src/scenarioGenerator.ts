@@ -2418,6 +2418,35 @@ function tryProducerChainVariant(args: {
   const { additional } = chosenProducer;
 
   const chosenId = chosenProducer.node.operationId;
+  // Never hand BFS a need the chosen producer satisfies from its OWN
+  // response. `buildAdditional` collects every optional input of the producer
+  // that the endpoint also produces, which for a paginated search is exactly
+  // the standard `page` envelope's cursors: such an op authoritatively RETURNS
+  // `page.startCursor` / `page.endCursor` (`provider: true`) and optionally
+  // ACCEPTS `page.before` / `page.after`. Passing those on as
+  // `additionalNeeded` asks BFS to schedule an EARLIER producer for a value the
+  // chain already yields one step later. BFS then picks the first cursor
+  // producer in spec-path order — `searchAgentDefinitions`, the
+  // alphabetically-first paginated resource and the one with no create
+  // operation, so its page can never become non-empty and the emitted
+  // `await_eventually` wait for items never resolves (9 of P3's 10 pass→fail
+  // regressions).
+  //
+  // This is scoped to what BFS is asked to satisfy, NOT to producer selection:
+  // `additional` still drives the Pass-1 overlap decision above, so the chosen
+  // producer is unchanged. `leaf.semantic` is exempt because the producer must
+  // be scheduled for the variant leaf even when it already produces it — that
+  // is the load-bearing case (`searchAgentInstances` filtering by
+  // `agentDefinitionKey`, where `searchAgentDefinitions` IS the leaf's real
+  // producer and must stay in the chain).
+  //
+  // Config-agnostic by construction: no semantic name is special-cased. The
+  // rule is "a producer's own authoritative output is not a need", which holds
+  // for any self-produced optional semantic, not just cursors.
+  const selfProduced = new Set(chosenProducer.node.produces);
+  const additionalNeeded = [...additional].filter(
+    (semantic) => semantic === leaf.semantic || !selfProduced.has(semantic),
+  );
   const variantProducersByType: Record<string, string[]> = { ...graph.producersByType };
   variantProducersByType[leaf.semantic] = [chosenId];
   const variantOperations: Record<string, OperationNode> = { ...graph.operations };
@@ -2440,7 +2469,7 @@ function tryProducerChainVariant(args: {
   const planned = generateScenariosForEndpoint(variantGraph, endpointOpId, {
     ...opts,
     allowEndpointAsProducer: true,
-    additionalNeeded: [...additional],
+    additionalNeeded,
     // #292: NOT a budget — see the matching note at the bare-endpoint
     // fallback above. One producer chain per variant leaf is the
     // strategy, not a tunable cap.
