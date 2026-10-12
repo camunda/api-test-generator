@@ -147,6 +147,11 @@ make_fixtures() {
   # content must be valid BPMN XML — createFile rejects a non-parseable body (400).
   local bpmn='<?xml version="1.0" encoding="UTF-8"?><bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" id="Definitions_1" targetNamespace="http://bpmn.io/schema/bpmn"><bpmn:process id="Process_1" isExecutable="false"/></bpmn:definitions>'
   export RV_FIXTURE_WORKSPACE_KEY; RV_FIXTURE_WORKSPACE_KEY="$(curl -s -X POST "$POS_URL/workspaces" "${h[@]}" -d '{"name":"rv-fixture-ws"}' | _jget workspaceKey)"
+  # removeClusterRegistration 403 auth-deny: clusterId is a plain path string that @PreAuthorize reads before any cluster lookup or feature-flag gate (see HubV2ClusterController.deleteCluster), so a made-up id reaches the 403. No cluster is created and the denied delete removes nothing.
+  export RV_FIXTURE_CLUSTER_ID; RV_FIXTURE_CLUSTER_ID="rv-fixture-nonexistent-cluster"
+  # removeMember 403 auth-deny: the email path key must resolve to an existing member so the deny request does not 404 before the authority check. Add the seeded camunda user to the fixture workspace and export the address; the denied delete keeps the member.
+  curl -s -X POST "$POS_URL/workspaces/$RV_FIXTURE_WORKSPACE_KEY/members" "${h[@]}" -d '{"email":"camunda@example.com","role":"viewer"}' >/dev/null
+  export RV_FIXTURE_MEMBER_EMAIL; RV_FIXTURE_MEMBER_EMAIL="camunda@example.com"
   export RV_FIXTURE_V2_PROJECT_KEY; RV_FIXTURE_V2_PROJECT_KEY="$(curl -s -X POST "$POS_URL/projects" "${h[@]}" -d "$(printf '{"name":"rv-fixture-proj-v2","workspaceKey":"%s"}' "$RV_FIXTURE_WORKSPACE_KEY")" | _jget projectKey)"
   export RV_FIXTURE_FOLDER_KEY;    RV_FIXTURE_FOLDER_KEY="$(curl -s -X POST "$POS_URL/folders" "${h[@]}" -d "$(printf '{"name":"rv-fixture-folder","projectKey":"%s"}' "$RV_FIXTURE_V2_PROJECT_KEY")" | _jget folderKey)"
   local file_body; file_body="$(BPMN="$bpmn" PK="$RV_FIXTURE_V2_PROJECT_KEY" python3 -c 'import json,os; print(json.dumps({"name":"rv-fixture-file","projectKey":os.environ["PK"],"content":os.environ["BPMN"],"type":"BPMN"}))')"

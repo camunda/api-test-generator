@@ -28,7 +28,9 @@
     "createVersion"
   ],
   "pathResourceFixtures": {
-    "projectKey": "RV_FIXTURE_V2_PROJECT_KEY"
+    "projectKey": "RV_FIXTURE_V2_PROJECT_KEY",
+    "clusterId": "RV_FIXTURE_CLUSTER_ID",
+    "email": "RV_FIXTURE_MEMBER_EMAIL"
   },
   "excludeOperations": [
     {
