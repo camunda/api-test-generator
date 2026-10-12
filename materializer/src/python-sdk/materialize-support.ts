@@ -520,10 +520,13 @@ def _retry_after_ms(response: httpx.Response) -> float | None:
     if raw is None:
         return None
     try:
-        seconds = float(raw.strip())
+        value = int(raw.strip())
     except ValueError:
         return None
-    return seconds * 1000 if seconds >= 0 else None
+    if value < 0:
+        return None
+    # Values >= 1000 are service-emitted millisecond hints (same heuristic as the Playwright helper).
+    return value * 1000 if value < 1000 else value
 
 
 def _is_non_empty_items_page(response: httpx.Response) -> bool:
