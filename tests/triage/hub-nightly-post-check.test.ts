@@ -10,6 +10,10 @@ import {
 
 const now = new Date('2026-10-12T04:30:00Z');
 
+function triageRun(over: Partial<Run> = {}): Run {
+  return run({ event: 'workflow_run', createdAt: '2026-10-12T02:40:00Z', ...over });
+}
+
 function run(over: Partial<Run>): Run {
   return {
     url: 'https://github.com/camunda/api-test-generator/actions/runs/1',
@@ -29,7 +33,7 @@ describe('startOfDayUtc', () => {
 
 describe('evaluate', () => {
   it('finds nothing when both ran and finished', () => {
-    expect(evaluate([run({})], [run({ createdAt: '2026-10-12T02:40:00Z' })], now)).toEqual([]);
+    expect(evaluate([run({})], [triageRun()], now)).toEqual([]);
   });
 
   it('reports a nightly that did not start today, and only that', () => {
@@ -55,7 +59,7 @@ describe('evaluate', () => {
   });
 
   it('does not report a nightly whose tests failed: it still posts', () => {
-    expect(evaluate([run({ conclusion: 'failure' })], [run({})], now)).toEqual([]);
+    expect(evaluate([run({ conclusion: 'failure' })], [triageRun()], now)).toEqual([]);
   });
 
   it('reports a triage that never ran after the nightly finished', () => {
@@ -66,19 +70,46 @@ describe('evaluate', () => {
   });
 
   it('ignores yesterday’s triage run', () => {
-    const problems = evaluate([run({})], [run({ createdAt: '2026-10-11T02:40:00Z' })], now);
+    const problems = evaluate([run({})], [triageRun({ createdAt: '2026-10-11T02:40:00Z' })], now);
     expect(problems[0]?.what).toContain('triage');
   });
 
   it('reports a failed triage run, because the digest is its post', () => {
-    const problems = evaluate([run({})], [run({ conclusion: 'failure' })], now);
+    const problems = evaluate([run({})], [triageRun({ conclusion: 'failure' })], now);
     expect(problems[0]?.why).toBe('ended as failure');
+  });
+
+  it('reports a skipped or neutral triage: it posted no digest', () => {
+    for (const conclusion of ['skipped', 'neutral']) {
+      const problems = evaluate([run({})], [triageRun({ conclusion })], now);
+      expect(problems[0]?.why).toBe(`ended as ${conclusion}`);
+    }
+  });
+
+  it('reports a nightly that ended skipped or neutral', () => {
+    for (const conclusion of ['skipped', 'neutral']) {
+      expect(evaluate([run({ conclusion })], [], now)[0]?.why).toBe(`ended as ${conclusion}`);
+    }
+  });
+
+  it('does not let a manual triage run stand in for the automatic one', () => {
+    const manual = triageRun({ event: 'workflow_dispatch', createdAt: '2026-10-12T03:00:00Z' });
+    const problems = evaluate([run({})], [manual], now);
+    expect(problems[0]?.what).toContain('triage');
+  });
+
+  it('does not count a triage run from before the nightly started', () => {
+    const earlier = triageRun({ createdAt: '2026-10-12T01:00:00Z' });
+    const problems = evaluate([run({ createdAt: '2026-10-12T02:05:00Z' })], [earlier], now);
+    expect(problems[0]?.what).toContain('triage');
   });
 
   it('judges the newest run of the day when there was a re-run', () => {
     const first = run({ conclusion: 'cancelled', createdAt: '2026-10-12T02:05:00Z' });
     const rerun = run({ createdAt: '2026-10-12T03:10:00Z' });
-    expect(evaluate([first, rerun], [run({ createdAt: '2026-10-12T03:50:00Z' })], now)).toEqual([]);
+    expect(
+      evaluate([first, rerun], [triageRun({ createdAt: '2026-10-12T03:50:00Z' })], now),
+    ).toEqual([]);
   });
 });
 
@@ -95,6 +126,8 @@ describe('buildAlert', () => {
     expect(text).toContain('the triage digest: ended as failure');
     expect(text).toContain('<https://example.test/run/9|run>');
     expect(text).toContain('<!subteam^S014VK4482H|hub-medic>');
+    expect(text).toContain('docs/hub-nightly-cookbook.md|');
+    expect(text).not.toContain('#when-a-post-is-missing');
   });
 
   it('has no run link when there is none', () => {
@@ -119,7 +152,7 @@ function deps(over: Partial<CheckDeps> & { nightly?: Run[]; triage?: Run[] }): {
     slackToken: 'xoxb-test',
     now,
     listNightly: async () => over.nightly ?? [run({})],
-    listTriage: async () => over.triage ?? [run({ createdAt: '2026-10-12T02:40:00Z' })],
+    listTriage: async () => over.triage ?? [triageRun()],
     post: async (text) => {
       posted.push(text);
     },

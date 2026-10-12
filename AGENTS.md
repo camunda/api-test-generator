@@ -883,8 +883,9 @@ The **nightly post check** ([hub-nightly-post-check.yml](.github/workflows/hub-n
 finished. A failed Slack step already turns a run red, but a run that never starts or hangs posts nothing and is not
 red, so this looks at today's runs (UTC) of `nightly-camunda-hub.yml` and `triage-camunda-hub-nightly.yml` and posts one
 alert to `#camunda-hub-nightly-test-results`, pinging `hub-medic`, when the nightly did not start, is still running, or
-ended cancelled or timed out, or when the triage did not run, is still running, or ended cancelled, timed out or
-failed. A nightly with failing tests is not a problem: it still posts. Silent when both ran. A manual run is a dry run
+ended as anything but success or failure (a nightly with failing tests is red but still posts), or when the triage run the
+nightly triggered did not run, is still running, or ended as anything but success (`skipped` and `neutral` mean no digest;
+a manual triage run does not stand in for the automatic one). Silent when both ran. A manual run is a dry run
 by default. Deterministic, no agent; covered by `tests/triage/hub-nightly-post-check.test.ts`.
 
 The **hub known-issue re-enable check**

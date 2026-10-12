@@ -30,15 +30,12 @@ export interface Problem {
 const NIGHTLY = 'the nightly run (02:00 UTC)';
 const TRIAGE = 'the triage digest';
 
-/** Conclusions that mean the run stopped without finishing its job. A plain `failure` is not one of
- * them for the nightly: a nightly with failing tests is red but still posts. */
-const UNFINISHED = new Set([
-  'cancelled',
-  'timed_out',
-  'startup_failure',
-  'action_required',
-  'stale',
-]);
+/** The conclusions that mean a run did its job. For the nightly a plain `failure` is healthy: a
+ * nightly with failing tests is red but still posts. For the triage only `success` is, because its
+ * digest is the post: `skipped` (its job has an `if`), `neutral`, `failure`, `cancelled` and the
+ * rest all mean no digest. */
+const NIGHTLY_HEALTHY = new Set(['success', 'failure']);
+const TRIAGE_HEALTHY = new Set(['success']);
 
 /** Midnight UTC of the day `now` falls on: the nightly of "today" starts after it. */
 export function startOfDayUtc(now: Date): Date {
@@ -51,38 +48,40 @@ function latestSince(runs: Run[], since: Date): Run | undefined {
     .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))[0];
 }
 
-function judge(run: Run | undefined, what: string, treatFailureAsMissing: boolean): Problem | null {
-  if (!run) return null;
+function judge(run: Run, what: string, healthy: Set<string>): Problem | null {
   if (run.status !== 'completed') {
     return { what, why: `still ${run.status.replace('_', ' ')}`, url: run.url };
   }
-  if (UNFINISHED.has(run.conclusion) || (treatFailureAsMissing && run.conclusion === 'failure')) {
-    return { what, why: `ended as ${run.conclusion}`, url: run.url };
+  if (!healthy.has(run.conclusion)) {
+    return { what, why: `ended as ${run.conclusion || 'no result'}`, url: run.url };
   }
   return null;
 }
 
 /** The problems with today's nightly and triage runs. `nightly` and `triage` are the runs of each
- * workflow, newest or not: only those created since midnight UTC count. A triage run is only
- * expected once the nightly has finished, so a missing nightly is reported once, not twice. A
- * failed triage run counts as a problem, because the digest is the post it exists to make. */
+ * workflow: only nightly runs created since midnight UTC count. The triage that counts is the one
+ * the nightly triggered (`workflow_run`) after the nightly started: a manual triage run, or one
+ * from earlier in the day, must not hide a missing automatic digest. A triage is only expected
+ * once the nightly has finished, so a missing nightly is reported once, not twice. */
 export function evaluate(nightly: Run[], triage: Run[], now: Date): Problem[] {
-  const since = startOfDayUtc(now);
-  const n = latestSince(nightly, since);
+  const n = latestSince(nightly, startOfDayUtc(now));
   if (!n) {
     return [{ what: NIGHTLY, why: 'did not start today', url: '' }];
   }
-  const nightlyProblem = judge(n, NIGHTLY, false);
+  const nightlyProblem = judge(n, NIGHTLY, NIGHTLY_HEALTHY);
   if (nightlyProblem) return [nightlyProblem];
-  const t = latestSince(triage, since);
+  const t = latestSince(
+    triage.filter((r) => r.event === 'workflow_run'),
+    new Date(Date.parse(n.createdAt)),
+  );
   if (!t) return [{ what: TRIAGE, why: 'did not run after the nightly finished', url: n.url }];
-  const triageProblem = judge(t, TRIAGE, true);
+  const triageProblem = judge(t, TRIAGE, TRIAGE_HEALTHY);
   return triageProblem ? [triageProblem] : [];
 }
 
 const HUB_MEDIC = '<!subteam^S014VK4482H|hub-medic>';
 const COOKBOOK_URL =
-  'https://github.com/camunda/api-test-generator/blob/main/docs/hub-nightly-cookbook.md#when-a-post-is-missing';
+  'https://github.com/camunda/api-test-generator/blob/main/docs/hub-nightly-cookbook.md';
 
 export function buildAlert(problems: Problem[]): string {
   if (problems.length === 0) return '';
