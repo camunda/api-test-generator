@@ -992,7 +992,7 @@ nightly rather than duplicating it — the composite actions
 (which auto-re-bundles). (`clone-hub-sibling` is also used by ci.yml's hub-invariants leg.)
 
 The **spec-bump check** ([spec-bump-check.yml](.github/workflows/spec-bump-check.yml),
-#387) is a scheduled (**daily** 06:00 UTC) + `workflow_dispatch` job — a
+#387) is a scheduled (**daily** 03:00 UTC) + `workflow_dispatch` job — a
 per-config **matrix over `camunda-oca` and `camunda-hub`**, never `pull_request`
 (it can't fail anyone's PR). For each config it resolves latest upstream `main`,
 generates + runs that config's invariants against it, diffs the operation
