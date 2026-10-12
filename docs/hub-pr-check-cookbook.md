@@ -1,9 +1,8 @@
 # Hub PR Check Cookbook
 
-> **Goal:** if the `api-test-generator/hub-suite` check on your camunda-hub PR is red, or a Slack alert names
-> your PR, you can tell in a few minutes whether it is your problem and what to do. "Start here" assumes
-> you know Hub, not how the generator works; its few terms (generator gap, classifier, fingerprint) are explained in "Words used" in [how-it-works.md](how-it-works.md#words-used). The check is
-> **informational, not required**: a red result does not block merging.
+> **Goal:** find out what is behind a red `api-test-generator/hub-suite` check on your camunda-hub PR, or a Slack alert
+> that names your PR. The check is **informational, not required**: a red result does not block merging. Terms
+> (generator gap, classifier, fingerprint) are in "Words used" in [how-it-works.md](how-it-works.md#words-used).
 
 **Looking for something else?** This guide is only about the check on a single camunda-hub PR. For the nightly run, the spec-bump and re-enable alerts and the weekly report, see [how-it-works.md](how-it-works.md).
 
@@ -77,11 +76,14 @@ Then ask a Hub teammate to review it: the Hub team reviews generator PRs.
 **Testing it before your Hub PR merges.** Re-running the PR check does not test it: that runs the generator's `main`.
 Instead:
 
-- **On GitHub, to check the generator side.** Run `hub-ondemand-test` with **Use workflow from** set to your generator
-  branch and `hub_ref` set to your Hub PR's branch name (a camunda-hub branch, not a generator one). The tests come from
-  your PR's spec and your generator fix, but run against the latest published Hub `main`, **not your PR**, so tests for a
-  brand-new endpoint get 404 there. It shows that generation and the invariants work, not that the endpoint behaves as
-  expected. Steps: "Run it by hand" in [hub-nightly-cookbook.md](hub-nightly-cookbook.md). A PR to this repo also gets
+- **On GitHub, to check the generator side.** Run `hub-ondemand-test` ("Run it by hand" in
+  [hub-nightly-cookbook.md](hub-nightly-cookbook.md)) with:
+  - **Use workflow from**: your generator branch;
+  - `hub_ref`: your Hub PR's branch (a camunda-hub branch);
+  - the Hub image: by default the latest published `main`, which has no new endpoint yet, so tests for it get 404. The run
+    shows that generation and the invariants work, not that the endpoint behaves as expected.
+
+  A PR to this repo also gets
   [hub-pr-live-check](https://github.com/camunda/api-test-generator/actions/workflows/hub-pr-live-check.yml)
   automatically, except PRs opened by the automation account (the AI agents and the re-enable and spec-bump scripts): for
   those, read the diff and run the suite by hand.
@@ -93,11 +95,17 @@ Instead:
 - **No** (for example it only turns on a feature flag in `docker/docker-compose.hub.yml`): merge it any time, even first.
   A flag is just a setting passed to Hub, and nothing looks it up in the spec, so it is harmless until the endpoint exists.
   The check is then green from the first push.
-- **Yes** (for example a line for it in `conflict-replay.json`): merge it **after** your Hub PR, or at the same time. The
-  generator looks that name up in Hub's `main` spec, and until your Hub PR merges the endpoint is not there, so generation
-  fails and the nightly goes red because of your generator PR. The PR check will not warn you, because it reads your
-  PR's own spec, which already has the endpoint. If your Hub PR is delayed, leave the generator PR open and merge it
-  right after.
+- **Yes** (for example a line for it in `conflict-replay.json`): the generator looks that name up in a Hub spec, and two
+  specs matter. Merge in this order:
+  1. **Your Hub PR.** The nightly reads Hub's latest `main` spec. If your generator PR merges first, the endpoint is not
+     there, generation fails and the nightly goes red because of your generator PR.
+  2. **The pin bump.** This repo's own checks read the **pinned** spec (`configs/camunda-hub/spec-pin.json`), so the
+     generator PR fails its checks until the pin includes your endpoint. Move the pin once your Hub PR has merged
+     (`npm run bump-spec-pin`, see the README; the spec-bump bot also opens a PR for it).
+  3. **The generator PR.**
+
+  The PR check will not warn you, because it reads your PR's own spec, which already has the endpoint. If your Hub PR is
+  delayed, leave the generator PR open.
 
 **If the nightly fails before your PR merges,** the triage agent may open its own fix PR for the same endpoint. That is the
 backstop, not a mistake by anyone. Keep whichever merges first and close the other. You do not need to wait for
@@ -116,7 +124,7 @@ If a test cannot pass yet, suppress it so CI is not blocked, and track it so it 
    Entries that share a URL must share a summary.
 3. **Who opens the issue.** For a Hub bug, whoever suppresses it files the camunda-hub issue and links it. A generator
    gap is tracked by an issue in this repo, which the re-enable check cannot watch, so someone has to revisit it by hand.
-4. **Open the suppress PR with the two labels** from the section above.
+4. **Open the suppress PR with the two labels** from the section above. If skipping a test that currently counts makes the coverage check fail, lower the matching floor in `configs/camunda-hub/coverage-floors.json` in the same PR and link the Hub issue (see "Floors" in [the coverage guide](hub-response-coverage-report.md#floors)).
 5. **It is a bridge.** When the Hub issue closes as fixed, the re-enable check opens a draft PR that removes the skip. If
    Hub closed it as not planned, the skip stays; see [the nightly guide](hub-nightly-cookbook.md#the-re-enable-check-0400).
 
