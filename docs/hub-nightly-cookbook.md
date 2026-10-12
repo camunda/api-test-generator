@@ -38,7 +38,7 @@ So a night with no spec-bump or re-enable post is normal. A night with no nightl
 
 | The line shows | What happened | PR opened automatically? | What you do |
 |---|---|---|---|
-| 🎫 known issue | Hub already has an issue for it | **No** | Nothing. The linked issue is the work |
+| 🎫 known issue | Hub already has an issue for it | **Sometimes**: the agent opens a suppress PR for every confirmed product bug, known or not, so a ⛔ link can appear on the same line | The linked issue is the work. If the line also has a ⛔ link, review that suppress PR like the one in the next row |
 | 📦 product, with 📝 and ⛔ links | Hub is wrong. The agent filed a **new** Hub issue (`hub-medic` was pinged) and opened a **suppress PR** that switches the test off until Hub fixes it | **Yes**, a suppress PR | Open the Hub issue and take it, or hand it to the owning team. Review the suppress PR: merge it only if the linked Hub issue is real **and** the suite is green on its branch. Agent PRs get no automatic live check, so run it yourself (see "Run it by hand"). Review it within a day or add `do-not-close`: a daily job closes a `nightly-api-fix` PR with no activity for a day |
 | 📦 product, with a 📝 link, **no** ⛔ link | A Hub issue was filed, but no suppress PR: the test was already suppressed, an open PR already covers it, or opening it failed (the line shows ⚠️) | **No** | Open the Hub issue and take it. If the line shows ⚠️, add the suppress entry yourself |
 | 📦 product, **no link** | Hub is probably wrong, but no issue was filed and **nobody was pinged** | **No** | Open the triage run and read the finding. Then file the Hub issue yourself |
