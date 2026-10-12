@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildAlert,
   type CheckDeps,
+  collectRuns,
   evaluate,
   type Run,
   runCheck,
@@ -235,5 +236,35 @@ describe('runCheck', () => {
       },
     });
     await expect(runCheck(d)).rejects.toThrow('HTTP 403');
+  });
+});
+
+describe('collectRuns', () => {
+  const full = (n: number): Run[] =>
+    Array.from({ length: 100 }, (_, i) => run({ id: n * 1000 + i }));
+
+  it('reads every page until a short one', async () => {
+    const pages = [full(1), full(2), [run({ id: 9 })]];
+    const seen: number[] = [];
+    const runs = await collectRuns(async (page) => {
+      seen.push(page);
+      return pages[page - 1] ?? [];
+    });
+    expect(runs).toHaveLength(201);
+    expect(seen).toEqual([1, 2, 3]);
+  });
+
+  it('stops after the first page when it is short', async () => {
+    const seen: number[] = [];
+    const runs = await collectRuns(async (page) => {
+      seen.push(page);
+      return [run({})];
+    });
+    expect(runs).toHaveLength(1);
+    expect(seen).toEqual([1]);
+  });
+
+  it('fails instead of reading green over a partial read when every page is full', async () => {
+    await expect(collectRuns(async (page) => full(page))).rejects.toThrow('were not read');
   });
 });

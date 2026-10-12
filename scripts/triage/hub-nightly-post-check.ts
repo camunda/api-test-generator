@@ -119,9 +119,34 @@ interface ApiRun {
   created_at: string;
 }
 
-async function listRuns(repo: string, file: string, token: string, since: Date): Promise<Run[]> {
+const PAGE_SIZE = 100;
+/** More than this many pages of one day's runs is not plausible; a full last page then proves nothing. */
+const MAX_PAGES = 5;
+
+/** Reads every page of a day's runs. Every ad-hoc nightly adds a nightly run and a triage run, so a
+ * single short page could push the scheduled run's triage out of view and give a false "missing"
+ * alert. Stops at the first short page; if MAX_PAGES full pages come back, completeness cannot be
+ * shown, so it throws and the run is red instead of green over a partial read. `fetchPage` is
+ * injectable for tests. */
+export async function collectRuns(fetchPage: (page: number) => Promise<Run[]>): Promise<Run[]> {
+  const out: Run[] = [];
+  for (let page = 1; page <= MAX_PAGES; page++) {
+    const batch = await fetchPage(page);
+    out.push(...batch);
+    if (batch.length < PAGE_SIZE) return out;
+  }
+  throw new Error(`more than ${MAX_PAGES * PAGE_SIZE} runs today; the rest were not read`);
+}
+
+async function fetchRunsPage(
+  repo: string,
+  file: string,
+  token: string,
+  since: Date,
+  page: number,
+): Promise<Run[]> {
   const day = since.toISOString().slice(0, 10);
-  const url = `https://api.github.com/repos/${repo}/actions/workflows/${file}/runs?per_page=20&created=%3E%3D${day}`;
+  const url = `https://api.github.com/repos/${repo}/actions/workflows/${file}/runs?per_page=${PAGE_SIZE}&page=${page}&created=%3E%3D${day}`;
   const resp = await fetch(url, {
     headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json' },
     signal: AbortSignal.timeout(30_000),
@@ -138,6 +163,10 @@ async function listRuns(repo: string, file: string, token: string, since: Date):
     conclusion: r.conclusion ?? '',
     createdAt: r.created_at,
   }));
+}
+
+function listRuns(repo: string, file: string, token: string, since: Date): Promise<Run[]> {
+  return collectRuns((page) => fetchRunsPage(repo, file, token, since, page));
 }
 
 /** Everything `runCheck` reads or writes, so a test can drive the whole run without the network. */
