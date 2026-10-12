@@ -80,8 +80,8 @@ channels each morning: PR-check alerts and the gap digest are in `#camunda-hub-p
 - **Coverage:** how many of the API's answers (success, 403, 404, bad request...) have a test.
 - **Pin:** the camunda-hub commit whose API description the invariant tests are checked against. The spec-bump alert moves it.
 - **Invariant tests:** tests in this repo that check the generated output against the pinned spec. They guard the generator, not Hub.
-- **Skip:** a test left out on purpose because of a tracked Hub limitation, with an issue link. It can stay after the issue closes, when Hub will not fix it. A **suite-wide skip** is not tied to one endpoint.
-- **Partly checked:** the test runs, but one assertion (the error-body shape) is not made.
+- **Skip:** a test left out on purpose. Usually because of a Hub bug, with the Hub issue linked; sometimes there is no issue: the test would contradict the API contract, or the generator cannot build it yet. It can stay after the issue closes, when Hub will not fix it. A **suite-wide skip** is not tied to one endpoint.
+- **Partly checked:** the test runs, but one check is left out because Hub's real answer differs from its API description (usually the shape of the error body). A Hub issue is linked, and the check goes back in when Hub is fixed.
 - **Fix PR / suppress PR:** a draft PR the triage agent opens in this repo. A fix PR corrects a wrong generated test. A suppress PR switches a test off until a Hub bug is fixed; its branch is named `fix/nightly-triage-suppress-…`. Both carry the labels `nightly-api-fix`, `auto-generated` and `hub`.
 - **Medic:** a Slack group on call for a test area. `hub-medic` is the on-call group.
 - **Classifier:** the automated step that reads a failed PR check and picks a verdict. It is an AI agent and can be wrong; it is told to answer "unknown" rather than guess.
