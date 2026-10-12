@@ -878,6 +878,15 @@ warning). `do-not-close` holds a PR across the daily reset; `dry_run` previews.
 Fix PRs must carry the `nightly-api-fix` label to be managed (the filed issues say
 so).
 
+The **nightly post check** ([hub-nightly-post-check.yml](.github/workflows/hub-nightly-post-check.yml),
+`scripts/triage/hub-nightly-post-check.ts`) runs daily at 04:30 UTC, after the nightly (02:00) and its triage have
+finished. A failed Slack step already turns a run red, but a run that never starts or hangs posts nothing and is not
+red, so this looks at today's runs (UTC) of `nightly-camunda-hub.yml` and `triage-camunda-hub-nightly.yml` and posts one
+alert to `#camunda-hub-nightly-test-results`, pinging `hub-medic`, when the nightly did not start, is still running, or
+ended cancelled or timed out, or when the triage did not run, is still running, or ended cancelled, timed out or
+failed. A nightly with failing tests is not a problem: it still posts. Silent when both ran. A manual run is a dry run
+by default. Deterministic, no agent; covered by `tests/triage/hub-nightly-post-check.test.ts`.
+
 The **hub known-issue re-enable check**
 ([hub-known-issue-reenable-check.yml](.github/workflows/hub-known-issue-reenable-check.yml),
 #432) is a scheduled (04:00 UTC, after the nightly + spec-bump-check) +

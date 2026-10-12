@@ -1,0 +1,68 @@
+# Morning check that last night's nightly run and its triage run happened. A failed Slack step already
+# turns its run red, but a run that never starts (a disabled schedule, an outage) or hangs posts nothing
+# and is not red, so a missing post would go unnoticed. Posts one alert to
+# #camunda-hub-nightly-test-results, pinging hub-medic, when the nightly or the triage is missing, stuck
+# or ended without finishing. Silent when both ran. Deterministic: no agent.
+name: Hub nightly post check
+
+on:
+  schedule:
+    # 04:30 UTC daily: the nightly starts at 02:00 and the triage follows it, so both have finished.
+    - cron: '30 4 * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Print the alert, post nothing.
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  actions: read # list the runs of the nightly and triage workflows
+  id-token: write # OIDC → Vault (Slack token)
+
+concurrency:
+  group: hub-nightly-post-check
+  cancel-in-progress: false
+
+jobs:
+  check:
+    name: Did the nightly post?
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout api-test-generator
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Fetch Slack bot token from Vault
+        id: slack-secrets
+        # A manual run defaults to a dry run that posts nothing, so it needs no token.
+        if: ${{ github.event_name != 'workflow_dispatch' || !inputs.dry_run }}
+        continue-on-error: true
+        uses: ./.github/actions/slack-token
+        with:
+          vault-url: ${{ secrets.VAULT_ADDR }}
+          vault-jwt-path: ${{ secrets.VAULT_JWT_PATH }}
+          vault-jwt-role: ${{ secrets.VAULT_JWT_ROLE }}
+          vault-jwt-audience: ${{ secrets.VAULT_JWT_AUDIENCE }}
+
+      - name: Check the nightly and triage runs, and post if one is missing
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          SLACK_TOKEN: ${{ steps.slack-secrets.outputs.SLACK_BOT_TOKEN }}
+          # Scheduled runs post; a manual run defaults to a dry run.
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || 'false' }}
+        run: node scripts/triage/hub-nightly-post-check.ts
+
+      - name: Fail the run if the Slack alert did not go out
+        if: always()
+        uses: ./.github/actions/fail-if-slack-failed
+        with:
+          outcomes: "${{ (steps.slack-secrets.outcome == 'success' && steps.slack-secrets.outputs.SLACK_BOT_TOKEN == '') && 'failure' || steps.slack-secrets.outcome }}"

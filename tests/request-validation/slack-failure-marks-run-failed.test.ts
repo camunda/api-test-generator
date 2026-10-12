@@ -14,6 +14,7 @@ const WORKFLOWS = [
   'hub-known-issue-reenable-check',
   'hub-response-coverage',
   'hub-generator-gap-digest',
+  'hub-nightly-post-check',
 ];
 
 interface Step {
