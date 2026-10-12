@@ -117,7 +117,8 @@ describe('python await_eventually: 429 backoff', () => {
       writeFileSync(join(dir, 'support', '__init__.py'), '');
       writeFileSync(join(dir, 'support', 'await_eventually.py'), helper.content, 'utf8');
       const script = `
-import asyncio, json
+import asyncio, json, sys, types
+sys.modules['httpx'] = types.ModuleType('httpx')
 import support.await_eventually as m
 class Resp:
     def __init__(self, status_code, headers=None):
@@ -134,11 +135,11 @@ async def run(headers):
     async def fetch(): return seq.pop(0)
     await m.await_eventually(fetch, operation_id='x', method='GET', poll_interval_ms=500)
     return list(sleeps)
-out = [asyncio.run(run(h)) for h in ({'retry-after': '1'}, {'retry-after': '99'}, {}, {'retry-after': 'bad'})]
+out = [asyncio.run(run(h)) for h in ({'retry-after': '1'}, {'retry-after': '99'}, {}, {'retry-after': 'bad'}, {'retry-after': '1000'})]
 print(json.dumps(out))
 `;
       const out = execFileSync('python3', ['-B', '-c', script], { encoding: 'utf8', cwd: dir });
-      expect(JSON.parse(out.trim())).toEqual([[1], [2], [1], [1]]);
+      expect(JSON.parse(out.trim())).toEqual([[1], [2], [1], [1], [1]]);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
