@@ -10,7 +10,7 @@
       <requiredDecision href="#Decision_1" />
     </informationRequirement>
     <literalExpression id="LiteralExpression_2">
-      <text>Decision_1</text>
+      <text>Decision</text>
     </literalExpression>
   </decision>
 </definitions>
