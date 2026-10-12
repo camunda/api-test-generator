@@ -59,14 +59,18 @@ function judge(run: Run, what: string, healthy: Set<string>): Problem | null {
 }
 
 /** The problems with today's nightly and triage runs. `nightly` and `triage` are the runs of each
- * workflow: only nightly runs created since midnight UTC count. The triage that counts is the one
+ * workflow: only scheduled nightly runs created since midnight UTC count (a manual run on
+ * some branch must not replace the scheduled one, and its triage is skipped on purpose). The triage that counts is the one
  * the nightly triggered (`workflow_run`) after the nightly started: a manual triage run, or one
  * from earlier in the day, must not hide a missing automatic digest. A triage is only expected
  * once the nightly has finished, so a missing nightly is reported once, not twice. */
 export function evaluate(nightly: Run[], triage: Run[], now: Date): Problem[] {
-  const n = latestSince(nightly, startOfDayUtc(now));
+  const n = latestSince(
+    nightly.filter((r) => r.event === 'schedule'),
+    startOfDayUtc(now),
+  );
   if (!n) {
-    return [{ what: NIGHTLY, why: 'did not start today', url: '' }];
+    return [{ what: NIGHTLY, why: 'did not start on schedule today', url: '' }];
   }
   const nightlyProblem = judge(n, NIGHTLY, NIGHTLY_HEALTHY);
   if (nightlyProblem) return [nightlyProblem];

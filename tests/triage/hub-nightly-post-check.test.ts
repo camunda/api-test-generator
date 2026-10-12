@@ -41,7 +41,18 @@ describe('evaluate', () => {
     const problems = evaluate([yesterday], [yesterday], now);
     expect(problems).toHaveLength(1);
     expect(problems[0]?.what).toContain('nightly');
-    expect(problems[0]?.why).toBe('did not start today');
+    expect(problems[0]?.why).toBe('did not start on schedule today');
+  });
+
+  it('does not let a manual nightly run stand in for the scheduled one', () => {
+    const manual = run({ event: 'workflow_dispatch', createdAt: '2026-10-12T03:00:00Z' });
+    const problems = evaluate([manual], [], now);
+    expect(problems[0]?.why).toBe('did not start on schedule today');
+  });
+
+  it('judges the scheduled run even when a later manual run exists', () => {
+    const manual = run({ event: 'workflow_dispatch', createdAt: '2026-10-12T03:30:00Z' });
+    expect(evaluate([run({}), manual], [triageRun()], now)).toEqual([]);
   });
 
   it('reports a nightly that is still running at the check time', () => {
@@ -132,7 +143,7 @@ describe('buildAlert', () => {
 
   it('has no run link when there is none', () => {
     const text = buildAlert([
-      { what: 'the nightly run (02:00 UTC)', why: 'did not start today', url: '' },
+      { what: 'the nightly run (02:00 UTC)', why: 'did not start on schedule today', url: '' },
     ]);
     expect(text).not.toContain('|run>');
   });
@@ -175,7 +186,7 @@ describe('runCheck', () => {
     const { d, posted } = deps({ nightly: [], triage: [] });
     await runCheck(d);
     expect(posted).toHaveLength(1);
-    expect(posted[0]).toContain('did not start today');
+    expect(posted[0]).toContain('did not start on schedule today');
   });
 
   it('prints the alert but posts nothing in a dry run', async () => {
