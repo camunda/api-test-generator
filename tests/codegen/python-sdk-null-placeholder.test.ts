@@ -121,7 +121,7 @@ function evalEmitted(pythonExpr: string, ctx: Record<string, unknown>): unknown 
     // cannot resolve to the stub itself and recurse.
     const script = `
 import json
-from prune import prune_nulls
+from prune import prune_nulls, unbound
 _data = json.loads(r'''${JSON.stringify(ctx)}''')
 class _Ctx:
     def get(self, k, d=None):
@@ -150,20 +150,23 @@ describe('the python support package ships prune_nulls (Item 6a)', () => {
 
   test('prune_nulls drops a null cursor AND the page object that becomes empty', () => {
     // The exact defect: `{"page":{"after":null}}` is a 400, `{}` is a 200.
-    expect(evalEmitted(`prune_nulls({'page': {'after': None}})`, {})).toEqual({});
-    expect(evalEmitted(`prune_nulls({'page': {'before': None}})`, {})).toEqual({});
+    expect(evalEmitted(`prune_nulls({'page': {'after': unbound(None)}})`, {})).toEqual({});
+    expect(evalEmitted(`prune_nulls({'page': {'before': unbound(None)}})`, {})).toEqual({});
   });
 
   test('prune_nulls keeps a bound cursor and its siblings untouched', () => {
     expect(
-      evalEmitted(`prune_nulls({'page': {'after': ctx.get('endCursorVar')}})`, {
+      evalEmitted(`prune_nulls({'page': {'after': unbound(ctx.get('endCursorVar'))}})`, {
         endCursorVar: 'cursor-abc',
       }),
     ).toEqual({ page: { after: 'cursor-abc' } });
 
     // A null sibling must not take a bound one down with it.
     expect(
-      evalEmitted(`prune_nulls({'page': {'after': ctx.get('endCursorVar'), 'limit': 10}})`, {}),
+      evalEmitted(
+        `prune_nulls({'page': {'after': unbound(ctx.get('endCursorVar')), 'limit': 10}})`,
+        {},
+      ),
     ).toEqual({ page: { limit: 10 } });
   });
 
@@ -172,10 +175,14 @@ describe('the python support package ships prune_nulls (Item 6a)', () => {
     // updateJob.changeset={}, resolveIncidentsBatchOperation.filter={},
     // evaluateConditionals.variables={}. Pruning them would change semantics.
     expect(evalEmitted(`prune_nulls({'changeset': {}})`, {})).toEqual({ changeset: {} });
-    expect(evalEmitted(`prune_nulls({'filter': {}, 'page': {'after': None}})`, {})).toEqual({
+    expect(
+      evalEmitted(`prune_nulls({'filter': {}, 'page': {'after': unbound(None)}})`, {}),
+    ).toEqual({
       filter: {},
     });
-    expect(evalEmitted(`prune_nulls({'variables': [], 'page': {'after': None}})`, {})).toEqual({
+    expect(
+      evalEmitted(`prune_nulls({'variables': [], 'page': {'after': unbound(None)}})`, {}),
+    ).toEqual({
       variables: [],
     });
   });
@@ -186,9 +193,9 @@ describe('the python support package ships prune_nulls (Item 6a)', () => {
     // and `filter.$or=[{tags:[]}]` is a 500. Dropping the emptied key is the
     // only uniform behaviour, so a list emptied by pruning is removed like a
     // dict emptied by pruning.
-    expect(evalEmitted(`prune_nulls({'filter': {'tags': [None]}})`, {})).toEqual({});
+    expect(evalEmitted(`prune_nulls({'filter': {'tags': [unbound(None)]}})`, {})).toEqual({});
     expect(
-      evalEmitted(`prune_nulls({'filter': {'tags': [ctx.get('tagVar'), 'real']}})`, {}),
+      evalEmitted(`prune_nulls({'filter': {'tags': [unbound(ctx.get('tagVar')), 'real']}})`, {}),
     ).toEqual({ filter: { tags: ['real'] } });
     // A list that was ALREADY empty in the template is preserved verbatim.
     expect(evalEmitted(`prune_nulls({'filter': {'tags': []}})`, {})).toEqual({
@@ -200,19 +207,35 @@ describe('the python support package ships prune_nulls (Item 6a)', () => {
     // The `$or` shape: a pruned-empty dict must also leave its parent list,
     // which then empties and leaves its parent dict — otherwise the broker
     // sees `{"filter":{"$or":[{}]}}`, which is a 500.
-    expect(evalEmitted(`prune_nulls({'filter': {'$or': [{'tags': [None]}]}})`, {})).toEqual({});
+    expect(
+      evalEmitted(`prune_nulls({'filter': {'$or': [{'tags': [unbound(None)]}]}})`, {}),
+    ).toEqual({});
     // A sibling constraint survives the cascade.
     expect(
-      evalEmitted(`prune_nulls({'filter': {'$or': [{'tags': [None]}], 'name': 'x'}})`, {}),
+      evalEmitted(`prune_nulls({'filter': {'$or': [{'tags': [unbound(None)]}], 'name': 'x'}})`, {}),
     ).toEqual({ filter: { name: 'x' } });
+  });
+
+  test('prune_nulls preserves a literal JSON null but drops an unbound placeholder beside it', () => {
+    // Class: an intentional null (e.g. request-defaults tenantIds: null, optional-field
+    // variants) must not be conflated with an unresolved placeholder.
+    expect(
+      evalEmitted(`prune_nulls({'a': None, 'b': unbound(None), 'c': [None, unbound(None)]})`, {}),
+    ).toEqual({ a: null, c: [null] });
+    expect(evalEmitted(`prune_nulls({'page': {'after': None}})`, {})).toEqual({
+      page: { after: null },
+    });
   });
 
   test('prune_nulls is order- and scalar-preserving, and idempotent', () => {
     expect(
-      evalEmitted(`prune_nulls({'b': 1, 'a': None, 'c': {'d': False, 'e': 0, 'f': ''}})`, {}),
+      evalEmitted(
+        `prune_nulls({'b': 1, 'a': unbound(None), 'c': {'d': False, 'e': 0, 'f': ''}})`,
+        {},
+      ),
     ).toEqual({ b: 1, c: { d: false, e: 0, f: '' } });
     // Falsy-but-bound values must survive: only None is pruned.
-    expect(evalEmitted(`prune_nulls(prune_nulls({'x': {'y': None}}))`, {})).toEqual({});
+    expect(evalEmitted(`prune_nulls(prune_nulls({'x': {'y': unbound(None)}}))`, {})).toEqual({});
   });
 });
 
@@ -224,15 +247,15 @@ describe('the emitter wraps a null-capable body in prune_nulls (Item 6a)', () =>
     const line = bodyLine(output);
 
     expect(line).toContain('prune_nulls(');
-    expect(line).toContain("'page': {'after': ctx.get('endCursorVar')}");
-    expect(output).toContain('from support.prune import prune_nulls');
+    expect(line).toContain("'page': {'after': unbound(ctx.get('endCursorVar'))}");
+    expect(output).toContain('from support.prune import prune_nulls, unbound');
   });
 
   test('a top-level placeholder is wrapped too (the general rule, not a cursor special case)', () => {
     const line = bodyLine(renderPythonSuite(collectionFor([step({ name: PH('nameVar') })])));
 
     expect(line).toContain('prune_nulls(');
-    expect(line).toContain("'name': ctx.get('nameVar')");
+    expect(line).toContain("'name': unbound(ctx.get('nameVar'))");
   });
 
   test('an array-element placeholder is wrapped', () => {
@@ -241,7 +264,7 @@ describe('the emitter wraps a null-capable body in prune_nulls (Item 6a)', () =>
     );
 
     expect(line).toContain('prune_nulls(');
-    expect(line).toContain("'tags': [ctx.get('tagVar')]");
+    expect(line).toContain("'tags': [unbound(ctx.get('tagVar'))]");
   });
 
   test('a body with NO whole-string placeholder is left byte-identical (no needless wrapping)', () => {
@@ -251,7 +274,7 @@ describe('the emitter wraps a null-capable body in prune_nulls (Item 6a)', () =>
     const line = bodyLine(output);
 
     expect(line).not.toContain('prune_nulls(');
-    expect(output).not.toContain('from support.prune import prune_nulls');
+    expect(output).not.toContain('from support.prune import prune_nulls, unbound');
   });
 
   test('a CONCATENATED placeholder is not treated as null-capable (it already falls back to "")', () => {
@@ -282,7 +305,7 @@ describe('the emitter wraps a null-capable body in prune_nulls (Item 6a)', () =>
       ]),
     );
 
-    expect(output.match(/from support\.prune import prune_nulls/g)).toHaveLength(1);
+    expect(output.match(/from support\.prune import prune_nulls, unbound/g)).toHaveLength(1);
   });
 });
 

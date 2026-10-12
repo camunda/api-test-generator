@@ -1,5 +1,10 @@
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 import { renderPythonSuite } from '../../materializer/src/python-sdk/emitter.js';
+import { loadPythonProjectScaffoldingFiles } from '../../materializer/src/python-sdk/materialize-support.js';
 import type { EndpointScenarioCollection, RequestStep } from '../../path-analyser/src/types.ts';
 
 function collectionOf(
@@ -97,5 +102,39 @@ describe('python-sdk emitter: live-broker fixes', () => {
     const step2 = out.slice(out.indexOf('# Step 2'));
     expect(step2).toContain('require_items=False,');
     expect(out.slice(0, out.indexOf('# Step 2'))).not.toContain('require_items=False');
+  });
+});
+
+describe('python await_eventually: 429 backoff', () => {
+  test('honours Retry-After (capped at 2s) and falls back to 2x poll interval', () => {
+    const helper = loadPythonProjectScaffoldingFiles().find(
+      (f) => f.relativePath === 'support/await_eventually.py',
+    );
+    if (helper === undefined) throw new Error('support/await_eventually.py is not emitted');
+    const dir = mkdtempSync(join(tmpdir(), 'await-eval-'));
+    try {
+      mkdirSync(join(dir, 'support'));
+      writeFileSync(join(dir, 'support', '__init__.py'), '');
+      writeFileSync(join(dir, 'support', 'await_eventually.py'), helper.content, 'utf8');
+      const script = `
+import asyncio, json, httpx
+import support.await_eventually as m
+sleeps = []
+async def fake_sleep(s): sleeps.append(round(s, 3))
+m.asyncio.sleep = fake_sleep
+async def run(headers):
+    sleeps.clear()
+    seq = [httpx.Response(429, headers=headers), httpx.Response(200, json={})]
+    async def fetch(): return seq.pop(0)
+    await m.await_eventually(fetch, operation_id='x', method='GET', poll_interval_ms=500)
+    return list(sleeps)
+out = [asyncio.run(run(h)) for h in ({'retry-after': '1'}, {'retry-after': '99'}, {}, {'retry-after': 'bad'})]
+print(json.dumps(out))
+`;
+      const out = execFileSync('python3', ['-B', '-c', script], { encoding: 'utf8', cwd: dir });
+      expect(JSON.parse(out.trim())).toEqual([[1], [2], [1], [1]]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

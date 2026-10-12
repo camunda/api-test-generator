@@ -426,7 +426,9 @@ not uniformly accepted: 'filter.tags = []' is 200, but
 'filter.elementInstanceKeys = []' and 'filter.tenantIds = []' are both 400, and
 'filter.$or = [{}]' is a 500.
 
-Falsy-but-bound values (0, False, '') are never pruned; only None is.
+Falsy-but-bound values (0, False, '') are never pruned. A literal None in the
+template (an intentional JSON null) is preserved; only values wrapped by
+'unbound(...)' that resolved to None are dropped.
 """
 
 from __future__ import annotations
@@ -436,12 +438,20 @@ from typing import Any
 # Sentinel meaning "this value was pruned away", so a legitimately stored None
 # can never be confused with an absent one.
 _DROPPED = object()
+# Marks a '\${...}' placeholder whose binding was never produced.
+_UNBOUND = object()
+
+
+def unbound(value: Any) -> Any:
+    return _UNBOUND if value is None else value
 
 
 def _prune(value: Any) -> Any:
     if isinstance(value, dict):
         kept: dict[Any, Any] = {}
         for key, item in value.items():
+            if item is _UNBOUND:
+                continue
             pruned = _prune(item)
             if pruned is _DROPPED:
                 continue
@@ -454,6 +464,8 @@ def _prune(value: Any) -> Any:
     if isinstance(value, list):
         items: list[Any] = []
         for item in value:
+            if item is _UNBOUND:
+                continue
             pruned = _prune(item)
             if pruned is _DROPPED:
                 continue
@@ -461,7 +473,7 @@ def _prune(value: Any) -> Any:
         if value and not items:
             return _DROPPED
         return items
-    if value is None:
+    if value is _UNBOUND:
         return _DROPPED
     return value
 
@@ -500,6 +512,18 @@ from typing import Awaitable, Callable
 import httpx
 
 _ABORT_STATUSES = {400, 401, 403, 409, 422}
+_MAX_RETRY_AFTER_MS = 2_000
+
+
+def _retry_after_ms(response: httpx.Response) -> float | None:
+    raw = response.headers.get('retry-after')
+    if raw is None:
+        return None
+    try:
+        seconds = float(raw.strip())
+    except ValueError:
+        return None
+    return seconds * 1000 if seconds >= 0 else None
 
 
 def _is_non_empty_items_page(response: httpx.Response) -> bool:
@@ -541,7 +565,12 @@ async def await_eventually(
                 f"{attempts} attempt(s) in {elapsed_ms:.0f}ms (lastStatus={status}): "
                 f"{response.text[:1000]}"
             )
-        await asyncio.sleep(max(10, min(poll_interval_ms, remaining_ms)) / 1000)
+        delay_ms: float = poll_interval_ms
+        if status == 429:
+            retry_after = _retry_after_ms(response)
+            delay_ms = retry_after if retry_after is not None else poll_interval_ms * 2
+            delay_ms = min(delay_ms, _MAX_RETRY_AFTER_MS)
+        await asyncio.sleep(max(10, min(delay_ms, remaining_ms)) / 1000)
 `,
     },
 
