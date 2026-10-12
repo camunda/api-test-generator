@@ -117,14 +117,20 @@ describe('python await_eventually: 429 backoff', () => {
       writeFileSync(join(dir, 'support', '__init__.py'), '');
       writeFileSync(join(dir, 'support', 'await_eventually.py'), helper.content, 'utf8');
       const script = `
-import asyncio, json, httpx
+import asyncio, json
 import support.await_eventually as m
+class Resp:
+    def __init__(self, status_code, headers=None):
+        self.status_code = status_code
+        self.headers = headers or {}
+        self.text = ''
+    def json(self): return {}
 sleeps = []
 async def fake_sleep(s): sleeps.append(round(s, 3))
 m.asyncio.sleep = fake_sleep
 async def run(headers):
     sleeps.clear()
-    seq = [httpx.Response(429, headers=headers), httpx.Response(200, json={})]
+    seq = [Resp(429, headers), Resp(200)]
     async def fetch(): return seq.pop(0)
     await m.await_eventually(fetch, operation_id='x', method='GET', poll_interval_ms=500)
     return list(sleeps)

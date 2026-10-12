@@ -1985,7 +1985,7 @@ describeForThisConfig('bundled-spec invariants: planner variant output (#37)', (
         findOperation(opId).responseSemanticTypes ?? {},
       )) {
         if (!statusCode.startsWith('2') && !statusCode.startsWith('3')) continue;
-        for (const e of entries) out.add(e.semanticType);
+        for (const e of entries) if (e.provider) out.add(e.semanticType);
       }
       return out;
     }
