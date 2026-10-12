@@ -45,7 +45,7 @@ Three more posts show up only when needed:
 | Re-enable check | A Hub bug was fixed. Bring the test back, or decide on a bug closed as not planned |
 | A weekday post in `#camunda-hub-pr-e2e-results` listing generator gaps | A merged Hub PR left a generator gap. Open each issue and finish the generator PR |
 | Weekly report lists gaps | Read the "what to do" column. Some are Hub bugs, some are generator gaps |
-| A draft PR from the coverage-fix agent | Read its "In plain words" section first. Review it like any PR, within a day: a PR with no activity for a day is closed unless it has the `do-not-close` label |
+| A draft PR from the coverage-fix agent | Read its "In plain words" section first. Review it like any PR, within 3 days: a PR with no activity for 3 days is closed unless it has the `do-not-close` label |
 | Not sure | Ask in `#ask-qa` (tag `@test-automation-medic`) and include the run link |
 
 ## Who owns what

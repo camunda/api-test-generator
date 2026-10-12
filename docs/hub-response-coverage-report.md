@@ -150,8 +150,8 @@ would run the agent's code with Hub access before anything had checked it. What 
   `hub-ondemand-test` on the branch yourself ("Run it by hand" in [the nightly guide](hub-nightly-cookbook.md#run-it-by-hand)),
   then mark it ready.
 
-A pull request with no activity for a day is closed by the daily stale-PR clean-up, like the nightly fix pull requests,
-unless it has the `do-not-close` label. So review it within a day, or add that label.
+A pull request with no activity for 3 days is closed by the daily stale-PR clean-up, like the nightly fix pull requests,
+unless it has the `do-not-close` label. So review it within 3 days, or add that label.
 
 **What it tells people.** After a real run, the `verify` job posts what the agent found, including the gaps that got no PR:
 one comment on the weekly tracking issue (each gap, what the agent did and why) and one reply in the weekly Slack message's

@@ -68,7 +68,7 @@ cannot work out:
 **If you need one, open it at the same time as your Hub PR, and add both labels:**
 
 - `nightly-api-fix`, so the nightly's triage sees your PR and links to it instead of opening a duplicate that races yours.
-- `do-not-close`, because a daily job (01:00 UTC) closes every open `nightly-api-fix` PR with no activity for a day. This
+- `do-not-close`, because a daily job (01:00 UTC) closes every open `nightly-api-fix` PR with no activity for 3 days. This
   also keeps your PR open while it waits for a delayed Hub PR.
 
 Then ask a Hub teammate to review it: the Hub team reviews generator PRs.
