@@ -1,6 +1,6 @@
 # description: Daily janitor for the camunda-hub nightly API triage flow. Closes
 #              every open PR labelled `nightly-api-fix` that has gone stale
-#              (untouched for STALE_DAYS, default 1) and is not merged, across BOTH
+#              (untouched for STALE_DAYS, default 3) and is not merged, across BOTH
 #              api-test-generator (test-generation fixes) and camunda-hub (product
 #              fixes for issues the triage agent filed) — so each night's triage
 #              starts with no in-flight bot fix PRs. PRs labelled `do-not-close`
@@ -19,8 +19,8 @@ on:
   workflow_dispatch:
     inputs:
       stale_days:
-        description: 'Close PRs untouched for N days (default 1 — daily fresh start).'
-        default: '1'
+        description: 'Close PRs untouched for N days (default 3, so a PR survives a weekend of handover).'
+        default: '3'
         required: false
       dry_run:
         description: 'Print what would be closed but do not close anything.'
@@ -92,7 +92,7 @@ jobs:
         env:
           GH_TOKEN:   ${{ steps.app-token.outputs.token }}
           REPO:       camunda/${{ matrix.repo }}
-          STALE_DAYS: ${{ github.event.inputs.stale_days || '1' }}
+          STALE_DAYS: ${{ github.event.inputs.stale_days || '3' }}
           DRY_RUN:    ${{ github.event.inputs.dry_run || 'false' }}
         run: |
           set -euo pipefail

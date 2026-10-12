@@ -869,8 +869,8 @@ The **stale-fix-PR janitor**
 ([close-stale-nightly-api-fix-prs.yml](.github/workflows/close-stale-nightly-api-fix-prs.yml))
 is the triage flow's daily housekeeper: at 01:00 UTC (before the nightly + triage)
 it closes every open PR labelled **`nightly-api-fix`** that has gone stale
-(untouched ≥ `stale_days`, default 1) and isn't merged, so each night starts with
-no in-flight bot fix PRs. It runs a **matrix over both repos the flow spans** —
+(untouched ≥ `stale_days`, default 3) and isn't merged, so a bot fix PR does not sit open
+for long. A PR the triage agent skips because one is already open for the same operation is therefore skipped for up to 3 days. It runs a **matrix over both repos the flow spans** —
 `api-test-generator` (test-generation fixes) and `camunda-hub` (product fixes for
 issues the triage agent filed) — minting a per-repo **qa-processes** App token
 (Vault approle, same wiring as spec-bump-check; a leg with no token skips with a
