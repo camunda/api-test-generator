@@ -25,11 +25,12 @@ call as `hub-medic` reads the channel each morning and takes them. A PR labelled
 | After the run | Posted every night. **Triage digest**, with "No failures tonight" when green, and links to the nightly run and the triage run. When there are failures, a thread under it has one line per failure | Only if the digest lists failures | [triage-camunda-hub-nightly](https://github.com/camunda/api-test-generator/actions/workflows/triage-camunda-hub-nightly.yml) |
 | 03:00 | **Spec-bump alert**, only when the spec changed (the pinned spec is behind Hub's latest), or when the check itself failed and cannot tell | Yes | [spec-bump-check](https://github.com/camunda/api-test-generator/actions/workflows/spec-bump-check.yml) |
 | 04:00 | **Re-enable check**, only when a watched Hub bug closed: a skipped test can come back, or a skip that cannot come back (closed as not planned) needs a decision | Yes | [hub-known-issue-reenable-check](https://github.com/camunda/api-test-generator/actions/workflows/hub-known-issue-reenable-check.yml) |
+| 04:30 | **Missing-post alert**, only when the scheduled nightly or its triage did not start, is stuck, or ended without finishing (it pings `hub-medic`) | Yes: open the run it links, then "When a post is missing" | [hub-nightly-post-check](https://github.com/camunda/api-test-generator/actions/workflows/hub-nightly-post-check.yml) |
 | Monday 05:00 | Posted every week. **Weekly coverage report** | Yes | [hub-response-coverage](https://github.com/camunda/api-test-generator/actions/workflows/hub-response-coverage.yml) (Run workflow starts a dry run) |
 
 The times are when each job **starts**, not when its post arrives. The spec-bump post comes about 2 minutes later. The nightly posts come after the run finishes, usually 20 to 25 minutes later (the job's limit is 25 minutes). The triage digest is a separate job that starts after the nightly finishes, so it comes later still (its limit is 45 minutes).
 
-So a night with no spec-bump or re-enable post is normal. A night with no nightly post or no triage digest is not: see "When a post is missing" below.
+So a night with no spec-bump or re-enable post is normal. A night with no nightly post or no triage digest is not: a check at 04:30 UTC posts a missing-post alert for it, and "When a post is missing" below says what to do.
 
 **What to do with a failure.** Only when the digest lists failures.
 
@@ -67,6 +68,7 @@ The spec-bump and re-enable posts are explained in their own sections below.
 ## When a post is missing
 
 If a morning has no nightly post, the problem is the run or the posting, not Hub: a failing Hub still produces a post.
+A check at 04:30 UTC (`hub-nightly-post-check`) posts an alert here, pinging `hub-medic`, when the scheduled nightly or its triage did not start, is stuck, or ended without finishing, and links the run. It cannot see a Slack failure when the run itself succeeded, so a quiet channel with no alert still means: check the run.
 Open [nightly-camunda-hub](https://github.com/camunda/api-test-generator/actions/workflows/nightly-camunda-hub.yml) and check, in this order:
 
 1. **No run around 02:00 UTC.** The schedule did not fire. Start one with "Run workflow".
