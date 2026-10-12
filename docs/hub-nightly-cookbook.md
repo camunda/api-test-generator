@@ -15,7 +15,7 @@ without the one assertion Hub cannot meet yet. So any number above 0 is news.
 
 **Who acts.** The Hub team acts on everything in this channel; who is pinged for what is in "Who owns what" in
 [how-it-works.md](how-it-works.md). The PRs and issues these posts open have no assignee or reviewer, so the person on
-call as `hub-medic` reads the channel each morning and takes them. A PR nobody picks up just sits there.
+call as `hub-medic` reads the channel each morning and takes them. A PR labelled `nightly-api-fix` (a suppress, fix or unskip PR) is closed after a day without activity unless it carries `do-not-close`.
 
 **What you will see, in the order it happens** (all times UTC; examples of each message are in the sections below):
 
@@ -42,13 +42,13 @@ So a night with no spec-bump or re-enable post is normal. A night with no nightl
 | 📦 product, with 📝 and ⛔ links | Hub is wrong. The agent filed a **new** Hub issue (`hub-medic` was pinged) and opened a **suppress PR** that switches the test off until Hub fixes it | **Yes**, a suppress PR | Open the Hub issue and take it, or hand it to the owning team. Review the suppress PR: merge it only if the linked Hub issue is real **and** the suite is green on its branch. Agent PRs get no automatic live check, so run it yourself (see "Run it by hand"). Review it within a day or add `do-not-close`: a daily job closes a `nightly-api-fix` PR with no activity for a day |
 | 📦 product, with a 📝 link, **no** ⛔ link | A Hub issue was filed, but no suppress PR: the test was already suppressed, an open PR already covers it, or opening it failed (the line shows ⚠️) | **No** | Open the Hub issue and take it. If the line shows ⚠️, add the suppress entry yourself |
 | 📦 product, **no link** | Hub is probably wrong, but no issue was filed and **nobody was pinged** | **No** | Open the triage run and read the finding. Then file the Hub issue yourself |
-| 🧪 test-generation, with a 🛠️ link | The generated test is wrong; the agent opened a **fix PR** | **Yes**, a fix PR | Open the PR, read the diff, and merge it if it is right |
+| 🧪 test-generation, with a 🛠️ link | The generated test is wrong; the agent opened a **fix PR** | **Yes**, a fix PR | Open the PR, read the diff, and run the suite on its branch (see "Run it by hand"; agent PRs get no automatic live check). Merge it if it is right and the run is green. Review it within a day or add `do-not-close` |
 | 🧪 test-generation, with a ♻️ link | An open PR already covers it | **No** (one exists) | Open that PR and review it |
 | 🧪 test-generation, **no link** | The agent could not fix it safely, so it only reported | **No** | Open the triage run, read the finding, and fix the test yourself. If you are stuck, ask in `#ask-qa` |
 | 🔧 infrastructure | The run broke (Hub start, network, registry), not Hub or the tests | **No** | Open the failed step in the nightly run and read the error. Say so in the channel with the run link. Re-run only once the outside cause is fixed |
 | 🎲 flakiness | A test passes sometimes and fails sometimes | **No** | Open the test in the nightly report and compare the passed and failed attempts. If Hub caused it, file a Hub issue. If the test did, fix the test. Do not just re-run |
 | ⏳ or 🔗 on a line | A hint that a recent Hub change may explain it. It is a guess | **No**. It does not mean a PR exists | Investigate by hand |
-| 🚫 unmapped, or the 🚫 *Coverage gap* line in the digest | An operation has no generated test at all. It is not a failing test | **Sometimes**: a 🛠️ fix PR on the line | Review the PR if there is one. With none, it is only reported: see [the coverage report guide](hub-response-coverage-report.md) |
+| 🚫 unmapped, or the 🚫 *Coverage gap* line in the digest | An operation has no generated test at all. It is not a failing test | **Sometimes**: a 🛠️ fix PR on the line | Review the PR if there is one, and run the suite on its branch before merging (agent PRs get no automatic live check). With none, it is only reported: see [the coverage report guide](hub-response-coverage-report.md) |
 | ⚠️ on a line | The agent tried to open an issue or PR and failed | **No** | Do it by hand |
 
 **When may I re-run?** Only to see whether it still fails after you fixed an outside cause (🔧 infrastructure). A re-run
@@ -165,7 +165,7 @@ Skipped tests point to a Hub bug. This job watches those bugs. When one closes, 
 |---|---|---|---|
 | 🎉 *issue* is closed — re-enabled: `ops` → draft PR | The skip was removed in a draft PR | **Yes**, a draft unskip PR | Review the draft PR and run the suite on its branch (see "Run it by hand"; the automatic live check skips PRs from the automation account). Review it within a day or add `do-not-close`: a daily job closes a `nightly-api-fix` PR with no activity for a day. Merge if it is green **and** the Hub issue was closed as fixed. If the skip had lowered a coverage floor, raise it back in the same PR. If Hub closed it as not planned, close the PR: the skip must stay |
 | 🎉 … already has an open unskip PR | A PR for it exists already | **No** (one exists) | Review that PR |
-| ⚠️ … breaks local generate/tests, no generator token was available, or opening the unskip PR failed | The job could not bring the test back this time | **No** | Open the workflow run and read the error. A missing token fixes itself on the next run |
+| ⚠️ … breaks local generate/tests, no generator token was available, or opening the unskip PR failed | The job could not bring the test back this time | **No** | Open the workflow run and read the error. A missing token is retried on the next scheduled run. If the same error comes back, ask in `#ask-qa` (tag `@test-automation-medic`): the shared secrets and apps are theirs |
 | 📋 … is closed as **fixed**, no specific operation(s) to auto-unskip | A suite-wide skip whose Hub bug is fixed. Nothing can be done automatically | **No** | Remove its entry from `knownIssues` in `configs/camunda-hub/request-validation.json` and, if the same operation is also skipped in `positive-suppress.json` (key `suppress`) or excluded in `request-validation.json` (key `excludeOperations`), that entry too. Then run the suite on your branch (see "Run it by hand") |
 | 📋 … is closed as **not planned** | Hub will not fix it, so the skip must stay | **No** | Set `"acknowledgedNotPlanned": true` on its `knownIssues` entry in `configs/camunda-hub/request-validation.json`. The alert then stops. Until you do, it repeats every day |
 

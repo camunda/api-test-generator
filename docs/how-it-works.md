@@ -21,7 +21,7 @@ There are four things. The weekly report and the agent PRs need you every week; 
 
 | What | Where you see it | When | Is it yours? | Guide |
 |---|---|---|---|---|
-| **PR check** | A status on your camunda-hub pull request, and an alert in `#camunda-hub-pr-e2e-results` when red | Every Hub PR, except drafts, forks, PRs into `self-managed/*` and changes that cannot affect the API (details in the PR check guide) | Only when red. The alert says whose problem it is. The check never blocks merging | [PR check guide](hub-pr-check-cookbook.md) |
+| **PR check** | A status on your camunda-hub pull request, and an alert in `#camunda-hub-pr-e2e-results` when red (a yellow alert when only a coverage gap was found, with a green status) | Every Hub PR, except drafts, forks, PRs into `self-managed/*` and changes that cannot affect the API (details in the PR check guide) | Only when red. The alert says whose problem it is. The check never blocks merging | [PR check guide](hub-pr-check-cookbook.md) |
 | **Nightly run** | Posts in `#camunda-hub-nightly-test-results` | Every night, 02:00 UTC | Only when something failed. A normal night has 0 failures | [Nightly guide](hub-nightly-cookbook.md) |
 | **Weekly coverage report** | A post in the same channel | Monday, 05:00 UTC | Yes: it lists the API cases still not tested | [Coverage report guide](hub-response-coverage-report.md) |
 | **Coverage-fix PRs** | Small draft pull requests in this repo, opened by an AI agent | After the Monday report | Yes: you review them. A person always decides to merge | [Coverage report guide](hub-response-coverage-report.md) |
@@ -72,7 +72,7 @@ channels each morning: PR-check alerts and the gap digest are in `#camunda-hub-p
 ## Words used
 
 - **Generated suite:** the tests the generator writes from the spec. Nobody edits them by hand.
-- **Positive suite / negative suite:** the two groups of generated tests. The **positive** suite sends good requests and expects success, including create, read, delete and restore flows, and the 409 (conflict) tests, which need setup calls first. The **negative** suite sends bad requests and expects a refusal (400, 401, 403 or 404).
+- **Positive suite / negative suite:** the two groups of generated tests. The **positive** suite sends good requests and expects success, including create, read, delete and restore flows, and the 409 (conflict) tests, which need setup calls first. The **negative** suite sends bad requests and expects a refusal (400, 401, 403 or 404); a few edge cases it sends are ones the API should accept, and those expect 200.
 - **Operation:** one API endpoint, as the spec names it (for example `getWorkspace`). The guides use "endpoint" and "operation" for the same thing.
 - **Generator gap:** the generator does not understand something in Hub's API, so a test it generated is **wrong** and fails. It is a **cause**, and it is not a Hub bug. The fix is a generator PR, usually a config entry.
 - **Coverage gap / unmapped operation:** a test is **missing**: an endpoint, response or kind of bad request with none yet. It is a **measurement**, it never fails a test, and it is a to-do, not an incident. A test can be missing because the generator could not build it, or because it was skipped on purpose for a Hub bug.
