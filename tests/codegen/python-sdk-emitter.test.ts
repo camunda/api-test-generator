@@ -332,7 +332,7 @@ describe('Python SDK Emitter', () => {
       expect(output).toContain(
         "ctx.set('passwordVar', ctx.get('passwordVar') if ctx.get('passwordVar') is not None else seed_binding('passwordVar'))",
       );
-      expect(output).toContain("'password': ctx.get('passwordVar')");
+      expect(output).toContain("'password': unbound(ctx.get('passwordVar'))");
     });
 
     // Regression (Copilot PR #573 review): the seedBindings loop had no
@@ -1151,7 +1151,7 @@ describe('mixed literal + embedded ${var} template rendering (Copilot PR #574 re
 
     const output = renderPythonSuite(collection);
 
-    expect(output).toContain("'widgetId': ctx.get('widgetIdVar')");
+    expect(output).toContain("'widgetId': unbound(ctx.get('widgetIdVar'))");
     expect(output).not.toMatch(/f"\{ctx\.get\('widgetIdVar'\)/);
   });
 

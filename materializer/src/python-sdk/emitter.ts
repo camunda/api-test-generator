@@ -197,7 +197,7 @@ function hasNullCapablePlaceholder(value: unknown): boolean {
  * no binding is silently dropped by only matching a whole-string placeholder
  * (Copilot PR #574 review).
  */
-function renderPythonTemplateString(value: string): string {
+function renderPythonTemplateString(value: string, pruneAware = false): string {
   const whole = /^\$\{([^}]+)\}$/.exec(value);
   if (whole) {
     if (whole[1] === 'RANDOM') {
@@ -209,7 +209,9 @@ function renderPythonTemplateString(value: string): string {
     // ctx keys are the planner's original binding variable names (e.g.
     // tenantIdVar) — must match the ctx.set(...) calls emitted for
     // scenario.bindings verbatim, so no casing transform here (#354).
-    return `ctx.get('${whole[1]}')`;
+    // Under prune_nulls, mark an unbound placeholder with a sentinel so a literal
+    // JSON null in the template is preserved rather than pruned with it.
+    return pruneAware ? `unbound(ctx.get('${whole[1]}'))` : `ctx.get('${whole[1]}')`;
   }
   if (!HAS_PLACEHOLDER_RE.test(value)) {
     return renderPythonStringLiteral(value);
@@ -256,18 +258,20 @@ function renderPythonTemplateString(value: string): string {
  * Booleans/None map to Python spelling; whole-string `${var}` placeholders
  * become `ctx.get('snake_var')` lookups; everything else is escaped.
  */
-function renderPythonValue(value: unknown): string {
+function renderPythonValue(value: unknown, pruneAware = false): string {
   if (value === null || value === undefined) return 'None';
   if (typeof value === 'boolean') return value ? 'True' : 'False';
   if (typeof value === 'number') return String(value);
   if (typeof value === 'string') {
-    return renderPythonTemplateString(value);
+    return renderPythonTemplateString(value, pruneAware);
   }
   if (Array.isArray(value)) {
-    return `[${value.map((v) => renderPythonValue(v)).join(', ')}]`;
+    return `[${value.map((v) => renderPythonValue(v, pruneAware)).join(', ')}]`;
   }
   if (typeof value === 'object') {
-    const entries = Object.entries(value).map(([k, v]) => `'${k}': ${renderPythonValue(v)}`);
+    const entries = Object.entries(value).map(
+      ([k, v]) => `'${k}': ${renderPythonValue(v, pruneAware)}`,
+    );
     return `{${entries.join(', ')}}`;
   }
   return 'None';
@@ -280,9 +284,10 @@ function renderPythonValue(value: unknown): string {
 export function renderPythonBody(
   bodyTemplate: unknown,
   _bindings: Record<string, string | undefined>,
+  pruneAware = false,
 ): string {
   if (!bodyTemplate) return '{}';
-  return renderPythonValue(bodyTemplate);
+  return renderPythonValue(bodyTemplate, pruneAware);
 }
 
 /**
@@ -302,8 +307,9 @@ function renderPythonDictAssignment(
   omitWhenUnboundFieldNames: ReadonlySet<string>,
 ): string[] {
   const { inline, deferred } = splitInlineAndDeferred(record, omitWhenUnboundFieldNames);
+  const needsPrune = hasNullCapablePlaceholder(inline.map(([, v]) => v));
   const inlineEntries = inline.map(
-    ([fieldName, fieldValue]) => `'${fieldName}': ${renderPythonValue(fieldValue)}`,
+    ([fieldName, fieldValue]) => `'${fieldName}': ${renderPythonValue(fieldValue, needsPrune)}`,
   );
   // Item 6a: a whole-string `${var}` binding renders inline as `ctx.get('var')`,
   // which is None when the producer never bound it — and an explicit JSON null
@@ -319,7 +325,6 @@ function renderPythonDictAssignment(
   // actually produce a null keeps every other body byte-identical. The deferred
   // assignments still work: `prune_nulls` returns a dict to mutate.
   const literal = `{${inlineEntries.join(', ')}}`;
-  const needsPrune = hasNullCapablePlaceholder(inline.map(([, v]) => v));
   const lines = [`    ${varName} = ${needsPrune ? `prune_nulls(${literal})` : literal}`];
   for (const { fieldName, binding } of deferred) {
     const local = `__${toSnakeCase(fieldName)}_val`;
@@ -537,7 +542,7 @@ export function renderPythonSuite(
     ),
   );
   if (needsPruneNulls) {
-    lines.push('from support.prune import prune_nulls');
+    lines.push('from support.prune import prune_nulls, unbound');
   }
   if (hasMultipartStep) {
     lines.push('from support.fixtures import resolve_fixture');
@@ -798,10 +803,9 @@ function renderPythonRequestStep(
       // currently takes this shape with a placeholder, but the rule is about
       // the class "a body that can serialise an explicit null", not about the
       // dict case, so it is enforced here too rather than left to drift.
-      const bodyExpr = renderPythonBody(payloadTemplate, {});
-      const wrapped = hasNullCapablePlaceholder(payloadTemplate)
-        ? `prune_nulls(${bodyExpr})`
-        : bodyExpr;
+      const prune = hasNullCapablePlaceholder(payloadTemplate);
+      const bodyExpr = renderPythonBody(payloadTemplate, {}, prune);
+      const wrapped = prune ? `prune_nulls(${bodyExpr})` : bodyExpr;
       lines.push(`    body_${stepNum} = ${wrapped}`);
       requestArgs.push(`json=body_${stepNum}`);
     }
