@@ -16,6 +16,9 @@
 # owner: @camunda/test-automation-team
 ---
 name: Triage — camunda-hub nightly API failures
+# The run title carries the id of the nightly run it triages, so the nightly post check
+# (hub-nightly-post-check.yml) can tell which nightly each triage run belongs to.
+run-name: Triage of nightly ${{ github.event.workflow_run.id || inputs.nightly_run_id }}
 
 on:
   # Auto-run when the nightly test workflow finishes (any conclusion — a green

@@ -13,10 +13,10 @@ A set of automatic jobs then post what they found. Most nights the posts are gre
 **A normal night has 0 failed tests.** Known Hub bugs do not count as failures: their tests are either skipped or run
 without the one assertion Hub cannot meet yet. So any number above 0 is news.
 
-**Who acts.** The Hub team acts on everything in this channel. The spec-bump alert, the re-enable check and the weekly
-report ping `hub-medic`, so the person on call reviews the PR it opened, or decides what to do with the post. See
-"Who gets pinged" in [how-it-works.md](how-it-works.md). A PR labelled `nightly-api-fix` (a suppress, fix or unskip PR) is
-closed after a day without activity unless it carries `do-not-close`.
+**Who acts.** The Hub team acts on everything in this channel. The spec-bump alert, the re-enable check, the weekly
+report and the missing-post alert ping `hub-medic`, so the person on call reviews the PR it opened, or decides what to do
+with the post. See "Who gets pinged" in [how-it-works.md](how-it-works.md). A PR labelled `nightly-api-fix` (a suppress,
+fix or unskip PR) is closed after 3 days without activity unless it carries `do-not-close`.
 
 **What you will see, in the order it happens** (all times UTC; examples of each message are in the sections below):
 
@@ -26,11 +26,12 @@ closed after a day without activity unless it carries `do-not-close`.
 | After the run | Posted every night. **Triage digest**, with "No failures tonight" when green, and links to the nightly run and the triage run. When there are failures, a thread under it has one line per failure | Only if the digest lists failures | [triage-camunda-hub-nightly](https://github.com/camunda/api-test-generator/actions/workflows/triage-camunda-hub-nightly.yml) |
 | 03:00 | **Spec-bump alert**, only when the spec changed (the pinned spec is behind Hub's latest), or when the check itself failed and cannot tell | Yes | [spec-bump-check](https://github.com/camunda/api-test-generator/actions/workflows/spec-bump-check.yml) |
 | 04:00 | **Re-enable check**, only when a watched Hub bug closed: a skipped test can come back, or a skip that cannot come back (closed as not planned) needs a decision | Yes | [hub-known-issue-reenable-check](https://github.com/camunda/api-test-generator/actions/workflows/hub-known-issue-reenable-check.yml) |
+| 04:30 | **Missing-post alert**, only when the scheduled nightly or its triage did not start, is stuck, or ended without finishing (it pings `hub-medic`) | Yes: open the run it links, then "When a post is missing" | [hub-nightly-post-check](https://github.com/camunda/api-test-generator/actions/workflows/hub-nightly-post-check.yml) |
 | Monday 05:00 | Posted every week. **Weekly coverage report** | Yes | [hub-response-coverage](https://github.com/camunda/api-test-generator/actions/workflows/hub-response-coverage.yml) (Run workflow starts a dry run) |
 
 The times are when each job **starts**, not when its post arrives. The spec-bump post comes about 2 minutes later. The nightly posts come after the run finishes, usually 20 to 25 minutes later (the job's limit is 25 minutes). The triage digest is a separate job that starts after the nightly finishes, so it comes later still (its limit is 45 minutes).
 
-So a night with no spec-bump or re-enable post is normal. A night with no nightly post or no triage digest is not: see "When a post is missing" below.
+So a night with no spec-bump or re-enable post is normal. A night with no nightly post or no triage digest is not: a check at 04:30 UTC posts a missing-post alert for it, and "When a post is missing" below says what to do.
 
 **What to do with a failure.** Only when the digest lists failures.
 
@@ -40,10 +41,10 @@ So a night with no spec-bump or re-enable post is normal. A night with no nightl
 | The line shows | What happened | PR opened automatically? | What you do |
 |---|---|---|---|
 | 🎫 known issue | Hub already has an issue for it | **Sometimes**: the agent opens a suppress PR for every confirmed product bug, known or not, so a ⛔ link can appear on the same line | The linked issue is the work. If the line also has a ⛔ link, review that suppress PR like the one in the next row |
-| 📦 product, with 📝 and ⛔ links | Hub is wrong. The agent filed a **new** Hub issue (`hub-medic` was pinged) and opened a **suppress PR** that switches the test off until Hub fixes it | **Yes**, a suppress PR | Open the Hub issue and take it, or hand it to the owning team. Review the suppress PR: merge it only if the linked Hub issue is real **and** the suite is green on its branch. Agent PRs get no automatic live check, so run it yourself (see "Run it by hand"). Review it within a day or add `do-not-close`: a daily job closes a `nightly-api-fix` PR with no activity for a day |
+| 📦 product, with 📝 and ⛔ links | Hub is wrong. The agent filed a **new** Hub issue (`hub-medic` was pinged) and opened a **suppress PR** that switches the test off until Hub fixes it | **Yes**, a suppress PR | Open the Hub issue and take it, or hand it to the owning team. Review the suppress PR: merge it only if the linked Hub issue is real **and** the suite is green on its branch. Agent PRs get no automatic live check, so run it yourself (see "Run it by hand"). Review it within 3 days or add `do-not-close`: a daily job closes a `nightly-api-fix` PR with no activity for 3 days |
 | 📦 product, with a 📝 link, **no** ⛔ link | A Hub issue was filed, but no suppress PR: the test was already suppressed, an open PR already covers it, or opening it failed (the line shows ⚠️) | **No** | Open the Hub issue and take it. If the line shows ⚠️, add the suppress entry yourself |
 | 📦 product, **no link** | Hub is probably wrong, but no issue was filed and **nobody was pinged** | **No** | Open the triage run and read the finding. Then file the Hub issue yourself |
-| 🧪 test-generation, with a 🛠️ link | The generated test is wrong; the agent opened a **fix PR** | **Yes**, a fix PR | Open the PR, read the diff, and run the suite on its branch (see "Run it by hand"; agent PRs get no automatic live check). Merge it if it is right and the run is green. Review it within a day or add `do-not-close` |
+| 🧪 test-generation, with a 🛠️ link | The generated test is wrong; the agent opened a **fix PR** | **Yes**, a fix PR | Open the PR, read the diff, and run the suite on its branch (see "Run it by hand"; agent PRs get no automatic live check). Merge it if it is right and the run is green. Review it within 3 days or add `do-not-close` |
 | 🧪 test-generation, with a ♻️ link | An open PR already covers it | **No** (one exists) | Open that PR and review it |
 | 🧪 test-generation, **no link** | The agent could not fix it safely, so it only reported | **No** | Open the triage run, read the finding, and fix the test yourself. If you are stuck, ask in `#ask-qa` |
 | 🔧 infrastructure | The run broke (Hub start, network, registry), not Hub or the tests | **No** | Open the failed step in the nightly run and read the error. Say so in the channel with the run link. Re-run only once the outside cause is fixed |
@@ -68,6 +69,7 @@ The spec-bump and re-enable posts are explained in their own sections below.
 ## When a post is missing
 
 If a morning has no nightly post, the problem is the run or the posting, not Hub: a failing Hub still produces a post.
+A check at 04:30 UTC (`hub-nightly-post-check`) posts an alert here, pinging `hub-medic`, when the scheduled nightly or its triage did not start, is stuck, or ended without finishing, and links the run. It cannot see a Slack failure when the run itself succeeded, so a quiet channel with no alert still means: check the run.
 Open [nightly-camunda-hub](https://github.com/camunda/api-test-generator/actions/workflows/nightly-camunda-hub.yml) and check, in this order:
 
 1. **No run around 02:00 UTC.** The schedule did not fire. Start one with "Run workflow".
@@ -163,7 +165,7 @@ Skipped tests point to a Hub bug. This job watches those bugs. When one closes, 
 
 | Message | Meaning | PR opened automatically? | Do this |
 |---|---|---|---|
-| 🎉 *issue* is closed — re-enabled: `ops` → draft PR | The skip was removed in a draft PR | **Yes**, a draft unskip PR | Review the draft PR and run the suite on its branch (see "Run it by hand"; the automatic live check skips PRs from the automation account). Review it within a day or add `do-not-close`: a daily job closes a `nightly-api-fix` PR with no activity for a day. Merge if it is green **and** the Hub issue was closed as fixed. If the skip had lowered a coverage floor, raise it back in the same PR. If Hub closed it as not planned, close the PR: the skip must stay |
+| 🎉 *issue* is closed — re-enabled: `ops` → draft PR | The skip was removed in a draft PR | **Yes**, a draft unskip PR | Review the draft PR and run the suite on its branch (see "Run it by hand"; the automatic live check skips PRs from the automation account). Review it within 3 days or add `do-not-close`: a daily job closes a `nightly-api-fix` PR with no activity for 3 days. Merge if it is green **and** the Hub issue was closed as fixed. If the skip had lowered a coverage floor, raise it back in the same PR. If Hub closed it as not planned, close the PR: the skip must stay |
 | 🎉 … already has an open unskip PR | A PR for it exists already | **No** (one exists) | Review that PR |
 | ⚠️ … breaks local generate/tests, no generator token was available, or opening the unskip PR failed | The job could not bring the test back this time | **No** | Open the workflow run and read the error. A missing token is retried on the next scheduled run. If the same error comes back, ask in `#ask-qa` (tag `@test-automation-medic`): the shared secrets and apps are theirs |
 | 📋 … is closed as **fixed**, no specific operation(s) to auto-unskip | A suite-wide skip whose Hub bug is fixed. Nothing can be done automatically | **No** | Remove its entry from `knownIssues` in `configs/camunda-hub/request-validation.json`, and remove whatever skip the entry describes (a suite-wide entry has no single operation to look up): in `positive-suppress.json` (key `suppress`) or `request-validation.json` (key `excludeOperations`). Then run the suite on your branch (see "Run it by hand") |

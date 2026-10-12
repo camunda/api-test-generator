@@ -26,11 +26,12 @@ There are four things. The weekly report and the agent PRs need you every week; 
 | **Weekly coverage report** | A post in the same channel | Monday, 05:00 UTC | Yes: it lists the API cases still not tested | [Coverage report guide](hub-response-coverage-report.md) |
 | **Coverage-fix PRs** | Small draft pull requests in this repo, opened by an AI agent | After the Monday report | Yes: you review them. A person always decides to merge | [Coverage report guide](hub-response-coverage-report.md) |
 
-Three more posts show up only when needed:
+Four more posts show up only when needed:
 
 - **spec-bump alert**: Hub's API changed since we last looked;
 - **re-enable check**: a Hub bug we had worked around was fixed, so a skipped test can come back;
-- weekday **gap digest**: a merged Hub PR left a generator gap.
+- weekday **gap digest**: a merged Hub PR left a generator gap;
+- **missing-post alert** (04:30 UTC): the scheduled nightly or its triage did not start or did not finish.
 
 ## When something happens, what do I do?
 
@@ -40,12 +41,12 @@ Three more posts show up only when needed:
 | Red PR check, alert says "api-test-generator not yet handling a new/changed endpoint" | Not a Hub bug, but you act first: open the generator PR (see the PR check guide). Stuck? Ask in `#ask-qa` (tag `@test-automation-medic`) |
 | Red PR check, alert says "infrastructure failure" | Not yours. Open the failed step and find the outside cause. Stuck? Ask in `#ask-qa` (tag `@test-automation-medic`) with the run link |
 | Nightly post shows failures | Open the triage thread: one line per failure says whose it is |
-| No nightly post in the morning | The run or the posting broke, not Hub. See ["When a post is missing"](hub-nightly-cookbook.md#when-a-post-is-missing) in the nightly guide |
+| No nightly post in the morning (a 04:30 UTC alert usually says so) | The run or the posting broke, not Hub. See ["When a post is missing"](hub-nightly-cookbook.md#when-a-post-is-missing) in the nightly guide |
 | Spec-bump alert | Hub's API changed. Usually the bot has already opened a PR that updates the pinned spec: review it and merge it. If the alert says it is blocked or the check failed, it links a tracking issue or the run instead (see [the nightly guide](hub-nightly-cookbook.md#the-spec-bump-alert-0300)) |
 | Re-enable check | A Hub bug was fixed. Bring the test back, or decide on a bug closed as not planned |
 | A weekday post in `#camunda-hub-pr-e2e-results` listing generator gaps | A merged Hub PR left a generator gap. Open each issue and finish the generator PR |
 | Weekly report lists gaps | Read the "what to do" column. Some are Hub bugs, some are generator gaps |
-| A draft PR from the coverage-fix agent | Read its "In plain words" section first. Review it like any PR, within a day: a PR with no activity for a day is closed unless it has the `do-not-close` label |
+| A draft PR from the coverage-fix agent | Read its "In plain words" section first. Review it like any PR, within 3 days: a PR with no activity for 3 days is closed unless it has the `do-not-close` label |
 | Not sure | Ask in `#ask-qa` (tag `@test-automation-medic`) and include the run link |
 
 ## Who owns what
@@ -63,7 +64,7 @@ The Hub team:
 - changes the generator when a gap needs new behaviour. The agent only reports those, and a person opens the change. The code is in `request-validation/`, `path-analyser/` and `materializer/`, and [AGENTS.md](../AGENTS.md) lists the rules a change must follow.
 
 **Who gets pinged.** `hub-medic` is pinged for every alert: a failed PR check, a newly filed Hub issue, a fix or suppress PR
-that needs review, the spec-bump alert, the re-enable check, and the weekly report when it lists gaps.
+that needs review, the spec-bump alert, the re-enable check, the missing-post alert, and the weekly report when it lists gaps.
 `test-automation-medic` is also pinged only when a PR check fails before the tests start (a setup problem such as a clone
 token or registry login) or keeps failing with no evidence. Every PR to this repo requests a review from
 `@camunda/hub-backend` (see `.github/CODEOWNERS`). The daily gap digest and the coverage-fix agent's thread reply ping nobody

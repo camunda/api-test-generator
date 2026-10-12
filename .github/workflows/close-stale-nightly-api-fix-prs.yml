@@ -1,10 +1,10 @@
 # description: Daily janitor for the camunda-hub nightly API triage flow. Closes
 #              every open PR labelled `nightly-api-fix` that has gone stale
-#              (untouched for STALE_DAYS, default 1) and is not merged, across BOTH
+#              (untouched for STALE_DAYS, default 3) and is not merged, across BOTH
 #              api-test-generator (test-generation fixes) and camunda-hub (product
-#              fixes for issues the triage agent filed) — so each night's triage
-#              starts with no in-flight bot fix PRs. PRs labelled `do-not-close`
-#              are always kept. Mirrors c8-cross-component-e2e-tests'
+#              fixes for issues the triage agent filed) — so abandoned bot fix
+#              PRs are cleaned up while active handovers survive. PRs labelled
+#              `do-not-close` are always kept. Mirrors c8-cross-component-e2e-tests'
 #              close-stale-fix-prs.yml, extended to the two repos this flow spans.
 # type: CI
 # owner: @camunda/test-automation-team
@@ -14,13 +14,13 @@ name: Close stale nightly-api-fix PRs
 on:
   schedule:
     # 01:00 UTC daily — before the 02:00 nightly (nightly-camunda-hub.yml) and its
-    # downstream triage, so the day starts with a clean slate of fix PRs.
+    # downstream triage; PRs updated within the stale threshold are retained.
     - cron: '0 1 * * *'
   workflow_dispatch:
     inputs:
       stale_days:
-        description: 'Close PRs untouched for N days (default 1 — daily fresh start).'
-        default: '1'
+        description: 'Close PRs untouched for N days (default 3, so a PR survives a weekend of handover).'
+        default: '3'
         required: false
       dry_run:
         description: 'Print what would be closed but do not close anything.'
@@ -92,7 +92,7 @@ jobs:
         env:
           GH_TOKEN:   ${{ steps.app-token.outputs.token }}
           REPO:       camunda/${{ matrix.repo }}
-          STALE_DAYS: ${{ github.event.inputs.stale_days || '1' }}
+          STALE_DAYS: ${{ github.event.inputs.stale_days || '3' }}
           DRY_RUN:    ${{ github.event.inputs.dry_run || 'false' }}
         run: |
           set -euo pipefail
@@ -159,7 +159,7 @@ jobs:
             if [ "$DRY_RUN" != "true" ]; then
               if gh pr close "$number" \
                 --repo "$REPO" \
-                --comment "Closed by the \`close-stale-nightly-api-fix-prs\` janitor: \`nightly-api-fix\` PRs are closed daily if not merged, so each night's triage starts clean. Add the \`do-not-close\` label to hold this PR across the daily reset."; then
+                --comment "Closed by the \`close-stale-nightly-api-fix-prs\` janitor: \`nightly-api-fix\` PRs that have not been updated for ${STALE_DAYS} days are closed. Add the \`do-not-close\` label to keep this PR open regardless of activity."; then
                 closed=$((closed + 1))
               else
                 echo "::warning::Failed to close ${REPO}#$number"
