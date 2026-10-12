@@ -85,8 +85,9 @@ Instead:
 
   A PR to this repo also gets
   [hub-pr-live-check](https://github.com/camunda/api-test-generator/actions/workflows/hub-pr-live-check.yml)
-  automatically, except PRs opened by the automation account (the AI agents and the re-enable and spec-bump scripts): for
-  those, read the diff and run the suite by hand.
+  automatically, but not for forks, Dependabot, a PR that changes anything under `.github/`, or a PR from the automation
+  account (the AI agents and the re-enable and spec-bump scripts) or on a branch it ever pushed to. If your PR is one of
+  those, no check will appear: read the diff and run the suite by hand.
 - **On your machine, against your PR's own Hub.** Check out the Hub PR's commit next to this repo and start that PR's Hub
   image. Commands: [Reproducing locally](#reproducing-locally). It needs access to the container registry.
 
