@@ -11,11 +11,19 @@ import {
 const now = new Date('2026-10-12T04:30:00Z');
 
 function triageRun(over: Partial<Run> = {}): Run {
-  return run({ event: 'workflow_run', createdAt: '2026-10-12T02:40:00Z', ...over });
+  return run({
+    id: 900,
+    title: 'Triage of nightly 100',
+    event: 'workflow_run',
+    createdAt: '2026-10-12T02:40:00Z',
+    ...over,
+  });
 }
 
 function run(over: Partial<Run>): Run {
   return {
+    id: 100,
+    title: 'Nightly',
     url: 'https://github.com/camunda/api-test-generator/actions/runs/1',
     event: 'schedule',
     status: 'completed',
@@ -107,6 +115,23 @@ describe('evaluate', () => {
     const manual = triageRun({ event: 'workflow_dispatch', createdAt: '2026-10-12T03:00:00Z' });
     const problems = evaluate([run({})], [manual], now);
     expect(problems[0]?.what).toContain('triage');
+  });
+
+  it('does not let the triage of a manual nightly stand in for the scheduled one', () => {
+    const manualTriage = triageRun({ title: 'Triage of nightly 200' });
+    const problems = evaluate([run({})], [manualTriage], now);
+    expect(problems[0]?.what).toContain('triage');
+  });
+
+  it('matches the nightly id as a whole number, not as a prefix or suffix', () => {
+    for (const title of [
+      'Triage of nightly 1000',
+      'Triage of nightly 10',
+      'Triage of nightly 2100',
+    ]) {
+      const problems = evaluate([run({})], [triageRun({ title })], now);
+      expect(problems[0]?.what, title).toContain('triage');
+    }
   });
 
   it('does not count a triage run from before the nightly started', () => {

@@ -11,6 +11,9 @@
 import { postDigest } from './hub-gap-digest.ts';
 
 export interface Run {
+  id: number;
+  /** The run title. A triage run's title ends with the id of the nightly it triages. */
+  title: string;
   url: string;
   event: string;
   status: string;
@@ -42,6 +45,11 @@ export function startOfDayUtc(now: Date): Date {
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
 }
 
+/** True when `title` contains `id` as a whole number. */
+function titleNames(title: string, id: number): boolean {
+  return new RegExp(`(^|\\D)${id}(\\D|$)`).test(title);
+}
+
 function latestSince(runs: Run[], since: Date): Run | undefined {
   return runs
     .filter((r) => Date.parse(r.createdAt) >= since.getTime())
@@ -61,8 +69,8 @@ function judge(run: Run, what: string, healthy: Set<string>): Problem | null {
 /** The problems with today's nightly and triage runs. `nightly` and `triage` are the runs of each
  * workflow: only scheduled nightly runs created since midnight UTC count (a manual run on
  * some branch must not replace the scheduled one, and its triage is skipped on purpose). The triage that counts is the one
- * the nightly triggered (`workflow_run`) after the nightly started: a manual triage run, or one
- * from earlier in the day, must not hide a missing automatic digest. A triage is only expected
+ * the nightly triggered (`workflow_run`), whose title names that nightly's run id: a manual triage
+ * run, or the triage of a manual nightly, must not hide a missing scheduled digest. A triage is only expected
  * once the nightly has finished, so a missing nightly is reported once, not twice. */
 export function evaluate(nightly: Run[], triage: Run[], now: Date): Problem[] {
   const n = latestSince(
@@ -74,8 +82,10 @@ export function evaluate(nightly: Run[], triage: Run[], now: Date): Problem[] {
   }
   const nightlyProblem = judge(n, NIGHTLY, NIGHTLY_HEALTHY);
   if (nightlyProblem) return [nightlyProblem];
+  // The triage that counts is the one whose title names this nightly: a manual nightly on
+  // main also triggers a triage, and its digest must not stand in for the scheduled one.
   const t = latestSince(
-    triage.filter((r) => r.event === 'workflow_run'),
+    triage.filter((r) => r.event === 'workflow_run' && titleNames(r.title, n.id)),
     new Date(Date.parse(n.createdAt)),
   );
   if (!t) return [{ what: TRIAGE, why: 'did not run after the nightly finished', url: n.url }];
@@ -100,6 +110,8 @@ export function buildAlert(problems: Problem[]): string {
 // ---- I/O -------------------------------------------------------------------------------
 
 interface ApiRun {
+  id: number;
+  display_title: string | null;
   html_url: string;
   event: string;
   status: string | null;
@@ -118,6 +130,8 @@ async function listRuns(repo: string, file: string, token: string, since: Date):
   // biome-ignore lint/plugin: runtime contract boundary for parsed GitHub JSON
   const body = (await resp.json()) as { workflow_runs?: ApiRun[] };
   return (body.workflow_runs ?? []).map((r) => ({
+    id: r.id,
+    title: r.display_title ?? '',
     url: r.html_url,
     event: r.event,
     status: r.status ?? '',
