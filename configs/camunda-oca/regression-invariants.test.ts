@@ -11649,3 +11649,75 @@ describeForThisConfig('bundled-spec invariants: capability-gated fields (#404)',
     }
   });
 });
+
+describeForThisConfig('python-sdk variants fail when their own field is unbound', () => {
+  it('every variant whose final body carries its leaf as a ${var} placeholder asserts that binding before the final request', async () => {
+    const { pythonSuiteFileName } = await import('../../materializer/src/python-sdk/emitter.ts');
+    // A variant exists to send one optional field. When the producer step yields
+    // no value, the binding is None and prune_nulls drops the field, so without
+    // this guard the test passes without exercising what it is named for.
+    const valueAt = (root: unknown, leafPath: string): unknown => {
+      let cursor = root;
+      for (const segment of leafPath.split('.')) {
+        const isArray = segment.endsWith('[]');
+        if (cursor === null || typeof cursor !== 'object' || Array.isArray(cursor))
+          return undefined;
+        cursor = Object.entries(cursor).find(
+          ([k]) => k === (isArray ? segment.slice(0, -2) : segment),
+        )?.[1];
+        if (isArray) cursor = Array.isArray(cursor) ? cursor[0] : undefined;
+      }
+      return cursor;
+    };
+    const offenders: string[] = [];
+    let checked = 0;
+    for (const f of readdirSync(VARIANT_SCENARIOS_DIR)) {
+      if (!f.endsWith('-scenarios.json')) continue;
+      // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+      const collection = JSON.parse(readFileSync(join(VARIANT_SCENARIOS_DIR, f), 'utf8')) as {
+        endpoint: { operationId: string; method: string; path: string };
+        requiredSemanticTypes: string[];
+        optionalSemanticTypes: string[];
+        scenarios?: {
+          populatesSubShape?: { leafPaths?: string[] };
+          requestPlan?: { bodyKind?: string; bodyTemplate?: unknown }[];
+        }[];
+      };
+      const expected = new Map<string, number>();
+      for (const s of collection.scenarios ?? []) {
+        const plan = s.requestPlan ?? [];
+        const final = plan[plan.length - 1];
+        if (final?.bodyKind !== 'json') continue;
+        for (const leafPath of s.populatesSubShape?.leafPaths ?? []) {
+          const value = valueAt(final.bodyTemplate, leafPath);
+          const whole = typeof value === 'string' ? /^\$\{([^}]+)\}$/.exec(value) : null;
+          if (whole === null || whole[1] === 'RANDOM') continue;
+          expected.set(whole[1], (expected.get(whole[1]) ?? 0) + 1);
+        }
+      }
+      if (expected.size === 0) continue;
+      const pyFile = join(
+        PYTHON_SDK_DIR,
+        pythonSuiteFileName({ ...collection, scenarios: [] }, 'variant'),
+      );
+      if (!existsSync(pyFile)) {
+        offenders.push(`${f}: python variant suite ${basename(pyFile)} not found`);
+        continue;
+      }
+      const src = readFileSync(pyFile, 'utf8');
+      for (const [binding, count] of expected) {
+        checked += count;
+        const actual =
+          src.split(`assert ctx.get('${binding}') is not None, (\n        "variant field unbound`)
+            .length - 1;
+        if (actual !== count) {
+          offenders.push(`${basename(pyFile)}: ${binding} guarded ${actual}x, expected ${count}x`);
+        }
+      }
+    }
+    expect(checked, 'non-vacuity: expected variant leaf bindings to be checked').toBeGreaterThan(
+      50,
+    );
+    expect(offenders, offenders.slice(0, 10).join('\n')).toEqual([]);
+  });
+});

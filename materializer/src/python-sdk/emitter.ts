@@ -191,6 +191,53 @@ function hasNullCapablePlaceholder(value: unknown): boolean {
 }
 
 /**
+ * Read the value at a planner leaf path (`page.after`, `filter.$or[].incidentKey`)
+ * in a body template. A `name[]` segment descends into element 0, matching how
+ * the planner's `setLeafPlaceholder` writes the leaf.
+ */
+function valueAtLeafPath(root: unknown, leafPath: string): unknown {
+  let cursor = root;
+  for (const segment of leafPath.split('.')) {
+    const isArray = segment.endsWith('[]');
+    if (!isRecord(cursor)) return undefined;
+    cursor = cursor[isArray ? segment.slice(0, -2) : segment];
+    if (isArray) {
+      if (!Array.isArray(cursor)) return undefined;
+      cursor = cursor[0];
+    }
+  }
+  return cursor;
+}
+
+/**
+ * The ctx bindings that carry a variant scenario's own field(s) — the leaves
+ * named in `populatesSubShape.leafPaths`, which the planner writes into the
+ * final request body as whole-string `${var}` placeholders.
+ *
+ * Such a binding is None when no earlier step produced the value (e.g. a cursor
+ * warm-up that returned an empty page). `prune_nulls` then drops the field, and
+ * the request passes without exercising what the variant exists to test. The
+ * caller emits an assertion on each binding so that case fails visibly instead.
+ * Literal leaves (minted values) and `${RANDOM}` can never be None, so they get
+ * no guard.
+ */
+function variantLeafBindings(scenario: EndpointScenario): { leafPath: string; binding: string }[] {
+  const leafPaths = scenario.populatesSubShape?.leafPaths ?? [];
+  const plan = scenario.requestPlan ?? [];
+  const final = plan[plan.length - 1];
+  if (leafPaths.length === 0 || final?.bodyKind !== 'json') return [];
+  const guards: { leafPath: string; binding: string }[] = [];
+  for (const leafPath of leafPaths) {
+    const value = valueAtLeafPath(final.bodyTemplate, leafPath);
+    const whole = typeof value === 'string' ? WHOLE_STRING_PLACEHOLDER_RE.exec(value) : null;
+    if (whole !== null && whole[1] !== 'RANDOM') {
+      guards.push({ leafPath, binding: whole[1] });
+    }
+  }
+  return guards;
+}
+
+/**
  * Render a string that may contain one or more embedded `${var}` bindings
  * mixed with literal text (e.g. `proc-${processInstanceKeyVar}-${tenantIdVar}`)
  * as a concatenation of Python string-literal and ctx-lookup expressions, so
@@ -705,8 +752,22 @@ export function renderPythonSuite(
     const ecOps = new Set(
       scenario.operations.filter((o) => o.eventuallyConsistent).map((o) => o.operationId),
     );
+    const variantGuards = variantLeafBindings(scenario);
     for (let i = 0; i < requestPlan.length; i++) {
       const isFinal = i === requestPlan.length - 1;
+      if (isFinal) {
+        for (const { leafPath, binding } of variantGuards) {
+          lines.push(
+            `    # This variant exists to send ${leafPath}; without a value it would test nothing.`,
+          );
+          lines.push(`    assert ctx.get('${binding}') is not None, (`);
+          lines.push(
+            `        "variant field unbound: no earlier step produced '${binding}' for ${leafPath}, "`,
+          );
+          lines.push(`        "so this request would not exercise the field this variant tests"`);
+          lines.push('    )');
+        }
+      }
       renderPythonRequestStep(
         lines,
         requestPlan[i],
