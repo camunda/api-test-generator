@@ -145,3 +145,69 @@ print(json.dumps(out))
     }
   });
 });
+
+describe('python await_eventually: retry, abort and timeout branches', () => {
+  test('retries GET 404 and empty search pages; returns hard failures; times out', () => {
+    const helper = loadPythonProjectScaffoldingFiles().find(
+      (f) => f.relativePath === 'support/await_eventually.py',
+    );
+    if (helper === undefined) throw new Error('support/await_eventually.py is not emitted');
+    const dir = mkdtempSync(join(tmpdir(), 'await-eval-'));
+    try {
+      mkdirSync(join(dir, 'support'));
+      writeFileSync(join(dir, 'support', '__init__.py'), '');
+      writeFileSync(join(dir, 'support', 'await_eventually.py'), helper.content, 'utf8');
+      const script = `
+import asyncio, json, sys, types
+sys.modules['httpx'] = types.ModuleType('httpx')
+import support.await_eventually as m
+class Resp:
+    def __init__(self, status_code, body=None):
+        self.status_code = status_code
+        self.headers = {}
+        self.text = ''
+        self._body = body if body is not None else {}
+    def json(self): return self._body
+async def fake_sleep(s): pass
+m.asyncio.sleep = fake_sleep
+async def run(method, seq, **kw):
+    calls = []
+    async def fetch():
+        calls.append(1)
+        return seq.pop(0) if len(seq) > 1 else seq[0]
+    try:
+        r = await m.await_eventually(fetch, operation_id='x', method=method, **kw)
+        return [r.status_code, len(calls)]
+    except AssertionError:
+        return ['timeout', len(calls)]
+empty = {'items': []}
+full = {'items': [1]}
+async def main():
+    return [
+        await run('GET', [Resp(404), Resp(404), Resp(200)]),
+        await run('POST', [Resp(200, empty), Resp(200, empty), Resp(200, full)]),
+        await run('POST', [Resp(200, empty), Resp(200, empty)], require_items=False),
+        await run('POST', [Resp(404), Resp(200)]),
+        await run('GET', [Resp(400), Resp(200)]),
+        await run('GET', [Resp(503), Resp(200)]),
+        await run('GET', [Resp(404)], wait_up_to_ms=0),
+        await run('POST', [Resp(200, empty)], wait_up_to_ms=0),
+    ]
+print(json.dumps(asyncio.run(main())))
+`;
+      const out = execFileSync('python3', ['-B', '-c', script], { encoding: 'utf8', cwd: dir });
+      expect(JSON.parse(out.trim())).toEqual([
+        [200, 3],
+        [200, 3],
+        [200, 1],
+        [404, 1],
+        [400, 1],
+        [503, 1],
+        ['timeout', 1],
+        ['timeout', 1],
+      ]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
