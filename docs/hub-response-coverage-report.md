@@ -103,7 +103,7 @@ After the fix:
 ### Floors
 
 `coverage-floors.json` pins the numbers this report shows. The Hub invariant `response coverage does not regress`
-(in the `hub invariants` CI job of this repo, on every PR) runs the same script and fails a PR if a number drops below its floor, or if an endpoint has no test at all
+(in the `hub invariants` CI job of this repo, on every same-repo PR; fork PRs skip it, and Dependabot PRs skip its Hub steps because secrets are not available, so a missing result is not approval) runs the same script and fails a PR if a number drops below its floor, or if an endpoint has no test at all
 and is not listed in `zeroTestOperations` with a reason. A floor only goes up. Never lower one to make CI pass; add the missing test.
 
 **The one exception is a deliberate skip.** A test that is skipped for a tracked Hub bug is not counted as tested, so a suppress PR can push a number below its floor even though nothing is wrong. In that PR you may lower the floor by exactly what the skip removes. Say so in the description and link the Hub issue. When the test is re-enabled, raise the floor back in the same PR. Lower a floor for no other reason.
