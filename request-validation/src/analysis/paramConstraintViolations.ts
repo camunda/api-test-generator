@@ -148,8 +148,10 @@ export function generateParamConstraintViolations(
       if (!violations.length) continue;
       const gate = !p.required ? opts.capabilityGates?.get(p.name) : undefined;
       // Use valid placeholders for all params first
+      // Path and query siblings both, so a path-target scenario still sends the required query
+      // params and a query-target one sends valid path values.
       const validMap = buildSiblingValues(
-        op.parameters.filter((pp) => pp.in === p.in),
+        op.parameters.filter((pp) => pp.in === 'path' || pp.in === 'query'),
         opts.capabilityGates,
       );
       for (const v of violations) {

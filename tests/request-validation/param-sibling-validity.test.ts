@@ -148,6 +148,53 @@ describe('capability-gated optional params are not sent as siblings', () => {
   }
 });
 
+describe('mixed path, query and header params: every other param is present and valid', () => {
+  const at = (
+    name: string,
+    where: ParameterModel['in'],
+    required: boolean,
+    schema: ParameterModel['schema'],
+  ): ParameterModel => ({ name, in: where, required, schema });
+  const mixed: OperationModel = {
+    operationId: 'getThing',
+    method: 'GET',
+    path: '/things/{id}',
+    tags: [],
+    parameters: [
+      at('id', 'path', true, { type: 'string', pattern: '^[0-9]+$', maxLength: 5 }),
+      at('startTime', 'query', true, { type: 'string', format: 'date-time' }),
+      at('trace', 'header', true, { type: 'string' }),
+      // No short string can satisfy this, so the optional param is left out rather than sent invalid.
+      at('code', 'query', false, { type: 'string', pattern: '^\\d{4}-[a-z]+$' }),
+      at('flag', 'query', false, { type: 'boolean' }),
+    ],
+  };
+
+  const byKind: Record<string, ValidationScenario[]> = {
+    'param-missing': generateParamMissing([mixed], {}),
+    'param-type-mismatch': generateParamTypeMismatch([mixed], {}),
+    'param-constraint-violation': generateParamConstraintViolations([mixed], {}),
+  };
+
+  for (const [kind, scenarios] of Object.entries(byKind)) {
+    it(`${kind} emits scenarios for the mixed shape`, () => {
+      expect(scenarios.length).toBeGreaterThan(0);
+    });
+    for (const s of scenarios) {
+      it(`${kind}: ${s.target} ${s.constraintKind ?? ''}`.trim(), () => {
+        const params = s.params ?? {};
+        const target = s.target?.split('.')[1];
+        // A path token left out is sent as __MISSING_PARAM__, so the route fails before validation.
+        if (target !== 'id') expect(params.id, 'path placeholder').toBeDefined();
+        // Header params are not sent through `params`; only path and query siblings are checked.
+        if (target !== 'startTime') expect(params.startTime, 'required query').toBeDefined();
+        // An optional param no value can satisfy is omitted, not sent invalid.
+        if (target !== 'code') expect(params, 'unsatisfiable optional').not.toHaveProperty('code');
+      });
+    }
+  }
+});
+
 describe('param-enum-violation: the other params are valid too', () => {
   // A required date-time next to an enum target. Without the baseline the request omits `startTime`
   // and the server answers 400 for the missing parameter, not for the enum.

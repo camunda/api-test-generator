@@ -62,6 +62,19 @@ export function resolveParamSchema(p: ParameterModel): ResolvedParamSchema | und
  * sibling params with non-violating placeholders).
  */
 export function buildValidValue(r: ResolvedParamSchema): string {
+  return findValidValue(r) ?? fallbackValue(r);
+}
+
+function fallbackValue(r: ResolvedParamSchema): string {
+  return r.minLength && r.minLength > 1 ? 'a'.repeat(r.minLength) : 'x';
+}
+
+/**
+ * A value that satisfies the schema, or undefined when none of the candidates meets its pattern
+ * and length bounds. {@link buildValidValue} falls back to a plain token in that case; a caller
+ * that can leave the param out (an optional sibling) should do that instead of sending it invalid.
+ */
+export function findValidValue(r: ResolvedParamSchema): string | undefined {
   if (r.enumValues?.length) return String(r.enumValues[0]);
   if (r.pattern) {
     if (/^\^-?\[0-9]\+\$$/.test(r.pattern) || r.pattern === '^-?[0-9]+$') return '1';
@@ -71,11 +84,10 @@ export function buildValidValue(r: ResolvedParamSchema): string {
   if (t === 'boolean') return 'true';
   const byFormat = r.format !== undefined ? VALID_BY_FORMAT[r.format] : undefined;
   if (byFormat !== undefined) return byFormat;
-  const first = r.minLength && r.minLength > 1 ? 'a'.repeat(r.minLength) : 'x';
   // Cover the pattern shapes in the bundled specs: lowercase, uppercase, digits, `1-1` keys and
-  // `1*` prefix wildcards. If none fits, `first` is returned and the scenario sends it as is.
+  // `1*` prefix wildcards.
   const candidates = [
-    first,
+    fallbackValue(r),
     'x',
     'a',
     '1',
@@ -90,7 +102,7 @@ export function buildValidValue(r: ResolvedParamSchema): string {
     '*',
     '1*',
   ];
-  return firstSatisfying(candidates, r) ?? first;
+  return firstSatisfying(candidates, r);
 }
 
 const END_NAME = /^(end|to|until|before)/i;
@@ -125,6 +137,8 @@ export function orderedDateValues(params: ParameterModel[]): Map<string, string>
  * Date params get distinct, ordered values (see {@link orderedDateValues}). An optional param named
  * in `gates` is left out: the environment rejects any non-blank value for it (a capability gate,
  * #404), so sending one makes the server answer for the gate instead of the param under test.
+ * An optional param no candidate value can satisfy (an unusual pattern) is left out too, rather
+ * than sent invalid; a required one falls back to a plain token because it cannot be omitted.
  */
 export function buildSiblingValues(
   params: ParameterModel[],
@@ -135,7 +149,9 @@ export function buildSiblingValues(
   for (const p of params) {
     if (!p.required && gates?.has(p.name)) continue;
     const r = resolveParamSchema(p);
-    out[p.name] = dates.get(p.name) ?? (r ? buildValidValue(r) : 'x');
+    const value = dates.get(p.name) ?? (r ? findValidValue(r) : 'x');
+    if (value !== undefined) out[p.name] = value;
+    else if (p.required && r) out[p.name] = buildValidValue(r);
   }
   return out;
 }

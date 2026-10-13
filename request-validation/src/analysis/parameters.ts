@@ -32,6 +32,18 @@ function buildQueryParamMap(
 }
 
 /**
+ * A request with nothing wrong: a placeholder for every path token plus a valid value for every
+ * query param. A path token left out is sent as `__MISSING_PARAM__`, so the route would fail
+ * before any validation and the scenario would test the route, not the target.
+ */
+function buildBaseline(
+  op: OperationModel,
+  gates?: ReadonlyMap<string, unknown>,
+): Record<string, string> {
+  return { ...buildParams(op.path, {}), ...buildQueryParamMap(op, gates) };
+}
+
+/**
  * What each parameter generator can actually produce, written once. The generators below and the
  * per-operation applicability rules in `generate.ts` (which COVERAGE.json's `missingApplicableKinds`
  * is measured against) both call these, so an operation is never reported as missing a check the
@@ -101,14 +113,12 @@ export function generateParamMissing(ops: OperationModel[], opts: Opts): Validat
     for (const p of op.parameters) {
       if (!isOmittableParam(p)) continue; // a path param can't be omitted without changing the path shape
       if (opts.capPerOperation && produced >= opts.capPerOperation) break;
-      let params: Record<string, string> | undefined;
-      if (p.in === 'query') {
-        const allQ = buildQueryParamMap(op, opts.capabilityGates);
-        delete allQ[p.name];
-        params = Object.keys(allQ).length ? allQ : undefined;
-      } else {
-        params = buildParams(op.path, {});
-      }
+      // Path placeholders and the other query params stay, so only the target is missing.
+      const baseline = buildBaseline(op, opts.capabilityGates);
+      delete baseline[p.name];
+      const params: Record<string, string> | undefined = Object.keys(baseline).length
+        ? baseline
+        : undefined;
       out.push({
         id: makeId([op.operationId, 'paramMissing', p.in, p.name]),
         operationId: op.operationId,
@@ -137,8 +147,8 @@ export function generateParamTypeMismatch(ops: OperationModel[], opts: Opts): Va
       const paramType = typeMismatchTargetType(p, opts.unenforcedStringFormats);
       if (paramType === undefined) continue;
       if (opts.capPerOperation && produced >= opts.capPerOperation) break;
-      // Start with all required query params (so we don't unintentionally create identical empty queries)
-      const allQ = buildQueryParamMap(op, opts.capabilityGates);
+      // Start from valid path placeholders and query params, then break only the target.
+      const allQ = buildBaseline(op, opts.capabilityGates);
       // Overwrite the specific param with a wrong typed value (stringified to keep buildUrl logic simple).
       // Branch on the type the eligibility rule resolved, not the raw schema type, which may be a union
       // such as ['string', 'null'] that matches no branch and would leave the valid value in place.
@@ -200,11 +210,7 @@ export function generateParamEnumViolation(
         type: 'param-enum-violation',
         target: `${p.in}.${p.name}`,
         // Path tokens and every other query param stay valid, so the 400 can only come from the enum.
-        params: {
-          ...buildParams(op.path, {}),
-          ...buildQueryParamMap(op, opts.capabilityGates),
-          [p.name]: String(invalid),
-        },
+        params: { ...buildBaseline(op, opts.capabilityGates), [p.name]: String(invalid) },
         expectedStatus: 400,
         description: `Enum violation for ${p.in} parameter ${p.name}`,
         headersAuth: true,
