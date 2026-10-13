@@ -102,7 +102,7 @@ Instead:
      there, generation fails and the nightly goes red because of your generator PR.
   2. **The pin bump.** This repo's own checks read the **pinned** spec (`configs/camunda-hub/spec-pin.json`), so the
      generator PR fails its checks until the pin includes your endpoint. Move the pin once your Hub PR has merged
-     (`npm run bump-spec-pin`, see the README; the spec-bump bot also opens a PR for it).
+     (`npm run bump-spec-pin -- --config camunda-hub`, see the README; the spec-bump bot also opens a PR for it).
   3. **The generator PR.**
 
   The PR check will not warn you, because it reads your PR's own spec, which already has the endpoint. If your Hub PR is
