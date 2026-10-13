@@ -151,7 +151,7 @@ The last line says what to do:
 - **➡️ Adopt via bump PR #N** (PR opened automatically: **yes**): the new spec is safe, and the bot has already opened the bump PR for you. The generator owner reviews and merges it, which moves the pin. While it stays open, later checks update the same PR; once it is merged, the next change gets a new one.
 - **📋 Blocked — see tracking issue #N** (PR opened automatically: **no**, only an issue): the new spec breaks something, or needs a test the generator does not have. Read
   the issue. The pin does not move until it is fixed.
-- **⚠️ Spec-bump check failed for X** (PR opened automatically: **no**): a step of the job itself failed, so the drift result may be missing. Open the run
+- **⚠️ Spec-bump check failed for X** (PR opened automatically: **no**): a step of the job itself failed, so the drift result may be missing. `hub-medic` is pinged. Open the run
   before trusting that there is no drift.
 
 Nightlies are **not** blocked by a pending bump: they run against Hub's latest spec regardless. The pin only affects the
