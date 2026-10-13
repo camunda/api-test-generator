@@ -53,8 +53,7 @@ Four more posts show up only when needed:
 
 **The Hub team owns this project**: the alerts, the Hub settings, and the generator itself,
 including changing it when a new kind of coverage needs it. The test automation enablement team does not
-carry on-call or maintenance duties for it. The one exception is the `camunda-oca` config and its output: the same
-engine builds it, and the test automation team stays responsible for it, so tell them when an engine change could affect it.
+carry on-call or maintenance duties for it. The one exception is the `camunda-oca` config and its output, which the test automation team stays responsible for.
 
 The Hub team:
 
@@ -78,7 +77,7 @@ are in `#camunda-hub-pr-e2e-results`, everything else is in `#camunda-hub-nightl
 - **Generated suite:** the tests the generator writes from the spec. Nobody edits them by hand.
 - **Positive suite / negative suite:** the two groups of generated tests. The **positive** suite sends good requests and expects success, including create, read, delete and restore flows, and the 409 (conflict) tests, which need setup calls first. The **negative** suite sends bad requests and expects a refusal (400, 401, 403 or 404); a few edge cases it sends are ones the API should accept, and those expect 200.
 - **Operation:** one API endpoint, as the spec names it (for example `getWorkspace`). The guides use "endpoint" and "operation" for the same thing.
-- **Generator gap:** the generator does not understand something in Hub's API, so a test it generated is **wrong** and fails. It is a **cause**, and it is not a Hub bug. The fix is a generator PR, usually a config entry.
+- **Generator gap:** the generator does not understand something in Hub's API. The result is a generated test that is **wrong** and fails or, for a new endpoint it does not know yet, **no test at all**. It is a **cause**, and it is not a Hub bug. The fix is a generator PR, usually a config entry.
 - **Coverage gap:** a test is **missing**: an endpoint, response or kind of bad request with none yet. It is a **measurement**, it never fails a test, and it is a to-do, not an incident. A test can be missing because the generator could not build it, or because it was skipped on purpose for a Hub bug.
 - **Unmapped operation:** the narrowest coverage gap: an endpoint with **no generated test at all**. For a new endpoint in your PR the cause is that the generator does not know the endpoint yet, so the PR check words it as "api-test-generator not yet handling a new/changed endpoint". The missing test is still a coverage gap; the alert names the cause.
 - **Coverage:** how many of the API's answers (success, 403, 404, bad request...) have a test.

@@ -617,7 +617,7 @@ jobs:
           payload: |
             {
               "channel": "#camunda-hub-nightly-test-results",
-              "text": ${{ toJSON(format(':warning: *Spec-bump check failed for {0}* - a step failed, so the drift result for this config may be missing or incomplete. Check the run before trusting it. <{1}/{2}/actions/runs/{3}|Open the run> · <{1}/{2}/blob/main/docs/hub-nightly-cookbook.md|📖 Cookbook>', matrix.config, github.server_url, github.repository, github.run_id)) }},
+              "text": ${{ toJSON(format(':warning: *Spec-bump check failed for {0}* - a step failed, so the drift result for this config may be missing or incomplete. Check the run before trusting it. <{1}/{2}/actions/runs/{3}|Open the run> · <{1}/{2}/blob/main/docs/hub-nightly-cookbook.md|📖 Cookbook>{4}', matrix.config, github.server_url, github.repository, github.run_id, matrix.private && ' · :rotating_light: <!subteam^S014VK4482H|hub-medic>' || '')) }},
               "mrkdwn": true
             }
 
