@@ -1,11 +1,16 @@
 import type { OperationModel, ParameterModel, ValidationScenario } from '../model/types.js';
 import { INVALID_BY_FORMAT } from '../util/formatValues.js';
-import { buildValidValue, orderedDateValues, resolveParamSchema } from '../util/paramSchema.js';
+import { buildSiblingValues } from '../util/paramSchema.js';
 import { makeId } from './common.js';
 
 interface Opts {
   onlyOperations?: Set<string>;
   capPerOperation?: number;
+  /**
+   * Field name -> capability-gate info (#404). An optional gated param is left out of the sibling
+   * values, because the environment rejects any non-blank value for it.
+   */
+  capabilityGates?: ReadonlyMap<string, unknown>;
   /** Formats the server does not check (config `unenforcedStringFormats`); no scenario targets them. */
   unenforcedStringFormats?: readonly string[];
 }
@@ -19,15 +24,11 @@ function collectQueryParams(op: OperationModel): ParameterModel[] {
  * parameter it tests, so each other parameter must be valid or the server rejects that one first
  * and the scenario never reaches the target.
  */
-function buildQueryParamMap(op: OperationModel): Record<string, string> {
-  const q: Record<string, string> = {};
-  const query = collectQueryParams(op);
-  const dates = orderedDateValues(query);
-  for (const p of query) {
-    const r = resolveParamSchema(p);
-    q[p.name] = dates.get(p.name) ?? (r ? buildValidValue(r) : 'x');
-  }
-  return q;
+function buildQueryParamMap(
+  op: OperationModel,
+  gates?: ReadonlyMap<string, unknown>,
+): Record<string, string> {
+  return buildSiblingValues(collectQueryParams(op), gates);
 }
 
 /**
@@ -102,7 +103,7 @@ export function generateParamMissing(ops: OperationModel[], opts: Opts): Validat
       if (opts.capPerOperation && produced >= opts.capPerOperation) break;
       let params: Record<string, string> | undefined;
       if (p.in === 'query') {
-        const allQ = buildQueryParamMap(op);
+        const allQ = buildQueryParamMap(op, opts.capabilityGates);
         delete allQ[p.name];
         params = Object.keys(allQ).length ? allQ : undefined;
       } else {
@@ -137,7 +138,7 @@ export function generateParamTypeMismatch(ops: OperationModel[], opts: Opts): Va
       if (paramType === undefined) continue;
       if (opts.capPerOperation && produced >= opts.capPerOperation) break;
       // Start with all required query params (so we don't unintentionally create identical empty queries)
-      const allQ = buildQueryParamMap(op);
+      const allQ = buildQueryParamMap(op, opts.capabilityGates);
       // Overwrite the specific param with a wrong typed value (stringified to keep buildUrl logic simple).
       // Branch on the type the eligibility rule resolved, not the raw schema type, which may be a union
       // such as ['string', 'null'] that matches no branch and would leave the valid value in place.
@@ -201,7 +202,7 @@ export function generateParamEnumViolation(
         // Path tokens and every other query param stay valid, so the 400 can only come from the enum.
         params: {
           ...buildParams(op.path, {}),
-          ...buildQueryParamMap(op),
+          ...buildQueryParamMap(op, opts.capabilityGates),
           [p.name]: String(invalid),
         },
         expectedStatus: 400,

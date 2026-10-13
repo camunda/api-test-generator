@@ -2956,10 +2956,14 @@ describeForThisConfig('bundled-spec invariants: query params in param scenarios'
     // A param scenario overwrites one query param with a bad value and fills the rest with
     // placeholders. A placeholder `x` on a date-time, boolean or integer param is invalid, so the
     // server rejects that param first and the test never reaches the one it names.
-    const dir = join(REPO_ROOT, 'generated', CONFIG_NAME, 'request-validation', 'unsecured');
-    if (!existsSync(dir)) {
+    const rvRoot = join(REPO_ROOT, 'generated', CONFIG_NAME, 'request-validation');
+    // Every profile the generator emits, not only the unsecured one.
+    const dirs = ['unsecured', 'secured', 'rbac']
+      .map((profile) => join(rvRoot, profile))
+      .filter((d) => existsSync(d));
+    if (dirs.length === 0) {
       throw new Error(
-        `Generated request-validation directory not found at ${dir}. ` +
+        `Generated request-validation directories not found under ${rvRoot}. ` +
           `Run 'npm run generate:request-validation' (or 'npm run pipeline') first.`,
       );
     }
@@ -2969,17 +2973,33 @@ describeForThisConfig('bundled-spec invariants: query params in param scenarios'
     const bundlePath = join(getSpecBundleDir(REPO_ROOT), 'rest-api.bundle.json');
     const spec: unknown = JSON.parse(readFileSync(bundlePath, 'utf8'));
     const paths = isObject(spec) && isObject(spec.paths) ? spec.paths : {};
-    // `path|param` for every query param whose schema is not a plain string.
+    // Follow `$ref` and merge `allOf`, so a param typed through a shared schema counts as typed.
+    function resolveRef(node: unknown, depth = 0): Record<string, unknown> {
+      if (!isObject(node) || depth > 10) return {};
+      let merged: Record<string, unknown> = {};
+      if (typeof node.$ref === 'string' && node.$ref.startsWith('#/')) {
+        let cur: unknown = spec;
+        for (const key of node.$ref.slice(2).split('/')) cur = isObject(cur) ? cur[key] : undefined;
+        merged = { ...resolveRef(cur, depth + 1) };
+      }
+      if (Array.isArray(node.allOf)) {
+        for (const part of node.allOf) merged = { ...resolveRef(part, depth + 1), ...merged };
+      }
+      const { $ref: _ref, allOf: _allOf, ...own } = node;
+      return { ...merged, ...own };
+    }
+    // `path|param` for every query param whose resolved schema is not a plain string.
     const typed = new Set<string>();
     for (const [path, item] of Object.entries(paths)) {
       if (!isObject(item)) continue;
       for (const op of Object.values(item)) {
         if (!isObject(op) || !Array.isArray(op.parameters)) continue;
         for (const p of op.parameters) {
-          if (!isObject(p) || p.in !== 'query' || typeof p.name !== 'string') continue;
-          const s = isObject(p.schema) ? p.schema : {};
+          const param = resolveRef(p);
+          if (param.in !== 'query' || typeof param.name !== 'string') continue;
+          const s = resolveRef(param.schema);
           const plainString = s.type === 'string' && s.format === undefined && !s.enum;
-          if (!plainString && s.type !== undefined) typed.add(`${path}|${p.name}`);
+          if (!plainString && s.type !== undefined) typed.add(`${path}|${param.name}`);
         }
       }
     }
@@ -2988,13 +3008,17 @@ describeForThisConfig('bundled-spec invariants: query params in param scenarios'
     const offenders: string[] = [];
     // Slot 2 is `undefined` for a route without path params and an object for a keyed route.
     const call = /buildUrl\(\s*'([^']+)',\s*(?:undefined|\{[^}]*\}),\s*\{([^}]*)\}/g;
-    for (const f of readdirSync(dir)) {
-      if (!f.endsWith('.spec.ts')) continue;
-      const text = readFileSync(join(dir, f), 'utf8');
-      for (const m of text.matchAll(call)) {
-        const path = m[1] ?? '';
-        for (const kv of (m[2] ?? '').matchAll(/(\w+):\s*'x'/g)) {
-          if (typed.has(`${path}|${kv[1]}`)) offenders.push(`${f}: ${path} ${kv[1]}='x'`);
+    for (const dir of dirs) {
+      for (const f of readdirSync(dir)) {
+        if (!f.endsWith('.spec.ts')) continue;
+        const text = readFileSync(join(dir, f), 'utf8');
+        for (const m of text.matchAll(call)) {
+          const path = m[1] ?? '';
+          for (const kv of (m[2] ?? '').matchAll(/(\w+):\s*'x'/g)) {
+            if (typed.has(`${path}|${kv[1]}`)) {
+              offenders.push(`${basename(dir)}/${f}: ${path} ${kv[1]}='x'`);
+            }
+          }
         }
       }
     }

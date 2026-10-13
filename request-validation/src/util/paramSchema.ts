@@ -120,6 +120,26 @@ export function orderedDateValues(params: ParameterModel[]): Map<string, string>
   return out;
 }
 
+/**
+ * A schema-valid value for every param in `params`, to fill the ones a scenario is NOT testing.
+ * Date params get distinct, ordered values (see {@link orderedDateValues}). An optional param named
+ * in `gates` is left out: the environment rejects any non-blank value for it (a capability gate,
+ * #404), so sending one makes the server answer for the gate instead of the param under test.
+ */
+export function buildSiblingValues(
+  params: ParameterModel[],
+  gates?: ReadonlyMap<string, unknown>,
+): Record<string, string> {
+  const dates = orderedDateValues(params);
+  const out: Record<string, string> = {};
+  for (const p of params) {
+    if (!p.required && gates?.has(p.name)) continue;
+    const r = resolveParamSchema(p);
+    out[p.name] = dates.get(p.name) ?? (r ? buildValidValue(r) : 'x');
+  }
+  return out;
+}
+
 /** The first candidate that meets the schema's length bounds and pattern, if any does. */
 function firstSatisfying(candidates: string[], r: ResolvedParamSchema): string | undefined {
   let re: RegExp | undefined;

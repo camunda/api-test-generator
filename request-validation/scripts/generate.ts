@@ -566,6 +566,7 @@ async function main() {
         ...generateParamMissing(model.operations, {
           capPerOperation: 10,
           onlyOperations: opts.onlyOperations,
+          capabilityGates,
         }),
       );
     }
@@ -575,6 +576,7 @@ async function main() {
           capPerOperation: 10,
           onlyOperations: opts.onlyOperations,
           unenforcedStringFormats: rvConfig.unenforcedStringFormats,
+          capabilityGates,
         }),
       );
     }
@@ -583,6 +585,7 @@ async function main() {
         ...generateParamEnumViolation(model.operations, {
           capPerOperation: 10,
           onlyOperations: opts.onlyOperations,
+          capabilityGates,
         }),
       );
     }

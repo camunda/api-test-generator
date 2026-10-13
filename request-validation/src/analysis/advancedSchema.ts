@@ -1,6 +1,7 @@
 import type { OperationModel, ValidationScenario } from '../model/types.js';
 import { buildBaselineBody } from '../schema/baseline.js';
 import { buildWalk, type WalkNode } from '../schema/walker.js';
+import { INVALID_BY_FORMAT } from '../util/formatValues.js';
 import { makeId, setAtPath } from './common.js';
 
 interface Opts {
@@ -159,12 +160,11 @@ export function generateMultipleOfViolations(
 
 export function generateFormatInvalid(ops: OperationModel[], opts: Opts): ValidationScenario[] {
   const out: ValidationScenario[] = [];
-  const invalidByFormat: Record<string, string> = {
-    uuid: 'not-a-uuid',
-    'date-time': 'not-a-datetime',
-    email: 'not-an-email',
-    uri: 'not a uri',
-  };
+  // Shared with the parameter generators. `date` stays out: this body generator has never emitted
+  // it, and adding it would change the generated suite.
+  const invalidByFormat: Record<string, string> = Object.fromEntries(
+    Object.entries(INVALID_BY_FORMAT).filter(([format]) => format !== 'date'),
+  );
   const unenforced = new Set(opts.unenforcedStringFormats ?? []);
   for (const op of ops) {
     if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId)) continue;

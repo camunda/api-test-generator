@@ -117,6 +117,37 @@ describe('param scenarios: parameters other than the target are valid', () => {
   });
 });
 
+describe('capability-gated optional params are not sent as siblings', () => {
+  // `tenantId` is gated (single-tenant mode rejects any non-blank value). Sending it as a sibling
+  // makes the server answer for the gate instead of the param under test.
+  const gates = new Map([['tenantId', { disabledDetailContains: 'multi-tenancy' }]]);
+  const withEnumToo: OperationModel = {
+    ...usageMetrics,
+    parameters: [
+      ...usageMetrics.parameters,
+      param('status', false, { type: 'string', enum: ['OPEN', 'CLOSED'] }),
+    ],
+  };
+  const gated: Record<string, ValidationScenario[]> = {
+    'param-type-mismatch': generateParamTypeMismatch([withEnumToo], { capabilityGates: gates }),
+    'param-missing': generateParamMissing([withEnumToo], { capabilityGates: gates }),
+    'param-enum-violation': generateParamEnumViolation([withEnumToo], { capabilityGates: gates }),
+    'param-constraint-violation': generateParamConstraintViolations([withEnumToo], {
+      capabilityGates: gates,
+    }),
+  };
+
+  for (const [kind, scenarios] of Object.entries(gated)) {
+    it(`${kind} leaves tenantId out unless it is the target`, () => {
+      expect(scenarios.length).toBeGreaterThan(0);
+      for (const s of scenarios) {
+        if (s.target === 'query.tenantId') continue;
+        expect(s.params, `${kind}: ${s.target}`).not.toHaveProperty('tenantId');
+      }
+    });
+  }
+});
+
 describe('param-enum-violation: the other params are valid too', () => {
   // A required date-time next to an enum target. Without the baseline the request omits `startTime`
   // and the server answers 400 for the missing parameter, not for the enum.
