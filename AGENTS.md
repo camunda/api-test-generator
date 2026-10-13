@@ -713,6 +713,13 @@ loser deletes its own); the reply lookup is paginated and fails closed.
 Any threading failure (unresolvable channel name, missing Slack history scope) falls
 back to a plain post, so an alert is never lost to the threading logic.
 
+**Current state (run log of 7 Oct, `report` job, "Notify Slack" step):** the Slack bot lacks the `channels:read`
+scope, so `conversations.list` fails with `missing_scope` and every alert is posted without threading. In practice each
+failed run posts its own message: nothing is edited or grouped, a failure that pings pings each time, and the 3-failure
+escalation does not fire, because a plain post returns no `seen` counter (the quiet reply's text still promises it). Giving
+the bot `channels:read` and `channels:history` turns the threaded behaviour above on. After changing the scopes, check
+that the "Notify Slack" step no longer prints "Slack threading failed".
+
 A PR-caused generator gap (the same `caused_by_pr` condition as the comment) is also tracked: the
 `generator-gap-tracker` job keeps one issue per camunda-hub PR
 (`[hub-pr-check] Generator gap on camunda-hub#N`, labels `generator-gap` + `hub`), **assigned to

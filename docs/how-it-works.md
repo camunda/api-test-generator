@@ -64,8 +64,9 @@ The Hub team:
 
 **Who gets pinged.** `hub-medic` is pinged for every alert: a failed PR check, a newly filed Hub issue, a fix or suppress PR
 that needs review, the spec-bump alert, the re-enable check, the missing-post alert, and the weekly report when it lists gaps.
-`test-automation-medic` is also pinged only when a PR check fails before the tests start (a setup problem such as a clone
-token or registry login) or keeps failing with no evidence. Every PR to this repo requests a review from
+`test-automation-medic` is also pinged when a PR check fails before the tests start (a setup problem such as a clone
+token or registry login). A PR check that fails with no test evidence is posted without a ping. Every failed PR-check run
+posts its own Slack message. Every PR to this repo requests a review from
 `@camunda/hub-backend` (see `.github/CODEOWNERS`). The daily gap digest and the coverage-fix agent's thread reply ping nobody
 by name, so whoever is on call as `hub-medic` reads both Slack channels each morning: PR-check alerts and the gap digest
 are in `#camunda-hub-pr-e2e-results`, everything else is in `#camunda-hub-nightly-test-results`.

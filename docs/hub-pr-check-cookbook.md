@@ -182,7 +182,7 @@ Do not call `npx playwright` directly: it skips the `POS_FIXTURE_*` settings tha
 - *Green despite a coverage gap:* intentional. A missing test is not a failing test, and the fix is in the generator, not
   your Hub PR. The gap stays visible in the status description, the `Coverage gap` issue and Slack (yellow). The repo-wide
   view is the weekly report: [hub-response-coverage-report.md](hub-response-coverage-report.md).
-- *Slack edited instead of a new message:* the PR failed the same way again (same failing tests), so its message was updated and nobody was pinged again. A new message is posted only when the failure changes.
+- *Several Slack messages for the same PR:* every failed run posts its own message, so a PR that fails on three pushes shows three. Nothing is edited or grouped, and a failure that pings pings each time. A failure with no test evidence is posted without a ping.
 - *The classifier said `unknown`:* it is told to prefer that over guessing `product`, because
   `product` at high confidence pages hub-medic.
 
