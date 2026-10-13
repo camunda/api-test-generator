@@ -863,6 +863,48 @@
       }
     },
     {
+      "operationId": "completeJob",
+      "scenarioKinds": [
+        {
+          "kind": "constraint-violation",
+          "targets": ["jobLeaseToken"]
+        }
+      ],
+      "reason": "jobLeaseToken declares minLength: 1 in the spec, but the REST gateway never validates it on job lifecycle commands (camunda/camunda#65750), so \"\" reaches the engine, which treats it as no token. On the unleased RV_FIXTURE_JOB_KEY job the command is accepted: completeJob returned 204 and completed the shared fixture job, so every later job scenario got 404. On a leased job it is rejected with INVALID_STATE (409, verified live). No fixture can produce the 400. Scoped to the jobLeaseToken target only.",
+      "knownIssue": {
+        "summary": "jobLeaseToken's minLength:1 constraint isn't enforced on job complete/fail/throw-error/update — an empty token is forwarded to the engine instead of being rejected; an unleased job accepts the command (204), a leased job rejects it with INVALID_STATE (409), never 400",
+        "url": "https://github.com/camunda/camunda/issues/65750"
+      }
+    },
+    {
+      "operationId": "failJob",
+      "scenarioKinds": [
+        {
+          "kind": "constraint-violation",
+          "targets": ["jobLeaseToken"]
+        }
+      ],
+      "reason": "jobLeaseToken declares minLength: 1 in the spec, but the REST gateway never validates it on job lifecycle commands (camunda/camunda#65750), so \"\" reaches the engine, which treats it as no token: an unleased job accepts the command and a leased one rejects it with INVALID_STATE (409). No fixture can produce the 400, and on the shared unleased RV_FIXTURE_JOB_KEY job an accepted failJob would consume it. Scoped to the jobLeaseToken target only.",
+      "knownIssue": {
+        "summary": "jobLeaseToken's minLength:1 constraint isn't enforced on job complete/fail/throw-error/update — an empty token is forwarded to the engine instead of being rejected; an unleased job accepts the command (204), a leased job rejects it with INVALID_STATE (409), never 400",
+        "url": "https://github.com/camunda/camunda/issues/65750"
+      }
+    },
+    {
+      "operationId": "throwJobError",
+      "scenarioKinds": [
+        {
+          "kind": "constraint-violation",
+          "targets": ["jobLeaseToken"]
+        }
+      ],
+      "reason": "jobLeaseToken declares minLength: 1 in the spec, but the REST gateway never validates it on job lifecycle commands (camunda/camunda#65750), so \"\" reaches the engine, which treats it as no token: an unleased job accepts the command and a leased one rejects it with INVALID_STATE (409). No fixture can produce the 400, and on the shared unleased RV_FIXTURE_JOB_KEY job an accepted throwJobError would consume it. Scoped to the jobLeaseToken target only.",
+      "knownIssue": {
+        "summary": "jobLeaseToken's minLength:1 constraint isn't enforced on job complete/fail/throw-error/update — an empty token is forwarded to the engine instead of being rejected; an unleased job accepts the command (204), a leased job rejects it with INVALID_STATE (409), never 400",
+        "url": "https://github.com/camunda/camunda/issues/65750"
+      }
+    },
+    {
       "operationId": "cancelProcessInstancesBatchOperation",
       "scenarioKinds": [
         "constraint-violation"
