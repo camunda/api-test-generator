@@ -714,8 +714,8 @@ Any threading failure (unresolvable channel name, missing Slack history scope) f
 back to a plain post, so an alert is never lost to the threading logic.
 
 **Current state (run log of 7 Oct, `report` job, "Notify Slack" step):** the Slack bot lacks the `channels:read`
-scope, so `conversations.list` fails with `missing_scope` and every alert is posted without threading. In practice each
-failed run posts its own message: nothing is edited or grouped, a failure that pings pings each time, and the 3-failure
+scope, so `conversations.list` fails with `missing_scope` and every alert is posted as a top-level message instead of a
+reply under the day's message. In practice each failed run posts its own message: nothing is edited or grouped, a failure that pings pings each time, and the 3-failure
 escalation does not fire, because a plain post returns no `seen` counter (the quiet reply's text still promises it). Giving
 the bot `channels:read` and `channels:history` turns the threaded behaviour above on. After changing the scopes, check
 that the "Notify Slack" step no longer prints "Slack threading failed".
