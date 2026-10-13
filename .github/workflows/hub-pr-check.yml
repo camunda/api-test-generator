@@ -1490,4 +1490,5 @@ jobs:
             --channel "#camunda-hub-pr-e2e-results" \
             --date "$(date -u +%Y-%m-%d)" \
             --marker "hub-pr:${PR_NUMBER:-${SHA:0:12}}:escalated" \
+            --top-level \
             --text-file "${RUNNER_TEMP}/escalation.txt"

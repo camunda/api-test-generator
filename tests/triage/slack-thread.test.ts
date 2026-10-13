@@ -5,6 +5,7 @@ import {
   findDailyParent,
   findIn,
   findReply,
+  postOnce,
   replyMarker,
   resolveChannel,
   type SlackApi,
@@ -315,5 +316,31 @@ describe('seen counter', () => {
     const first = await upsert(api, { ...base, marker, text: 'ids: `seen:2`' });
     const second = await upsert(api, { ...base, marker, text: 'ids: `seen:2`' });
     expect([first.seen, second.seen]).toEqual([1, 2]);
+  });
+});
+
+describe('postOnce', () => {
+  it('posts a top-level message, not a thread reply', async () => {
+    const { api, messages } = fakeSlack();
+    const r = await postOnce(api, { ...base, marker: 'hub-pr:7:escalated', text: 'keeps failing' });
+    expect(r.action).toBe('posted');
+    expect(messages).toHaveLength(1);
+    expect(messages[0]?.thread_ts).toBeUndefined();
+    expect(messages[0]?.text).toContain('keeps failing');
+  });
+
+  it('posts nothing the second time, so the people it pings are pinged once', async () => {
+    const { api, messages } = fakeSlack();
+    await postOnce(api, { ...base, marker: 'hub-pr:7:escalated', text: 'keeps failing' });
+    const r = await postOnce(api, { ...base, marker: 'hub-pr:7:escalated', text: 'keeps failing' });
+    expect(r.action).toBe('exists');
+    expect(messages).toHaveLength(1);
+  });
+
+  it('keeps different PRs apart', async () => {
+    const { api, messages } = fakeSlack();
+    await postOnce(api, { ...base, marker: 'hub-pr:7:escalated', text: 'a' });
+    await postOnce(api, { ...base, marker: 'hub-pr:8:escalated', text: 'b' });
+    expect(messages).toHaveLength(2);
   });
 });

@@ -94,7 +94,16 @@ export async function resolveChannel(api: SlackApi, channel: string): Promise<st
 // from it could pick a duplicate and split the day's thread. The caller falls back to a plain
 // post, so an alert is never lost to this.
 async function listDailyParents(api: SlackApi, channel: string, date: string): Promise<string[]> {
-  const marker = dailyMarker(date);
+  return listTopLevel(api, channel, date, dailyMarker(date));
+}
+
+// Same read for any marker: today's top-level bot messages whose trailer is `marker`, earliest first.
+async function listTopLevel(
+  api: SlackApi,
+  channel: string,
+  date: string,
+  marker: string,
+): Promise<string[]> {
   const oldest = String(Date.parse(`${date}T00:00:00Z`) / 1000);
   const parents: string[] = [];
   let cursor = '';
@@ -219,6 +228,27 @@ export async function upsert(
   return { action: 'posted', replyTs: resp.ts ?? '', seen };
 }
 
+// One top-level message per marker per day, outside the daily thread so it is easy to see. It is
+// never edited: a second call with the same marker finds the first and posts nothing, so the
+// people it pings are pinged once.
+export async function postOnce(
+  api: SlackApi,
+  args: { channel: string; date: string; marker: string; text: string },
+): Promise<{ action: 'posted' | 'exists'; ts: string }> {
+  const channel = await resolveChannel(api, args.channel);
+  const existing = (await listTopLevel(api, channel, args.date, args.marker))[0];
+  if (existing) return { action: 'exists', ts: existing };
+  const resp = must(
+    await api.call('chat.postMessage', {
+      channel,
+      text: `${args.text}\n\`${args.marker}\``,
+      unfurl_links: false,
+    }),
+    'chat.postMessage',
+  );
+  return { action: 'posted', ts: resp.ts ?? '' };
+}
+
 function slackApi(token: string): SlackApi {
   const headers = { Authorization: `Bearer ${token}` };
   return {
@@ -255,7 +285,8 @@ async function main(): Promise<void> {
   const text = readFileSync(arg('text-file'), 'utf8').trimEnd();
   const api = slackApi(token);
   try {
-    const result = await upsert(api, {
+    const post = process.argv.includes('--top-level') ? postOnce : upsert;
+    const result = await post(api, {
       channel: arg('channel'),
       date: arg('date'),
       marker: arg('marker'),
