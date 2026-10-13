@@ -722,12 +722,10 @@ pushes and closed on a green run (a failed run that is merely classified differe
 nothing, so it leaves the issue open); the sticky PR comment is marked resolved on a green run too. If the gap comes back, the same
 issue is reopened rather than a second one opened. The issue contains only sanitized operation
 ids and our own classification, never the PR author's free text. Once the camunda-hub PR
-merges the gap is live on Hub main, so
-[hub-generator-gap-digest.yml](.github/workflows/hub-generator-gap-digest.yml) (weekdays 07:00 UTC,
-`scripts/triage/hub-gap-digest.ts`) posts one Slack message to `#camunda-hub-pr-e2e-results`
-listing those issues that are still open (merge age, issue age, assignee), and closes issues whose
-camunda-hub PR was closed without merging. It posts nothing on days with nothing overdue; a manual
-`workflow_dispatch` is a dry run by default.
+merges the gap is live on Hub main and the issue stays open until the generator PR lands and a
+person closes it. There is no daily reminder: the nightly run and the weekly coverage report
+surface the same gap (a wrong test fails the nightly, a missing test is listed in the weekly
+report). An issue whose camunda-hub PR was closed without merging is closed by hand.
 Both scripts run under plain `node` (type stripping, no `npm ci`) and are covered
 by `tests/triage/`. Not ported, deliberately: AlwaysGreen's fix-agent dispatch
 caps/dedupe (this classifier is read-only and opens nothing) and its
@@ -968,7 +966,7 @@ standalone feature specs a lifecycle test replaces may be adapted under four con
 review". The weekly Slack message gets a thread reply listing the agent's PRs still open (`.github/scripts/hub-coverage-agent-prs.sh`).
 
 **A failed Slack step fails the scheduled run.** The Slack steps of the scheduled Hub workflows (nightly, triage,
-spec-bump check, re-enable check, weekly coverage report, generator-gap digest) use `continue-on-error`, so a Vault or
+spec-bump check, re-enable check, weekly coverage report) use `continue-on-error`, so a Vault or
 Slack problem never stopped the run and the alert silently did not go out. Each of those jobs now ends with
 [`fail-if-slack-failed`](.github/actions/fail-if-slack-failed/action.yml) (`if: always()`), given the outcome of every
 Slack step; if any failed, or a token step succeeded but produced an empty token (so every post would be skipped), the run is

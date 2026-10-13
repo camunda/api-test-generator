@@ -8,8 +8,6 @@
 //
 // Runs under plain `node` (type stripping): no enums, no parameter properties.
 
-import { postDigest } from './hub-gap-digest.ts';
-
 export interface Run {
   id: number;
   /** The run title. A triage run's title ends with the id of the nightly it triages. */
@@ -119,6 +117,35 @@ interface ApiRun {
   created_at: string;
 }
 
+type SlackReply = { ok: boolean; error?: string };
+
+async function slackApi(url: string, token: string, init: RequestInit): Promise<SlackReply> {
+  const resp = await fetch(url, {
+    ...init,
+    headers: { Authorization: `Bearer ${token}`, ...(init.headers ?? {}) },
+    signal: AbortSignal.timeout(30_000),
+  });
+  if (!resp.ok) throw new Error(`${url}: HTTP ${resp.status}`);
+  // biome-ignore lint/plugin: runtime contract boundary for parsed Slack JSON
+  return (await resp.json()) as SlackReply;
+}
+
+/** Posts the alert. Slack answers HTTP 200 with `ok: false` for a rejected post (bot not in the channel, bad token), so
+ * that has to throw: a warning would leave the run green with the alert not posted. `send` is injectable for tests. */
+export async function postSlack(
+  text: string,
+  token: string,
+  channel: string,
+  send: (url: string, token: string, init: RequestInit) => Promise<SlackReply> = slackApi,
+): Promise<void> {
+  const resp = await send('https://slack.com/api/chat.postMessage', token, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json; charset=utf-8' },
+    body: JSON.stringify({ channel, text, unfurl_links: false }),
+  });
+  if (!resp.ok) throw new Error(`Slack post failed: ${resp.error}`);
+}
+
 const PAGE_SIZE = 100;
 /** More than this many pages of one day's runs is not plausible; a full last page then proves nothing. */
 const MAX_PAGES = 5;
@@ -220,7 +247,7 @@ async function main(): Promise<void> {
     listNightly: (since) => listRuns(repo, 'nightly-camunda-hub.yml', token, since),
     listTriage: (since) => listRuns(repo, 'triage-camunda-hub-nightly.yml', token, since),
     post: (text, slack) =>
-      postDigest(text, slack, env('SLACK_CHANNEL') || '#camunda-hub-nightly-test-results'),
+      postSlack(text, slack, env('SLACK_CHANNEL') || '#camunda-hub-nightly-test-results'),
     log: (line) => console.log(line),
     error: (line) => console.error(line),
   });

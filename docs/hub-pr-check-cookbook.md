@@ -192,12 +192,10 @@ Do not call `npx playwright` directly: it skips the `POS_FIXTURE_*` settings tha
   the title names the PR (`[hub-pr-check] Generator gap on camunda-hub#N`) and the body lists every endpoint that needs work.
   It is opened only when the PR's own spec change caused the gap, and assigned to the PR's author when possible (not for
   bots or authors without access to this repo; reassign freely).
-- **Daily nudge:** `hub-generator-gap-digest.yml` posts to `#camunda-hub-pr-e2e-results` on weekdays at 07:00 UTC, listing
-  issues whose camunda-hub PR has merged and whose issue is still open, oldest first. Silent when nothing is overdue.
-  **What you do:** open each listed issue. Your Hub PR has merged, so the endpoint is live and the generator PR is yours to
-  finish (see "Adding or changing an endpoint in Hub" above). Nobody is pinged by name, so someone on the Hub team has to
-  read the channel.
-- **Cleanup:** the issue closes by itself on a green run, or when its PR is closed without merging, and reopens if the gap
-  comes back. The PR comment is marked resolved on a green run too.
+- **After your Hub PR merges:** the endpoint is live, so the generator PR is yours to finish (see "Adding or changing an
+  endpoint in Hub" above). The issue stays open until you close it. Nothing reminds you: a wrong test fails the nightly, and a
+  missing one shows up in the weekly coverage report.
+- **Cleanup:** the issue closes by itself on a green run and reopens if the gap comes back. The PR comment is marked
+  resolved on a green run too. If your Hub PR is closed without merging, close the issue yourself.
 - **Not the same as the weekly report.** Its index and area issues are repo-wide, not tied to a PR, and **not assigned**: the
   Hub team picks them up (see [hub-response-coverage-report.md](hub-response-coverage-report.md)).

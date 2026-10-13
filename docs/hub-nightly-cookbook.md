@@ -75,7 +75,7 @@ Open [nightly-camunda-hub](https://github.com/camunda/api-test-generator/actions
 1. **No run around 02:00 UTC.** The schedule did not fire. Start one with "Run workflow".
 2. **The run is red with "Slack alert not posted".** The Slack token could not be read from Vault, or Slack rejected the
    post. The tests may be fine. You cannot fix this from the Hub side: post the run link in `#ask-qa` (tag `@test-automation-medic`). Every scheduled Hub
-   workflow (triage, spec-bump, re-enable, weekly report, gap digest) shows the same error.
+   workflow (triage, spec-bump, re-enable, weekly report) shows the same error.
 3. **The run is red for another reason.** Open the failing step.
 
 While Slack is down you can still read the night's result: open the nightly run, then the job summary and the report artifacts; the triage run keeps its digest as an artifact too. You do not need to re-post it.

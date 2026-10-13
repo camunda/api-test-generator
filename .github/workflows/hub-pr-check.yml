@@ -845,10 +845,8 @@ jobs:
   # A generator gap the camunda-hub PR itself caused (classify's caused_by_pr) is a work item for
   # THIS repo, but until now it lived only in Slack and a PR comment. Keep one tracking issue per
   # camunda-hub PR, assigned to that PR's author (they know the change best), updated in place on
-  # later pushes and closed when a push clears the gap. hub-generator-gap-digest.yml nags daily
-  # once the camunda-hub PR has merged and the issue is still open. Deterministic: no agent, and
-  # the issue holds only sanitized operation ids plus our own classification, never the author's
-  # free text.
+  # later pushes and closed when a push clears the gap. Deterministic: no agent, and the issue
+  # holds only sanitized operation ids plus our own classification, never the author's free text.
   generator-gap-tracker:
     name: Track a PR-caused generator gap as an issue
     needs: [validate, run, classify]

@@ -13,7 +13,6 @@ const WORKFLOWS = [
   'spec-bump-check',
   'hub-known-issue-reenable-check',
   'hub-response-coverage',
-  'hub-generator-gap-digest',
   'hub-nightly-post-check',
 ];
 
@@ -150,7 +149,6 @@ describe.each(WORKFLOWS)('%s', (file) => {
 
 describe('workflows whose manual run is a dry run that posts nothing', () => {
   it.each([
-    'hub-generator-gap-digest',
     'hub-nightly-post-check',
     'hub-response-coverage',
   ])('%s fetches no Slack token in a dry run, so a Vault problem cannot fail it', (file) => {

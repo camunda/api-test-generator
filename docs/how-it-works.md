@@ -26,11 +26,10 @@ There are four things. The weekly report and the agent PRs need you every week; 
 | **Weekly coverage report** | A post in the same channel | Monday, 05:00 UTC | Yes: it lists the API cases still not tested | [Coverage report guide](hub-response-coverage-report.md) |
 | **Coverage-fix PRs** | Small draft pull requests in this repo, opened by an AI agent | After the Monday report | Yes: you review them. A person always decides to merge | [Coverage report guide](hub-response-coverage-report.md) |
 
-Four more posts show up only when needed:
+Three more posts show up only when needed:
 
 - **spec-bump alert**: Hub's API changed since we last looked;
 - **re-enable check**: a Hub bug we had worked around was fixed, so a skipped test can come back;
-- weekday **gap digest**: a merged Hub PR left a generator gap;
 - **missing-post alert** (04:30 UTC): the scheduled nightly or its triage did not start or did not finish.
 
 ## When something happens, what do I do?
@@ -67,9 +66,9 @@ The Hub team:
 that needs review, the spec-bump alert, the re-enable check, the missing-post alert, and the weekly report when it lists gaps.
 `test-automation-medic` is also pinged only when a PR check fails before the tests start (a setup problem such as a clone
 token or registry login) or keeps failing with no evidence. Every PR to this repo requests a review from
-`@camunda/hub-backend` (see `.github/CODEOWNERS`). The daily gap digest and the coverage-fix agent's thread reply ping nobody
-by name, so whoever is on call as `hub-medic` reads both Slack channels each morning: PR-check alerts and the gap digest
-are in `#camunda-hub-pr-e2e-results`, everything else is in `#camunda-hub-nightly-test-results`.
+`@camunda/hub-backend` (see `.github/CODEOWNERS`). The coverage-fix agent's thread reply pings nobody
+by name, so whoever is on call as `hub-medic` reads both Slack channels each morning: PR-check alerts are in
+`#camunda-hub-pr-e2e-results`, everything else is in `#camunda-hub-nightly-test-results`.
 
 **Questions or help:** ask in `#ask-qa` and tag `@test-automation-medic`. The enablement team always replies there.
 

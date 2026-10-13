@@ -4,6 +4,7 @@ import {
   type CheckDeps,
   collectRuns,
   evaluate,
+  postSlack,
   type Run,
   runCheck,
   startOfDayUtc,
@@ -266,5 +267,28 @@ describe('collectRuns', () => {
 
   it('fails instead of reading green over a partial read when every page is full', async () => {
     await expect(collectRuns(async (page) => full(page))).rejects.toThrow('were not read');
+  });
+});
+
+describe('postSlack', () => {
+  it('sends the alert to the channel', async () => {
+    const calls: { url: string; token: string; body: string }[] = [];
+    await postSlack('hello', 'tok', '#chan', async (url, token, init) => {
+      calls.push({ url, token, body: String(init.body) });
+      return { ok: true };
+    });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.url).toBe('https://slack.com/api/chat.postMessage');
+    expect(JSON.parse(calls[0]?.body ?? '{}')).toEqual({
+      channel: '#chan',
+      text: 'hello',
+      unfurl_links: false,
+    });
+  });
+
+  it('throws when Slack rejects the post, so the run fails instead of staying green', async () => {
+    await expect(
+      postSlack('hello', 'tok', '#chan', async () => ({ ok: false, error: 'not_in_channel' })),
+    ).rejects.toThrow('Slack post failed: not_in_channel');
   });
 });
