@@ -71,7 +71,7 @@ token or registry login) or keeps failing with no evidence. Every PR to this rep
 by name, so whoever is on call as `hub-medic` reads both Slack channels each morning: PR-check alerts and the gap digest
 are in `#camunda-hub-pr-e2e-results`, everything else is in `#camunda-hub-nightly-test-results`.
 
-**Questions or help:** ask in `#ask-qa` and tag `@test-automation-medic`. The enablement team answers there, but nothing here depends on a reply.
+**Questions or help:** ask in `#ask-qa` and tag `@test-automation-medic`. The enablement team always replies there.
 
 ## Words used
 
