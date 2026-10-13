@@ -53,8 +53,7 @@ Four more posts show up only when needed:
 
 **The Hub team owns this project**: the alerts, the Hub settings, and the generator itself,
 including changing it when a new kind of coverage needs it. The test automation enablement team does not
-carry on-call or maintenance duties for it. The one exception is the `camunda-oca` config and its output: the same
-engine builds it, and the test automation team stays responsible for it, so tell them when an engine change could affect it.
+carry on-call or maintenance duties for it. The one exception is the `camunda-oca` config and its output, which the test automation team stays responsible for.
 
 The Hub team:
 
