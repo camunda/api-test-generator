@@ -1444,7 +1444,7 @@ describe('search order checks compare timestamps by instant', () => {
 
   // Runs the comparator exactly as the generated test carries it.
   const loadComparator = (src: string): ((a: unknown, b: unknown) => number) => {
-    const start = src.indexOf('const sortKey');
+    const start = src.indexOf('const parseInstant');
     const end = src.indexOf('const values = read(page);');
     expect(start).toBeGreaterThan(-1);
     expect(end).toBeGreaterThan(start);
@@ -1474,6 +1474,16 @@ describe('search order checks compare timestamps by instant', () => {
     const later = '2023-12-31T23:30:00Z';
     expect([later, earlier].sort(byInstant)).toEqual([earlier, later]);
     expect(byInstant('2024-01-01T00:00:00+0100', earlier)).toBe(0);
+  });
+
+  test('orders timestamps before 1970 by instant', () => {
+    const byInstant = loadComparator(render('ASC'));
+    const values = ['1969-12-31T23:59:58Z', '1969-12-31T23:59:59Z', '1970-01-01T00:00:00Z'];
+    expect([values[2], values[1], values[0]].sort(byInstant)).toEqual(values);
+    expect(['1969-12-31T23:59:59.5Z', '1969-12-31T23:59:59Z'].sort(byInstant)).toEqual([
+      '1969-12-31T23:59:59Z',
+      '1969-12-31T23:59:59.5Z',
+    ]);
   });
 
   test('keeps the lexical order for values that are not timestamps', () => {

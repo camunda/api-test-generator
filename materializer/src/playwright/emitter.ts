@@ -733,21 +733,27 @@ function renderScenarioTest(
         const field = JSON.stringify(order.field);
         const read = `(r: { items: Record<string, unknown>[] }) => r.items.map((i) => i[${field}])`;
         body.push(`      const read = ${read};`);
-        // The key is the instant in UTC seconds, then the fraction at a fixed width, so offsets and
-        // fraction lengths do not change the order. A value that is not a timestamp keeps its text.
+        // Timestamps compare by UTC epoch seconds, then by the fraction at a fixed width, so offsets,
+        // fraction lengths and dates before 1970 do not change the order. A value that is not a
+        // timestamp keeps its text.
         for (const line of [
-          `      const sortKey = (v: unknown): string => {`,
+          `      const parseInstant = (v: unknown): { secs: number; frac: string } | null => {`,
           `        const m = /^(.*T\\d\\d:\\d\\d:\\d\\d)(\\.\\d+)?(Z|[+-]\\d\\d:?\\d\\d)$/.exec(String(v));`,
-          `        if (!m) return String(v);`,
+          `        if (!m) return null;`,
           `        const offset = (m[3] ?? '').replace(/^([+-]\\d\\d)(\\d\\d)$/, '$1:$2');`,
           `        const secs = Date.parse(\`\${m[1] ?? ''}\${offset}\`);`,
-          `        if (Number.isNaN(secs)) return String(v);`,
-          `        return String(secs).padStart(16, '0') + (m[2] ?? '.').padEnd(10, '0');`,
+          `        return Number.isNaN(secs) ? null : { secs, frac: (m[2] ?? '.').padEnd(10, '0') };`,
           `      };`,
           `      const byInstant = (a: unknown, b: unknown) => {`,
-          `        const x = sortKey(a);`,
-          `        const y = sortKey(b);`,
-          `        return x < y ? -1 : x > y ? 1 : 0;`,
+          `        const x = parseInstant(a);`,
+          `        const y = parseInstant(b);`,
+          `        if (x && y) {`,
+          `          if (x.secs !== y.secs) return x.secs < y.secs ? -1 : 1;`,
+          `          return x.frac < y.frac ? -1 : x.frac > y.frac ? 1 : 0;`,
+          `        }`,
+          `        const p = String(a);`,
+          `        const q = String(b);`,
+          `        return p < q ? -1 : p > q ? 1 : 0;`,
           `      };`,
         ]) {
           body.push(line);
