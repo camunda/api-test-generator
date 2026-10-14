@@ -596,7 +596,12 @@ def slack(s, prev, args):
     links.append(f'<{GUIDE_URL}|📖 Guide>')
     if links:
         lines += ['', ' · '.join(links)]
-    if s['opsMissingResponseTest'] or s['zeroTestOperations']:
+    # A zero-test op already parked under a tracking ticket (in trackedOperations, listed above with
+    # its issue) is a known gap, not an actionable new one, so it must not page the medic every week;
+    # it stays visible on the line above. Only an untracked zero-test op, or a real missing-response
+    # gap (opsMissingResponseTest already excludes held/suppressed ops), pings.
+    unexpected_zero = [o for o in s['zeroTestOperations'] if o not in set(s['trackedOperations'])]
+    if s['opsMissingResponseTest'] or unexpected_zero:
         lines += ['', ':rotating_light: ' + HUB_MEDIC]
     return '\n'.join(lines) + '\n'
 

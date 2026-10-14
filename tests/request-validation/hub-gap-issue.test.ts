@@ -455,6 +455,21 @@ describe('weekly Slack message', () => {
     expect(text).not.toContain('hub-medic');
   });
 
+  it('does not ping for a zero-test op already parked under a ticket, but still lists it', () => {
+    // A zero-test op tracked under a Hub issue (e.g. getClusterUsageMetrics) is a known, parked gap,
+    // not an actionable new one: it stays visible with its ticket but must not page the medic weekly.
+    const text = slackText(
+      baseSummary({
+        opsMissingResponseTest: 0,
+        zeroTestOperations: ['getClusterUsageMetrics'],
+        trackedOperations: ['getClusterUsageMetrics'],
+      }),
+      null,
+    );
+    expect(text).not.toContain('hub-medic');
+    expect(text).toContain('getClusterUsageMetrics');
+  });
+
   it('has a positive-tests section and a negative-tests section, each holding its own lines', () => {
     const text = slackText(baseSummary(), null);
     const at = (needle: string) => text.indexOf(needle);
