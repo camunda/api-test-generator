@@ -16,6 +16,10 @@ run_url="${GITHUB_SERVER_URL:-https://github.com}/${GITHUB_REPOSITORY:-}/actions
 # The rolling auto-bump PR's branch for the active config.
 bump_branch() { echo "chore/spec-bump-${CONFIG:?CONFIG required}"; }
 
+# The label that marks Hub work, for the Hub config only: the spec-bump check also runs for
+# camunda-oca, whose PRs and issues must not carry it. Empty for any other config.
+config_label() { if [ "${CONFIG:-}" = camunda-hub ]; then echo hub; fi; }
+
 # Number of the open rolling tracking issue whose title is exactly $ISSUE_TITLE,
 # or empty. The first match is selected inside jq (`first // empty`) rather than
 # piped to `head -1`: under `set -euo pipefail`, `head` closing the pipe can

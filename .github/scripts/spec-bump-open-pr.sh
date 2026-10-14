@@ -39,6 +39,12 @@ short="${LATEST:0:12}"
 # can reach a `gh pr edit` before the later creation calls run.
 gh label create "$DRIFT_LABEL" --color BFD4F2 --description "Upstream spec drifted from the pin (spec-bump check)" 2>/dev/null || true
 gh label create auto-generated --color ededed --description "Opened by automation, not a human" 2>/dev/null || true
+# Hub's bump PR also carries `hub`. Added with a separate, best-effort edit (not `--label` on create),
+# so a label that failed to create can never lose the PR itself.
+hub_label="$(config_label)"
+if [ -n "$hub_label" ]; then
+  gh label create "$hub_label" --color 1D76DB --description "Hub-related" 2>/dev/null || true
+fi
 
 # If a bump PR is already open, leave it alone — it may carry reviewer edits
 # (e.g. invariant updates), and force-pushing the rolling branch would clobber
@@ -54,6 +60,7 @@ if [ -n "$existing" ]; then
   # superseded tracking issue below (labeling is an auxiliary self-heal, the
   # issue-close is the actual point of this path).
   gh pr edit "$existing" --add-label "$DRIFT_LABEL" --add-label auto-generated >/dev/null || true
+  if [ -n "$hub_label" ]; then gh pr edit "$existing" --add-label "$hub_label" >/dev/null || true; fi
   issue="$(find_rolling_issue)"
   if [ -n "$issue" ]; then
     gh issue close "$issue" --comment "Superseded by the open auto-bump PR #${existing}. Closing." >/dev/null
@@ -135,6 +142,7 @@ title="chore(${CONFIG}): bump spec pin to ${short}"
 echo "Opening bump PR."
 gh pr create --draft --base main --head "$branch" --title "$title" --body-file "$body_file" \
   --label "$DRIFT_LABEL" --label auto-generated >/dev/null
+if [ -n "$hub_label" ]; then gh pr edit "$branch" --add-label "$hub_label" >/dev/null || true; fi
 
 # Clean up the tracking issue if one is open — the PR supersedes it.
 issue="$(find_rolling_issue)"

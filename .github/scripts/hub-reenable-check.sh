@@ -220,10 +220,12 @@ operation(s) get their tests back: ${ops}." >/dev/null
 
   GH_TOKEN="$GH_TOKEN_GENERATOR" gh label create nightly-api-fix --repo "$GEN_REPO" --color FF4444 \
     --description "Bot-opened fix PR for a nightly triage finding (test-generation bug or coverage gap)" 2>/dev/null || true
+  GH_TOKEN="$GH_TOKEN_GENERATOR" gh label create hub --repo "$GEN_REPO" --color 1D76DB \
+    --description "Hub-related" 2>/dev/null || true
 
   pr_url="$(GH_TOKEN="$GH_TOKEN_GENERATOR" gh pr create --repo "$GEN_REPO" --base main --head "$branch" --draft \
     --title "chore(nightly): re-enable ${ops} — camunda-hub#${issue_num} closed" \
-    --body-file "$body_file" --label nightly-api-fix 2>&1)"
+    --body-file "$body_file" --label nightly-api-fix --label hub 2>&1)"
   create_rc=$?
   rm -f "$body_file"
 
