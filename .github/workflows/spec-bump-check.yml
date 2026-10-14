@@ -500,6 +500,7 @@ jobs:
           N_REMOVED: ${{ steps.opdiff.outputs.n_removed }}
           UNMAPPED: ${{ steps.unmapped.outputs.unmapped }}
           COOKBOOK_URL: ${{ github.server_url }}/${{ github.repository }}/blob/main/docs/hub-nightly-cookbook.md
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -uo pipefail
           # ISSUE_TITLE + CONFIG (matrix env) are the single source of truth for
@@ -539,6 +540,7 @@ jobs:
           UNMAPPED_LIST="${UNMAPPED:-}" \
           LINK="$link" \
           COOKBOOK_URL="$COOKBOOK_URL" \
+          RUN_URL="$RUN_URL" \
           node -e '
             const e = process.env;
             // UNMAPPED is already ", "-joined by the python step that produces it
@@ -563,7 +565,7 @@ jobs:
               : hasUnmapped
               ? `:alert2: *camunda-hub coverage regression* vs latest \`${e.LATEST}\` (no operationId churn):`
               : `:alert2: *camunda-hub spec pin is behind* latest \`${e.LATEST}\` (no operationId churn, no coverage regression):`;
-            const text = headline + unmappedLine + `\n${e.LINK}\n<${e.COOKBOOK_URL}|📖 What this alert means>`;
+            const text = headline + unmappedLine + `\n${e.LINK}\n<${e.RUN_URL}|📊 View run> · <${e.COOKBOOK_URL}|📖 What this alert means>`;
             require("fs").appendFileSync(process.env.GITHUB_OUTPUT, `text_json=${JSON.stringify(text)}\n`);
           '
 

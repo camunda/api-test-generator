@@ -97,13 +97,17 @@ const HUB_MEDIC = '<!subteam^S014VK4482H|hub-medic>';
 const COOKBOOK_URL =
   'https://github.com/camunda/api-test-generator/blob/main/docs/hub-nightly-cookbook.md';
 
-export function buildAlert(problems: Problem[]): string {
+export function buildAlert(problems: Problem[], runUrl = ''): string {
   if (problems.length === 0) return '';
   const lines = [':warning: *No nightly post this morning*'];
   for (const p of problems) {
     lines.push(`• ${p.what}: ${p.why}${p.url ? ` (<${p.url}|run>)` : ''}`);
   }
-  lines.push(`<${COOKBOOK_URL}|📖 What to check> ${HUB_MEDIC}`);
+  const links = [
+    ...(runUrl ? [`<${runUrl}|📊 View check run>`] : []),
+    `<${COOKBOOK_URL}|📖 What to check>`,
+  ];
+  lines.push(`${links.join(' · ')} ${HUB_MEDIC}`);
   return lines.join('\n');
 }
 
@@ -175,6 +179,8 @@ export interface CheckDeps {
   /** Empty when the Slack token was not available. */
   slackToken: string;
   now: Date;
+  /** This workflow run's URL, linked in the alert. Empty when not running in Actions. */
+  runUrl?: string;
   listNightly: (since: Date) => Promise<Run[]>;
   listTriage: (since: Date) => Promise<Run[]>;
   post: (text: string, token: string) => Promise<void>;
@@ -188,7 +194,7 @@ export async function runCheck(deps: CheckDeps): Promise<void> {
   const since = startOfDayUtc(deps.now);
   const [nightly, triage] = await Promise.all([deps.listNightly(since), deps.listTriage(since)]);
   const problems = evaluate(nightly, triage, deps.now);
-  const text = buildAlert(problems);
+  const text = buildAlert(problems, deps.runUrl);
   if (text === '') {
     deps.log('Both the nightly and the triage ran today; staying silent.');
     return;
@@ -209,6 +215,13 @@ function env(name: string): string {
   return process.env[name] ?? '';
 }
 
+function runUrl(): string {
+  const server = env('GITHUB_SERVER_URL');
+  const repo = env('GITHUB_REPOSITORY');
+  const id = env('GITHUB_RUN_ID');
+  return server && repo && id ? `${server}/${repo}/actions/runs/${id}` : '';
+}
+
 async function main(): Promise<void> {
   const repo = env('GITHUB_REPOSITORY') || 'camunda/api-test-generator';
   const token = env('GITHUB_TOKEN');
@@ -217,6 +230,7 @@ async function main(): Promise<void> {
     dryRun: env('DRY_RUN') === 'true',
     slackToken: env('SLACK_TOKEN'),
     now: new Date(),
+    runUrl: runUrl(),
     listNightly: (since) => listRuns(repo, 'nightly-camunda-hub.yml', token, since),
     listTriage: (since) => listRuns(repo, 'triage-camunda-hub-nightly.yml', token, since),
     post: (text, slack) =>
