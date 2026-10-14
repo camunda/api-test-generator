@@ -65,11 +65,12 @@ cannot work out:
 - a **state-dependent 409 or 400** that needs setup calls (`conflict-replay.json`);
 - a **new kind of resource** that should get a create, read, delete flow test (`ontology/entity-kinds.json`).
 
-**If you need one, open it at the same time as your Hub PR, and add both labels:**
+**If you need one, open it at the same time as your Hub PR, and add these labels:**
 
 - `nightly-api-fix`, so the nightly's triage sees your PR and links to it instead of opening a duplicate that races yours.
 - `do-not-close`, because a daily job (01:00 UTC) closes every open `nightly-api-fix` PR with no activity for 3 days. This
   also keeps your PR open while it waits for a delayed Hub PR.
+- `hub`, which marks the PR as Hub work. Every PR for Hub work in this repo carries it.
 
 Then ask a Hub teammate to review it: the Hub team reviews generator PRs.
 

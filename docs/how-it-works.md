@@ -60,6 +60,7 @@ The Hub team:
 - reads and acts on every alert on this page, and is the on-call group (`hub-medic`), including for generator and pipeline problems;
 - reviews and merges coverage-fix PRs, and fixes the Hub bugs the tests find;
 - keeps the Hub settings in `configs/camunda-hub/`. Most coverage gaps are fixed there, and the coverage-fix agent handles many of them;
+- puts the `hub` label on every PR for Hub work (the automation does it for its own PRs and issues);
 - changes the generator when a gap needs new behaviour. The agent only reports those, and a person opens the change. The code is in `request-validation/`, `path-analyser/` and `materializer/`, and [AGENTS.md](../AGENTS.md) lists the rules a change must follow.
 
 **Pings are not switched yet.** Some generator alerts still go to `test-automation-medic` instead of `hub-medic`, and three
