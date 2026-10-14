@@ -79,6 +79,10 @@ body_file="$(mktemp)"
 # on whether THIS run's blocker is an uncovered operation (#475's gate).
 gh label create "$DRIFT_LABEL" --color BFD4F2 --description "Upstream spec drifted from the pin (spec-bump check)" 2>/dev/null || true
 gh label create auto-generated --color ededed --description "Opened by automation, not a human" 2>/dev/null || true
+hub_label="$(config_label)"
+if [ -n "$hub_label" ]; then
+  gh label create "$hub_label" --color 1D76DB --description "Hub-related" 2>/dev/null || true
+fi
 gh label create missing-coverage --color D93F0B --description "A spec operation has no generated test coverage" 2>/dev/null || true
 gh label create needs-fixture --color D93F0B --description "A newly-required request property has no existing fixture (#492)" 2>/dev/null || true
 
@@ -94,6 +98,7 @@ if [ -n "$existing" ]; then
   # Best-effort (labeling is an auxiliary signal): a transient API error or a
   # label that failed to create above must not abort the issue update itself.
   gh issue edit "$existing" --add-label "$DRIFT_LABEL" --add-label auto-generated >/dev/null || true
+  if [ -n "$hub_label" ]; then gh issue edit "$existing" --add-label "$hub_label" >/dev/null || true; fi
   # Sync missing-coverage to THIS run's state — add it when unmapped ops are
   # the blocker, remove it if a later run clears them but the issue stays open
   # for another reason (e.g. invariants still broken). Both best-effort, same
@@ -119,6 +124,7 @@ else
   # entirely rather than just the label. Add it separately, best-effort, after.
   new_url="$(gh issue create --title "$ISSUE_TITLE" --body-file "$body_file" --label "$DRIFT_LABEL" --label auto-generated)"
   echo "Opened ${new_url}"
+  if [ -n "$hub_label" ]; then gh issue edit "${new_url##*/}" --add-label "$hub_label" >/dev/null || true; fi
   if [ -n "$UNMAPPED" ]; then
     gh issue edit "${new_url##*/}" --add-label missing-coverage >/dev/null || true
   fi
