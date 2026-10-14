@@ -733,12 +733,25 @@ function renderScenarioTest(
         const field = JSON.stringify(order.field);
         const read = `(r: { items: Record<string, unknown>[] }) => r.items.map((i) => i[${field}])`;
         body.push(`      const read = ${read};`);
-        body.push(
-          `      const sortKey = (v: unknown) => String(v).replace(/(\\.\\d+)?(Z|[+-]\\d\\d:?\\d\\d)$/, (_m, f: string | undefined, z: string) => (f ?? '.').padEnd(10, '0') + z);`,
-        );
-        body.push(
-          `      const byInstant = (a: unknown, b: unknown) => (sortKey(a) < sortKey(b) ? -1 : sortKey(a) > sortKey(b) ? 1 : 0);`,
-        );
+        // The key is the instant in UTC seconds, then the fraction at a fixed width, so offsets and
+        // fraction lengths do not change the order. A value that is not a timestamp keeps its text.
+        for (const line of [
+          `      const sortKey = (v: unknown): string => {`,
+          `        const m = /^(.*T\\d\\d:\\d\\d:\\d\\d)(\\.\\d+)?(Z|[+-]\\d\\d:?\\d\\d)$/.exec(String(v));`,
+          `        if (!m) return String(v);`,
+          `        const offset = (m[3] ?? '').replace(/^([+-]\\d\\d)(\\d\\d)$/, '$1:$2');`,
+          `        const secs = Date.parse(\`\${m[1] ?? ''}\${offset}\`);`,
+          `        if (Number.isNaN(secs)) return String(v);`,
+          `        return String(secs).padStart(16, '0') + (m[2] ?? '.').padEnd(10, '0');`,
+          `      };`,
+          `      const byInstant = (a: unknown, b: unknown) => {`,
+          `        const x = sortKey(a);`,
+          `        const y = sortKey(b);`,
+          `        return x < y ? -1 : x > y ? 1 : 0;`,
+          `      };`,
+        ]) {
+          body.push(line);
+        }
         body.push(`      const values = read(page);`);
         // A missing or misspelled field would give undefined values that sort as equal.
         body.push(
