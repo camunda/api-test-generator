@@ -721,8 +721,10 @@ function renderScenarioTest(
     if (step.searchChecks && isFinal && !isErrorScenario) {
       const { limit, order, offset } = step.searchChecks;
       const reqBody = `body${idx + 1}`;
-      const ascending = (dir: 'ASC' | 'DESC') =>
-        `[...values].sort()${dir === 'DESC' ? '.reverse()' : ''}`;
+      // Timestamps are compared by instant, not lexically: servers trim trailing zeros from the
+      // fraction, so "…:00.25908Z" is earlier than "…:00.259081Z" but sorts after it as text.
+      const ascending = (dir: 'ASC' | 'DESC', list: string) =>
+        `[...${list}].sort(byInstant)${dir === 'DESC' ? '.reverse()' : ''}`;
       body.push(`    {`);
       body.push(`      const page = await ${varName}.json();`);
       body.push(`      expect(Array.isArray(page.items)).toBe(true);`);
@@ -731,12 +733,18 @@ function renderScenarioTest(
         const field = JSON.stringify(order.field);
         const read = `(r: { items: Record<string, unknown>[] }) => r.items.map((i) => i[${field}])`;
         body.push(`      const read = ${read};`);
+        body.push(
+          `      const sortKey = (v: unknown) => String(v).replace(/(\\.\\d+)?(Z|[+-]\\d\\d:?\\d\\d)$/, (_m, f: string | undefined, z: string) => (f ?? '.').padEnd(10, '0') + z);`,
+        );
+        body.push(
+          `      const byInstant = (a: unknown, b: unknown) => (sortKey(a) < sortKey(b) ? -1 : sortKey(a) > sortKey(b) ? 1 : 0);`,
+        );
         body.push(`      const values = read(page);`);
         // A missing or misspelled field would give undefined values that sort as equal.
         body.push(
           `      expect(values.every((v) => typeof v === 'string' && v !== '')).toBe(true);`,
         );
-        body.push(`      expect(values).toEqual(${ascending(order.direction)});`);
+        body.push(`      expect(values).toEqual(${ascending(order.direction, 'values')});`);
         if (offset) {
           const from = offset.from;
           // Other specs create, delete and restore entities while this one runs, so two queries
@@ -774,7 +782,7 @@ function renderScenarioTest(
             `      expect(reversedValues.every((v) => typeof v === 'string' && v !== '')).toBe(true);`,
           );
           body.push(
-            `      expect(reversedValues).toEqual([...reversedValues].sort()${opposite === 'DESC' ? '.reverse()' : ''});`,
+            `      expect(reversedValues).toEqual(${ascending(opposite, 'reversedValues')});`,
           );
         }
       }
