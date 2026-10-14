@@ -21,4 +21,11 @@ describe('the spec-bump "check failed" post', () => {
   it('pings hub-medic for the Hub config only', () => {
     expect(post).toMatch(/matrix\.private && ' · :rotating_light: .*hub-medic/);
   });
+
+  it('links the Hub cookbook for the Hub config only', () => {
+    expect(post).toContain(
+      "matrix.private && format(' · <{0}/{1}/blob/main/docs/hub-nightly-cookbook.md|📖 Cookbook>'",
+    );
+    expect(post).not.toContain('|Open the run> · <{1}/{2}/blob/main/docs/hub-nightly-cookbook.md');
+  });
 });
