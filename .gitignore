@@ -6,8 +6,12 @@ external-spec/
 test-results/
 *.tsbuildinfo
 .claw/
-
 # Runtime state written by request-validation/templates/support/global-setup.ts
 # (RUNTIME_KEY_CLEANUP_STATE_FILE) — a generated-suite runtime artifact, never
 # meant to land in the template source tree itself.
 runtime-key-fixtures-cleanup.json
+
+materializer/src/csharp-sdk/project-templates/obj/
+materializer/src/csharp-sdk/project-templates/bin/
+csharp-sdk/**/obj/
+csharp-sdk/**/bin/
