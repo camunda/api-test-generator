@@ -53,7 +53,7 @@ export interface Digest {
 const COOKBOOK_URL =
   'https://github.com/camunda/api-test-generator/blob/main/docs/hub-pr-check-cookbook.md';
 
-export function buildDigest(items: Item[], now: Date): Digest {
+export function buildDigest(items: Item[], now: Date, runUrl = ''): Digest {
   const overdue = items
     .filter((i) => i.hubState === 'merged')
     .sort((a, b) => Date.parse(a.mergedAt) - Date.parse(b.mergedAt));
@@ -75,9 +75,11 @@ export function buildDigest(items: Item[], now: Date): Digest {
   }
   if (waiting > 0)
     lines.push(`_${waiting} more tracked for camunda-hub PRs that have not merged yet._`);
-  lines.push(
+  const links = [
+    ...(runUrl ? [`<${runUrl}|📊 View run>`] : []),
     `<${COOKBOOK_URL}#keeping-track-of-pending-generator-fixes|📖 What to do about these>`,
-  );
+  ];
+  lines.push(links.join(' · '));
   return { text: lines.join('\n'), overdue, toClose, waiting };
 }
 
@@ -244,6 +246,8 @@ export interface DigestDeps {
   log: (line: string) => void;
   error: (line: string) => void;
   now: Date;
+  /** This workflow run's URL, linked at the end of the message. Empty when not running in Actions. */
+  runUrl?: string;
 }
 
 /** Reads the tracked issues, closes the ones whose PR was closed unmerged, posts the overdue digest,
@@ -259,7 +263,7 @@ export async function runDigest(deps: DigestDeps): Promise<void> {
   const { items, failed } = await resolveItems(issues, deps.lookupPr);
   problems.push(...failed);
 
-  const digest = buildDigest(items, deps.now);
+  const digest = buildDigest(items, deps.now, deps.runUrl);
 
   for (const i of digest.toClose) {
     deps.log(`camunda-hub#${i.hubPr} closed without merging: closing #${i.number}`);
@@ -284,6 +288,13 @@ export async function runDigest(deps: DigestDeps): Promise<void> {
     for (const p of problems) deps.error(`::error title=Digest incomplete::${p}`);
     throw new Error(`Digest incomplete: ${problems.length} problem(s), see the errors above`);
   }
+}
+
+function runUrl(): string {
+  const server = env('GITHUB_SERVER_URL');
+  const repo = env('GITHUB_REPOSITORY');
+  const id = env('GITHUB_RUN_ID');
+  return server && repo && id ? `${server}/${repo}/actions/runs/${id}` : '';
 }
 
 async function main(): Promise<void> {
@@ -314,6 +325,7 @@ async function main(): Promise<void> {
     log: (line) => console.log(line),
     error: (line) => console.error(line),
     now: new Date(),
+    runUrl: runUrl(),
   });
 }
 

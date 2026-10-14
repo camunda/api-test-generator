@@ -268,3 +268,18 @@ describe('collectRuns', () => {
     await expect(collectRuns(async (page) => full(page))).rejects.toThrow('were not read');
   });
 });
+
+describe('buildAlert run link', () => {
+  const problems = [{ what: 'the nightly', why: 'did not start', url: '' }];
+  it('links this check run before the cookbook and pings hub-medic last', () => {
+    const run = 'https://github.com/camunda/api-test-generator/actions/runs/7';
+    const lines = buildAlert(problems, run).split('\n');
+    expect(lines.at(-1)).toMatch(
+      /^<https:\/\/github\.com\/camunda\/api-test-generator\/actions\/runs\/7\|📊 View check run> · <.+\|📖 What to check> <!subteam\^S014VK4482H\|hub-medic>$/,
+    );
+  });
+
+  it('omits the link when there is no run URL', () => {
+    expect(buildAlert(problems)).not.toContain('View check run');
+  });
+});
