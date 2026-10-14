@@ -195,6 +195,37 @@ describe('mixed path, query and header params: every other param is present and 
   }
 });
 
+describe('an enum-constrained date sibling keeps its enum member', () => {
+  // The ordered date values are synthesized, so they must not replace a value the schema restricts
+  // to an enum. The plain date next to it still gets an ordered value.
+  const withDates: OperationModel = {
+    operationId: 'listWindows',
+    method: 'GET',
+    path: '/windows',
+    tags: [],
+    parameters: [
+      param('from', true, { type: 'string', format: 'date-time' }),
+      param('snapshot', false, {
+        type: 'string',
+        format: 'date-time',
+        enum: ['2030-01-01T00:00:00Z'],
+      }),
+      param('limit', false, { type: 'integer' }),
+    ],
+  };
+
+  it('sends an allowed member for the enum date and an ordered value for the plain one', () => {
+    const scenarios = generateParamTypeMismatch([withDates], {}).filter(
+      (s) => s.target === 'query.limit',
+    );
+    expect(scenarios.length).toBeGreaterThan(0);
+    for (const s of scenarios) {
+      expect(s.params?.snapshot).toBe('2030-01-01T00:00:00Z');
+      expect(s.params?.from).toBe('2025-01-01T00:00:00Z');
+    }
+  });
+});
+
 describe('param-enum-violation: the other params are valid too', () => {
   // A required date-time next to an enum target. Without the baseline the request omits `startTime`
   // and the server answers 400 for the missing parameter, not for the enum.

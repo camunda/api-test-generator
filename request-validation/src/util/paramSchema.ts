@@ -119,7 +119,11 @@ const BASE_DATE_MS = Date.UTC(2025, 0, 1);
 export function orderedDateValues(params: ParameterModel[]): Map<string, string> {
   const dates: { name: string; format: string; end: boolean }[] = [];
   for (const p of params) {
-    const f = resolveParamSchema(p)?.format;
+    const r = resolveParamSchema(p);
+    // A date restricted to an enum keeps its allowed member (findValidValue picks it), so it is
+    // left out of the synthesized ordering.
+    if (r?.enumValues?.length) continue;
+    const f = r?.format;
     if (f === 'date-time' || f === 'date')
       dates.push({ name: p.name, format: f, end: END_NAME.test(p.name) });
   }
