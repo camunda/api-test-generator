@@ -8,9 +8,9 @@
 ## Start here
 
 **What is this channel?** Every night the generated Hub API tests run against the latest Hub image (`camunda/hub:SNAPSHOT`).
-A set of automatic jobs then post what they found. Most nights the posts are green and need nothing from you.
+A set of automatic jobs then post what they found.
 
-**A normal night has 0 failed tests.** Known Hub bugs do not count as failures: their tests are either skipped or run
+**A normal night has 0 failed tests, and the posts are green and need nothing from you.** Known Hub bugs do not count as failures: their tests are either skipped or run
 without the one assertion Hub cannot meet yet. So any number above 0 is news.
 
 **Who acts.** The Hub team acts on everything in this channel; who is pinged for what is in "Who owns what" in
@@ -117,10 +117,6 @@ or
 > 🎫 known issue: 1  📝 filed: 1
 > 🚫 **Coverage gap:** 2 operation(s) with no generated test — 1 fix PR(s) opened.
 
-The categories are 📦 product (Hub is wrong), 🧪 test-generation (our generated test is wrong or missing, not a Hub
-bug), 🔧 infrastructure (the run itself broke), 🎲 flakiness (passes sometimes), 🎫 known issue (already tracked) and
-📝 filed (a new Hub issue was opened tonight).
-
 The **thread** under the digest has one line per failure: the category icon, the operation, and a link. What each icon
 and link means, and what to do, is in the table under "What to do with a failure" above. Fix PRs and suppress PRs from the agent carry the
 labels `nightly-api-fix`, `auto-generated` and `hub`.
@@ -171,10 +167,12 @@ Skipped tests point to a Hub bug. This job watches those bugs. When one closes, 
 | 📋 … is closed as **fixed**, no specific operation(s) to auto-unskip | A suite-wide skip whose Hub bug is fixed. Nothing can be done automatically | **No** | Remove its entry from `knownIssues` in `configs/camunda-hub/request-validation.json`, and remove whatever skip the entry describes (a suite-wide entry has no single operation to look up): in `positive-suppress.json` (key `suppress`) or `request-validation.json` (key `excludeOperations`). Then run the suite on your branch (see "Run it by hand") |
 | 📋 … is closed as **not planned** | Hub will not fix it, so the skip must stay | **No** | Set `"acknowledgedNotPlanned": true` on its `knownIssues` entry in `configs/camunda-hub/request-validation.json`. The alert then stops. Until you do, it repeats every day |
 
-**Not watched:** the "partly checked" items in the negative thread (`knownProblemDetailShapeGaps` in
-`request-validation.json`) are not covered by this check, so nothing tells you when their Hub issue closes. Look at the
-issue's close reason first. **Closed as fixed:** remove the entry by hand. **Closed as not planned:** keep the entry, since
-Hub still does not meet that assertion and removing it would make the nightly fail.
+- **Not watched:** the "partly checked" items in the negative thread (`knownProblemDetailShapeGaps` in
+  `request-validation.json`) are not covered by this check, so nothing tells you when their Hub issue closes. Look at the
+  issue's close reason first.
+- **Closed as fixed:** remove the entry by hand.
+- **Closed as not planned:** keep the entry, since Hub still does not meet that assertion and removing it would make the
+  nightly fail.
 
 ## The weekly coverage report (Monday 05:00)
 

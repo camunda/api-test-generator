@@ -2,7 +2,7 @@
 
 > **Goal:** find out what is behind a red `api-test-generator/hub-suite` check on your camunda-hub PR, or a Slack alert
 > that names your PR. The check is **informational, not required**: a red result does not block merging. Terms
-> (generator gap, classifier, fingerprint) are in "Words used" in [how-it-works.md](how-it-works.md#words-used).
+> (generator gap, classifier) are in "Words used" in [how-it-works.md](how-it-works.md#words-used).
 
 **Looking for something else?** This guide is only about the check on a single camunda-hub PR. For the nightly run, the spec-bump and re-enable alerts and the weekly report, see [how-it-works.md](how-it-works.md).
 
@@ -45,7 +45,7 @@ nightly triage agent when the fix is small and safe.
 
 | The alert says | Whose problem | What to do |
 |---|---|---|
-| "infrastructure failure" | Not yours, not Hub's. The run itself had a problem | Open the failed step in the run and read the error first. Find the outside cause (registry login, image pull, runner) and get it fixed or confirmed fixed; then re-run to check (see "Re-run without a new push" below). Do not re-run to hope it passes. If you cannot name a cause, ask in `#ask-qa` (tag `@test-automation-medic`) with the run link |
+| "infrastructure failure" | The run itself had a problem | Open the failed step in the run and read the error first. Find the outside cause (registry login, image pull, runner) and get it fixed or confirmed fixed; then re-run to check (see "Re-run without a new push" below). Do not re-run to hope it passes. If you cannot name a cause, ask in `#ask-qa` (tag `@test-automation-medic`) with the run link |
 | "looks flaky" | A real defect that comes and goes, not something to retry until green: a race or bad wait in a test, or a race or missed signal in Hub | Do not just re-run. Open the failing test in the run's report and look at the passed and failed attempts. If it is a Hub race, it is yours; if the test is at fault, ask in `#ask-qa` (tag `@test-automation-medic`) |
 | "Hub PR image did not start" | Possibly yours: Hub did not become ready | Open the run, find the step "Wait for Hub to be ready", read the startup error |
 | "api-test-generator not yet handling a new/changed endpoint" | The generator's, not a Hub bug | **You act first.** When your spec change caused it, an issue `Generator gap on camunda-hub#N` is opened, and assigned to you if GitHub allows it. `hub-medic` is the backup. Ask in `#ask-qa` (tag `@test-automation-medic`) for help |
@@ -80,8 +80,9 @@ Instead:
   [hub-nightly-cookbook.md](hub-nightly-cookbook.md)) with:
   - **Use workflow from**: your generator branch;
   - `hub_ref`: your Hub PR's branch (a camunda-hub branch);
-  - the Hub image: by default the latest published `main`, which has no new endpoint yet, so tests for it get 404. The run
-    shows that generation and the invariants work, not that the endpoint behaves as expected.
+  - the Hub image: by default the latest published `main`, which has no new endpoint yet, so tests for it get 404.
+
+  The run shows that generation and the invariants work, not that the endpoint behaves as expected.
 
   A PR to this repo also gets
   [hub-pr-live-check](https://github.com/camunda/api-test-generator/actions/workflows/hub-pr-live-check.yml)
@@ -179,11 +180,11 @@ Do not call `npx playwright` directly: it skips the `POS_FIXTURE_*` settings tha
 
 ## Things that look wrong but are not
 
-- *Green despite a coverage gap:* intentional. A missing test is not a failing test, and the fix is in the generator, not
+- **Green despite a coverage gap:** intentional. A missing test is not a failing test, and the fix is in the generator, not
   your Hub PR. The gap stays visible in the status description, the `Coverage gap` issue and Slack (yellow). The repo-wide
   view is the weekly report: [hub-response-coverage-report.md](hub-response-coverage-report.md).
-- *Slack edited instead of a new message:* the PR failed the same way again (same failing tests), so its message was updated and nobody was pinged again. A new message is posted only when the failure changes.
-- *The classifier said `unknown`:* it is told to prefer that over guessing `product`, because
+- **Slack edited instead of a new message:** the PR failed the same way again (same failing tests), so its message was updated and nobody was pinged again. A new message is posted only when the failure changes.
+- **The classifier said `unknown`:** it is told to prefer that over guessing `product`, because
   `product` at high confidence pages hub-medic.
 
 ## Keeping track of pending generator fixes

@@ -39,7 +39,7 @@ Four more posts show up only when needed:
 |---|---|
 | Red PR check, alert says "likely a real regression" | It is probably your change. Read what the alert points to |
 | Red PR check, alert says "api-test-generator not yet handling a new/changed endpoint" | Not a Hub bug, but you act first: open the generator PR (see the PR check guide). Stuck? Ask in `#ask-qa` (tag `@test-automation-medic`) |
-| Red PR check, alert says "infrastructure failure" | Not yours. Open the failed step and find the outside cause. Stuck? Ask in `#ask-qa` (tag `@test-automation-medic`) with the run link |
+| Red PR check, alert says "infrastructure failure" | Open the failed step and find the outside cause. Stuck? Ask in `#ask-qa` (tag `@test-automation-medic`) with the run link |
 | Nightly post shows failures | Open the triage thread: one line per failure says whose it is |
 | No nightly post in the morning (a 04:30 UTC alert usually says so) | The run or the posting broke, not Hub. See ["When a post is missing"](hub-nightly-cookbook.md#when-a-post-is-missing) in the nightly guide |
 | Spec-bump alert | Hub's API changed. Usually the bot has already opened a PR that updates the pinned spec: review it and merge it. If the alert says it is blocked or the check failed, it links a tracking issue or the run instead (see [the nightly guide](hub-nightly-cookbook.md#the-spec-bump-alert-0300)) |
@@ -88,6 +88,5 @@ channels each morning: PR-check alerts and the gap digest are in `#camunda-hub-p
 - **Classifier:** the automated step that reads a failed PR check and picks a verdict. It is an AI agent and can be wrong; it is told to answer "unknown" rather than guess.
 - **Ontology:** the config files in `configs/camunda-hub/ontology/` that tell the generator how each resource is created, read, deleted and linked.
 - **Live check:** running the generated suite against a real Hub. `hub-pr-live-check` does it on PRs to this repo and `hub-ondemand-test` does it by hand.
-- **Fingerprint:** the failing tests plus the endpoints with no test. The same fingerprint edits one Slack message instead of posting a new one.
 
 Want to change how the generator works? See the [README](../README.md) and [AGENTS.md](../AGENTS.md).
