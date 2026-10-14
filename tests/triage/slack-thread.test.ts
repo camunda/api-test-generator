@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   ChannelUnresolved,
   dailyMarker,
+  describeError,
   findDailyParent,
   findIn,
   findReply,
@@ -315,5 +316,29 @@ describe('seen counter', () => {
     const first = await upsert(api, { ...base, marker, text: 'ids: `seen:2`' });
     const second = await upsert(api, { ...base, marker, text: 'ids: `seen:2`' });
     expect([first.seen, second.seen]).toEqual([1, 2]);
+  });
+});
+
+describe('describeError', () => {
+  it('names the missing scope and what the token has', () => {
+    expect(
+      describeError({
+        ok: false,
+        error: 'missing_scope',
+        needed: 'channels:read',
+        provided: 'chat:write',
+      }),
+    ).toBe('missing_scope (add the scope: channels:read; the token has: chat:write)');
+  });
+
+  it('names the scope even when Slack does not say what the token has', () => {
+    expect(describeError({ ok: false, error: 'missing_scope', needed: 'channels:read' })).toBe(
+      'missing_scope (add the scope: channels:read)',
+    );
+  });
+
+  it('leaves other errors as they were', () => {
+    expect(describeError({ ok: false, error: 'channel_not_found' })).toBe('channel_not_found');
+    expect(describeError({ ok: false, error: 'missing_scope' })).toBe('missing_scope');
   });
 });
