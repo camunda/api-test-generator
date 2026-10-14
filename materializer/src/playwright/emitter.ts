@@ -721,8 +721,10 @@ function renderScenarioTest(
     if (step.searchChecks && isFinal && !isErrorScenario) {
       const { limit, order, offset } = step.searchChecks;
       const reqBody = `body${idx + 1}`;
-      const ascending = (dir: 'ASC' | 'DESC') =>
-        `[...values].sort()${dir === 'DESC' ? '.reverse()' : ''}`;
+      // Timestamps are compared by instant, not lexically: servers trim trailing zeros from the
+      // fraction, so "…:00.25908Z" is earlier than "…:00.259081Z" but sorts after it as text.
+      const ascending = (dir: 'ASC' | 'DESC', list: string) =>
+        `[...${list}].sort(byInstant)${dir === 'DESC' ? '.reverse()' : ''}`;
       body.push(`    {`);
       body.push(`      const page = await ${varName}.json();`);
       body.push(`      expect(Array.isArray(page.items)).toBe(true);`);
@@ -731,12 +733,37 @@ function renderScenarioTest(
         const field = JSON.stringify(order.field);
         const read = `(r: { items: Record<string, unknown>[] }) => r.items.map((i) => i[${field}])`;
         body.push(`      const read = ${read};`);
+        // Timestamps compare by UTC epoch seconds, then by the fraction at a fixed width, so offsets,
+        // fraction lengths and dates before 1970 do not change the order. A value that is not a
+        // timestamp keeps its text.
+        for (const line of [
+          `      const parseInstant = (v: unknown): { secs: number; frac: string } | null => {`,
+          `        const m = /^(.*T\\d\\d:\\d\\d:\\d\\d)(\\.\\d+)?(Z|[+-]\\d\\d:?\\d\\d)$/.exec(String(v));`,
+          `        if (!m) return null;`,
+          `        const offset = (m[3] ?? '').replace(/^([+-]\\d\\d)(\\d\\d)$/, '$1:$2');`,
+          `        const secs = Date.parse(\`\${m[1] ?? ''}\${offset}\`);`,
+          `        return Number.isNaN(secs) ? null : { secs, frac: (m[2] ?? '.').padEnd(10, '0') };`,
+          `      };`,
+          `      const byInstant = (a: unknown, b: unknown) => {`,
+          `        const x = parseInstant(a);`,
+          `        const y = parseInstant(b);`,
+          `        if (x && y) {`,
+          `          if (x.secs !== y.secs) return x.secs < y.secs ? -1 : 1;`,
+          `          return x.frac < y.frac ? -1 : x.frac > y.frac ? 1 : 0;`,
+          `        }`,
+          `        const p = String(a);`,
+          `        const q = String(b);`,
+          `        return p < q ? -1 : p > q ? 1 : 0;`,
+          `      };`,
+        ]) {
+          body.push(line);
+        }
         body.push(`      const values = read(page);`);
         // A missing or misspelled field would give undefined values that sort as equal.
         body.push(
           `      expect(values.every((v) => typeof v === 'string' && v !== '')).toBe(true);`,
         );
-        body.push(`      expect(values).toEqual(${ascending(order.direction)});`);
+        body.push(`      expect(values).toEqual(${ascending(order.direction, 'values')});`);
         if (offset) {
           const from = offset.from;
           // Other specs create, delete and restore entities while this one runs, so two queries
@@ -774,7 +801,7 @@ function renderScenarioTest(
             `      expect(reversedValues.every((v) => typeof v === 'string' && v !== '')).toBe(true);`,
           );
           body.push(
-            `      expect(reversedValues).toEqual([...reversedValues].sort()${opposite === 'DESC' ? '.reverse()' : ''});`,
+            `      expect(reversedValues).toEqual(${ascending(opposite, 'reversedValues')});`,
           );
         }
       }

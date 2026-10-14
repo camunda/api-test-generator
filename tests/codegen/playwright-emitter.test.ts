@@ -1,3 +1,4 @@
+import ts from 'typescript';
 import { describe, expect, test } from 'vitest';
 import {
   PlaywrightEmitter,
@@ -1409,6 +1410,92 @@ describe('echo checks (optional-field variants)', () => {
 
   test('a literal value emits no stored-variable guard', () => {
     expect(render({ description: 'd' })).not.toContain('was never stored');
+  });
+});
+
+describe('search order checks compare timestamps by instant', () => {
+  const render = (direction: 'ASC' | 'DESC'): string =>
+    renderPlaywrightSuite(
+      {
+        endpoint: { operationId: 'searchThings', method: 'POST', path: '/things/search' },
+        requiredSemanticTypes: [],
+        optionalSemanticTypes: [],
+        scenarios: [
+          {
+            id: 'sc1',
+            name: 'page and sort',
+            operations: [{ operationId: 'searchThings', method: 'POST', path: '/things/search' }],
+            producedSemanticTypes: [],
+            satisfiedSemanticTypes: [],
+            requestPlan: [
+              {
+                operationId: 'searchThings',
+                method: 'POST',
+                pathTemplate: '/things/search',
+                expect: { status: 200 },
+                searchChecks: { limit: 2, order: { field: 'created', direction } },
+              },
+            ],
+          },
+        ],
+      },
+      { suiteName: 'searchThings', mode: 'variant', recordResponses: false },
+    );
+
+  // Runs the comparator exactly as the generated test carries it.
+  const loadComparator = (src: string): ((a: unknown, b: unknown) => number) => {
+    const start = src.indexOf('const parseInstant');
+    const end = src.indexOf('const values = read(page);');
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    const js = ts.transpileModule(`${src.slice(start, end)}\nreturn byInstant;`, {
+      compilerOptions: { target: ts.ScriptTarget.ES2022 },
+      reportDiagnostics: false,
+    }).outputText;
+    return new Function(js.replace(/^"use strict";\s*/, ''))();
+  };
+
+  test('orders a longer fraction after a shorter one that is earlier in time', () => {
+    const byInstant = loadComparator(render('DESC'));
+    const values = ['2026-10-14T08:00:00.25908Z', '2026-10-14T08:00:00.259081Z'];
+    expect([...values].sort(byInstant)).toEqual(values);
+    expect([...values].sort(byInstant).reverse()).toEqual([values[1], values[0]]);
+  });
+
+  test('orders a whole-second timestamp before its fractions', () => {
+    const byInstant = loadComparator(render('ASC'));
+    const sorted = ['2026-10-14T08:00:00.5Z', '2026-10-14T08:00:00Z'].sort(byInstant);
+    expect(sorted).toEqual(['2026-10-14T08:00:00Z', '2026-10-14T08:00:00.5Z']);
+  });
+
+  test('compares by instant when the offsets differ', () => {
+    const byInstant = loadComparator(render('ASC'));
+    const earlier = '2024-01-01T00:00:00+01:00';
+    const later = '2023-12-31T23:30:00Z';
+    expect([later, earlier].sort(byInstant)).toEqual([earlier, later]);
+    expect(byInstant('2024-01-01T00:00:00+0100', earlier)).toBe(0);
+  });
+
+  test('orders timestamps before 1970 by instant', () => {
+    const byInstant = loadComparator(render('ASC'));
+    const values = ['1969-12-31T23:59:58Z', '1969-12-31T23:59:59Z', '1970-01-01T00:00:00Z'];
+    expect([values[2], values[1], values[0]].sort(byInstant)).toEqual(values);
+    expect(['1969-12-31T23:59:59.5Z', '1969-12-31T23:59:59Z'].sort(byInstant)).toEqual([
+      '1969-12-31T23:59:59Z',
+      '1969-12-31T23:59:59.5Z',
+    ]);
+  });
+
+  test('keeps the lexical order for values that are not timestamps', () => {
+    const byInstant = loadComparator(render('ASC'));
+    expect(['b', 'a', 'c'].sort(byInstant)).toEqual(['a', 'b', 'c']);
+  });
+
+  test('the main and the opposite-sort assertions both use the comparator', () => {
+    const src = render('DESC');
+    expect(src).toContain('expect(values).toEqual([...values].sort(byInstant).reverse())');
+    expect(src).toContain('expect(reversedValues).toEqual([...reversedValues].sort(byInstant))');
+    expect(src).not.toMatch(/\.sort\(\)/);
   });
 });
 
