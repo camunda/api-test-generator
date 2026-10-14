@@ -54,15 +54,20 @@ function skip(reason: string): GateResult {
 }
 
 // An operation is "covered" when its id appears in an open fix PR's diff as a whole identifier (not a
-// substring, so getWorkspace does not match getWorkspaceEnvironments).
+// substring, so getWorkspace matches neither getWorkspaceEnvironments nor getWorkspace-v2). The
+// boundary class includes the "." and "-" the classifier permits in an operationId
+// (hub-pr-check.yml sanitizes to [A-Za-z0-9_.-]), so those count as part of the identifier, not as a
+// delimiter that would let a prefix match.
 function coveredByOpenPr(op: string, openFixPrs: OpenFixPr[]): boolean {
   const escaped = op.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const whole = new RegExp(`(^|[^A-Za-z0-9_])${escaped}([^A-Za-z0-9_]|$)`);
+  const whole = new RegExp(`(^|[^A-Za-z0-9_.-])${escaped}([^A-Za-z0-9_.-]|$)`);
   return openFixPrs.some((p) => typeof p.diff === 'string' && whole.test(p.diff));
 }
 
 export function gate(verdict: Verdict, openFixPrs: OpenFixPr[] = []): GateResult {
-  if (verdict.observed === false) {
+  // Fail closed: `observed` is the proof an attributable failure was found, so only a literal true
+  // passes — a missing or malformed value must not reach the privileged autofix path.
+  if (verdict.observed !== true) {
     return skip('no test evidence was observed, so the failure cannot be attributed to a fix');
   }
   if (verdict.category !== FIXABLE_CATEGORY) {
@@ -92,7 +97,7 @@ export function gate(verdict: Verdict, openFixPrs: OpenFixPr[] = []): GateResult
 
 // Reads a verdict and the open-fix-PR list from disk and prints the gate decision as JSON, so the
 // workflow can read `dispatch` and `operationIds` from it.
-function parseVerdict(raw: string): Verdict {
+export function parseVerdict(raw: string): Verdict {
   // biome-ignore lint/plugin: runtime contract boundary for parsed JSON (the artifact)
   const v = JSON.parse(raw) as Partial<Verdict> & { affected_operation_ids?: unknown };
   const idsSource = Array.isArray(v.affectedOperationIds)
@@ -104,7 +109,9 @@ function parseVerdict(raw: string): Verdict {
     category: typeof v.category === 'string' ? v.category : 'unknown',
     confidence: typeof v.confidence === 'string' ? v.confidence : 'low',
     affectedOperationIds: idsSource.filter((o): o is string => typeof o === 'string'),
-    observed: v.observed !== false,
+    // Fail closed: anything but the literal boolean true (missing, null, the string "false", ...)
+    // is treated as "no evidence observed", so an incomplete artifact never passes the evidence gate.
+    observed: v.observed === true,
   };
 }
 
@@ -114,17 +121,28 @@ function isOpenFixPr(p: unknown): p is OpenFixPr {
 
 function main(): void {
   const [verdictPath, prsPath] = process.argv.slice(2);
-  if (!verdictPath) {
-    console.error('usage: hub-pr-autofix-gate.ts <verdict.json> [open-fix-prs.json]');
+  // The open fix-PR list is required: without it duplicate suppression cannot run, and a silent []
+  // would let a duplicate autofix through. The workflow always passes it.
+  if (!verdictPath || !prsPath) {
+    console.error('usage: hub-pr-autofix-gate.ts <verdict.json> <open-fix-prs.json>');
     process.exit(2);
   }
   const verdict = parseVerdict(readFileSync(verdictPath, 'utf8'));
-  let openFixPrs: OpenFixPr[] = [];
-  if (prsPath) {
+  // Fail closed: if the list cannot be read as an array we cannot prove an operation is not already
+  // being fixed, so refuse to dispatch rather than risk a duplicate autofix PR — the same posture
+  // .github/scripts/hub-open-fix-prs.sh takes when it cannot produce the list.
+  let openFixPrs: OpenFixPr[];
+  try {
     const parsed: unknown = JSON.parse(readFileSync(prsPath, 'utf8'));
-    if (Array.isArray(parsed)) {
-      openFixPrs = parsed.filter(isOpenFixPr);
+    if (!Array.isArray(parsed)) {
+      throw new Error('the open fix PR list is not an array');
     }
+    openFixPrs = parsed.filter(isOpenFixPr);
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : 'unknown error';
+    const reason = `could not read the open fix PR list (${detail}); refusing to dispatch`;
+    process.stdout.write(`${JSON.stringify({ dispatch: false, operationIds: [], reason })}\n`);
+    return;
   }
   process.stdout.write(`${JSON.stringify(gate(verdict, openFixPrs))}\n`);
 }
