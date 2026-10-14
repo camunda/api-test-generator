@@ -26,6 +26,10 @@ export interface SlackMessage {
 interface SlackResponse {
   ok?: boolean;
   error?: string;
+  // Slack fills these on a `missing_scope` error: the one scope the call needs, and what the
+  // token holds. Slack names only the first missing scope, so a fix may need several rounds.
+  needed?: string;
+  provided?: string;
   ts?: string;
   messages?: SlackMessage[];
   channels?: { id?: string; name?: string }[];
@@ -57,8 +61,16 @@ export function findIn(messages: SlackMessage[], marker: string): string {
   return hits.at(-1)?.ts ?? '';
 }
 
+// The error code, plus which scope is missing when Slack says so, so a log line is enough to fix
+// the bot without reading the app settings first.
+export function describeError(resp: SlackResponse): string {
+  if (resp.error !== 'missing_scope' || !resp.needed) return String(resp.error);
+  const has = resp.provided ? `; the token has: ${resp.provided}` : '';
+  return `missing_scope (add the scope: ${resp.needed}${has})`;
+}
+
 function must(resp: SlackResponse, what: string): SlackResponse {
-  if (!resp.ok) throw new Error(`${what}: ${resp.error}`);
+  if (!resp.ok) throw new Error(`${what}: ${describeError(resp)}`);
   return resp;
 }
 
@@ -79,7 +91,7 @@ export async function resolveChannel(api: SlackApi, channel: string): Promise<st
     };
     if (cursor) params.cursor = cursor;
     const resp = await api.get('conversations.list', params);
-    if (!resp.ok) throw new ChannelUnresolved(`conversations.list: ${resp.error}`);
+    if (!resp.ok) throw new ChannelUnresolved(`conversations.list: ${describeError(resp)}`);
     const hit = resp.channels?.find((c) => c.name === name);
     if (hit?.id) return hit.id;
     cursor = resp.response_metadata?.next_cursor ?? '';
@@ -274,7 +286,7 @@ async function main(): Promise<void> {
       text,
       unfurl_links: false,
     });
-    if (!resp.ok) console.error(`::warning::Slack post failed: ${resp.error}`);
+    if (!resp.ok) console.error(`::warning::Slack post failed: ${describeError(resp)}`);
   }
 }
 

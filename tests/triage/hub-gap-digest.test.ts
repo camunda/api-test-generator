@@ -39,6 +39,13 @@ describe('parseHubPr', () => {
 });
 
 describe('buildDigest', () => {
+  it('links this workflow run next to the cookbook, when it has one', () => {
+    const run = 'https://github.com/camunda/api-test-generator/actions/runs/42';
+    const withRun = buildDigest([item({})], now, run).text;
+    expect(withRun).toContain(`<${run}|📊 View run> · <`);
+    expect(buildDigest([item({})], now).text).not.toContain('View run');
+  });
+
   it('stays silent when no tracked PR has merged', () => {
     expect(buildDigest([item({ hubState: 'open' })], now).text).toBe('');
     expect(buildDigest([], now).text).toBe('');

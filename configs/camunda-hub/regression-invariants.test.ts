@@ -770,7 +770,7 @@ describeForThisConfig('camunda-hub bundled-spec invariants (#128)', () => {
       const offsetOrder = entry.checkOrder === true ? 'ASC' : String(sort.order);
       expect(offsetTest, `${id}: offset sort not sent`).toContain(`order: '${offsetOrder}'`);
       if (entry.checkOrder === true) {
-        expect(test, `${id}: order not asserted`).toContain('[...values].sort()');
+        expect(test, `${id}: order not asserted`).toContain('[...values].sort(byInstant)');
         expect(test, `${id}: opposite order not compared`).toContain('reversedValues');
         expect(test, `${id}: opposite values not validated`).toContain(
           "reversedValues.every((v) => typeof v === 'string' && v !== '')",
