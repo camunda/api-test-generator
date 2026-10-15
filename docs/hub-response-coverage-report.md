@@ -165,6 +165,11 @@ the agent finds nothing to do but set gaps aside is reported (a dedicated agent-
 a fully-deferred week is not silent. Nothing is posted for a dry run, or for a run that opened no pull request and skipped,
 left and attempted nothing.
 
+Both the Slack reply and the issue comment open with a short note that the counts cover **only what the agent auto-fixes**
+(resources with no create-read-delete test, and config-only 403/404 gaps) — the full backlog is in the weekly report and the
+per-area issues. So "1 gap left for a person" is the agent's own scope, not the total number of gaps. The Slack reply's
+**Details** link points at that run's own comment on the tracking issue (not just the issue top), so it lands on the full record.
+
 **How it runs.** Two ways.
 
 - **By hand:** start the workflow [`hub-coverage-fix.yml`](../.github/workflows/hub-coverage-fix.yml) from the Actions tab.

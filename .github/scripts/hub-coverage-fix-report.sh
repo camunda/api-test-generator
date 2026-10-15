@@ -87,6 +87,7 @@ jq -r --arg run "$run_id" --argjson base "$base" --arg runurl "$run_url" --arg i
       + (if ($left | length) > 20 then "\n…and \($left | length - 20) more, see the tracking issue." else "" end)
       + (if ($skipped | length) > 0 then "\n*Not attempted this run:*\n" + ($skipped[:20] | map("• \(.resource | slackcode(40)) (\(.reason | clean(120) | neutral))") | join("\n")) + (if ($skipped | length) > 20 then "\n• …and \($skipped | length - 20) more" else "" end) else "" end)
       + (if $missing then "\n:warning: The agent left no usable result, so only the PRs found on GitHub are listed." else "" end)
+      + "\n> :information_source: Auto-fixes only create-read-delete and config-only 403/404 gaps; the full backlog is in the weekly report and per-area issues."
       + (if $issue != "" then "\nDetails: <\($issue)|tracking issue>" else "" end)) | cap(3000)
     end' "$result" > "$slack_out"
 
@@ -97,6 +98,7 @@ jq -r --arg run "$run_id" --argjson base "$base" --arg runurl "$run_url" --argjs
   | ([ $sel[0].skipped[]? ]) as $skipped
   | if ($opened | length) == 0 and ($left | length) == 0 and ($skipped | length) == 0 and ($missing | not) then empty else
       ("<!-- coverage-fix-run:\($run) -->\n### Coverage-fix agent run [\($run)](\($runurl))\n\n"
+      + "> ℹ️ Auto-fixes only create-read-delete and config-only 403/404 gaps; the full backlog is in the weekly report and per-area issues.\n\n"
       + "\($opened | length) PR\(if ($opened | length) == 1 then "" else "s" end) opened, \($left | length) gap\(if ($left | length) == 1 then "" else "s" end) left for a person\(if ($skipped | length) > 0 then ", \($skipped | length) not attempted" else "" end).\n"
       + (if ($opened | length) > 0 then "\n**Opened**\n\n" + ($opened[:20] | map("- \(.url) — \(.title | code(120))") | join("\n")) + (if ($opened | length) > 20 then "\n- …and \($opened | length - 20) more" else "" end) + "\n" else "" end)
       + (if ($left | length) > 0 then "\n**Not opened**\n\n" + ($left[:20] | map(
