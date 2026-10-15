@@ -8,14 +8,15 @@
 ## Start here
 
 **What is this channel?** Every night the generated Hub API tests run against the latest Hub image (`camunda/hub:SNAPSHOT`).
-A set of automatic jobs then post what they found.
+A set of automatic jobs then post what they found. Most nights the posts are green and need nothing from you.
 
-**A normal night has 0 failed tests, and the posts are green and need nothing from you.** Known Hub bugs do not count as failures: their tests are either skipped or run
+**A normal night has 0 failed tests.** Known Hub bugs do not count as failures: their tests are either skipped or run
 without the one assertion Hub cannot meet yet. So any number above 0 is news.
 
-**Who acts.** The Hub team acts on everything in this channel; who is pinged for what is in "Who owns what" in
-[how-it-works.md](how-it-works.md). The PRs and issues these posts open have no assignee or reviewer, so the person on
-call as `hub-medic` reads the channel each morning and takes them. A PR labelled `nightly-api-fix` (a suppress, fix or unskip PR) is closed after 3 days without activity unless it carries `do-not-close`.
+**Who acts.** The Hub team acts on everything in this channel. The spec-bump alert, the re-enable check, the weekly
+report and the missing-post alert ping `hub-medic`, so the person on call reviews the PR it opened, or decides what to do
+with the post. See "Who gets pinged" in [how-it-works.md](how-it-works.md). A PR labelled `nightly-api-fix` (a suppress,
+fix or unskip PR) is closed after 3 days without activity unless it carries `do-not-close`.
 
 **What you will see, in the order it happens** (all times UTC; examples of each message are in the sections below):
 
@@ -117,13 +118,16 @@ or
 > 🎫 known issue: 1  📝 filed: 1
 > 🚫 **Coverage gap:** 2 operation(s) with no generated test — 1 fix PR(s) opened.
 
+The categories are 📦 product (Hub is wrong), 🧪 test-generation (our generated test is wrong or missing, not a Hub
+bug), 🔧 infrastructure (the run itself broke), 🎲 flakiness (passes sometimes), 🎫 known issue (already tracked) and
+📝 filed (a new Hub issue was opened tonight).
+
 The **thread** under the digest has one line per failure: the category icon, the operation, and a link. What each icon
 and link means, and what to do, is in the table under "What to do with a failure" above. Fix PRs and suppress PRs from the agent carry the
 labels `nightly-api-fix`, `auto-generated` and `hub`.
 
 **Pings.** `hub-medic` is pinged for a newly filed Hub issue, a fix or suppress PR that needs review, and a failure the triage
-could not classify. `test-automation-medic` is pinged only for shared-pipeline faults the Hub team cannot fix (Vault, the Slack bot).
-Which pings have not been switched yet: see "Who owns what" in [how-it-works.md](how-it-works.md).
+could not classify. `test-automation-medic` is not pinged by the digest.
 
 Three warnings replace the normal digest. Treat each as "do not trust a green night":
 
@@ -147,7 +151,7 @@ The last line says what to do:
 - **➡️ Adopt via bump PR #N** (PR opened automatically: **yes**): the new spec is safe, and the bot has already opened the bump PR for you. The generator owner reviews and merges it, which moves the pin. While it stays open, later checks update the same PR; once it is merged, the next change gets a new one.
 - **📋 Blocked — see tracking issue #N** (PR opened automatically: **no**, only an issue): the new spec breaks something, or needs a test the generator does not have. Read
   the issue. The pin does not move until it is fixed.
-- **⚠️ Spec-bump check failed for X** (PR opened automatically: **no**): a step of the job itself failed, so the drift result may be missing. `hub-medic` is pinged. (The same post for the `camunda-oca` config goes to `#c8-orchestration-cluster-e2e-test-results` and pings nobody: it is the test automation team's.) Open the run
+- **⚠️ Spec-bump check failed for X** (PR opened automatically: **no**): a step of the job itself failed, so the drift result may be missing. `hub-medic` is pinged. Open the run
   before trusting that there is no drift.
 
 Nightlies are **not** blocked by a pending bump: they run against Hub's latest spec regardless. The pin only affects the
@@ -155,7 +159,7 @@ invariant tests.
 
 ## The re-enable check (04:00)
 
-Nobody is pinged for this post, and the draft PR it opens has no reviewer. It is only a message in the channel at about 04:00 UTC, and it is silent on most days. Each message ends with an **Open the workflow run** link.
+This post pings `hub-medic`. It appears at about 04:00 UTC and is silent on most days. The draft PR it opens requests a review from the Hub backend team when it is marked ready. Each message ends with an **Open the workflow run** link.
 
 Skipped tests point to a Hub bug. This job watches those bugs. When one closes, it tries to bring the tests back.
 
@@ -167,12 +171,10 @@ Skipped tests point to a Hub bug. This job watches those bugs. When one closes, 
 | 📋 … is closed as **fixed**, no specific operation(s) to auto-unskip | A suite-wide skip whose Hub bug is fixed. Nothing can be done automatically | **No** | Remove its entry from `knownIssues` in `configs/camunda-hub/request-validation.json`, and remove whatever skip the entry describes (a suite-wide entry has no single operation to look up): in `positive-suppress.json` (key `suppress`) or `request-validation.json` (key `excludeOperations`). Then run the suite on your branch (see "Run it by hand") |
 | 📋 … is closed as **not planned** | Hub will not fix it, so the skip must stay | **No** | Set `"acknowledgedNotPlanned": true` on its `knownIssues` entry in `configs/camunda-hub/request-validation.json`. The alert then stops. Until you do, it repeats every day |
 
-- **Not watched:** the "partly checked" items in the negative thread (`knownProblemDetailShapeGaps` in
-  `request-validation.json`) are not covered by this check, so nothing tells you when their Hub issue closes. Look at the
-  issue's close reason first.
-- **Closed as fixed:** remove the entry by hand.
-- **Closed as not planned:** keep the entry, since Hub still does not meet that assertion and removing it would make the
-  nightly fail.
+**Not watched:** the "partly checked" items in the negative thread (`knownProblemDetailShapeGaps` in
+`request-validation.json`) are not covered by this check, so nothing tells you when their Hub issue closes. Look at the
+issue's close reason first. **Closed as fixed:** remove the entry by hand. **Closed as not planned:** keep the entry, since
+Hub still does not meet that assertion and removing it would make the nightly fail.
 
 ## The weekly coverage report (Monday 05:00)
 

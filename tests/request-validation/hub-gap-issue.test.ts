@@ -438,6 +438,38 @@ const baseSummary = (over: Record<string, unknown> = {}) => ({
 });
 
 describe('weekly Slack message', () => {
+  const HUB_MEDIC = '<!subteam^S014VK4482H|hub-medic>';
+
+  it('pings hub-medic when some endpoint is missing a test', () => {
+    expect(slackText(baseSummary({ opsMissingResponseTest: 2 }), null)).toContain(HUB_MEDIC);
+    expect(
+      slackText(baseSummary({ opsMissingResponseTest: 0, zeroTestOperations: ['x'] }), null),
+    ).toContain(HUB_MEDIC);
+  });
+
+  it('does not ping anyone when nothing is missing', () => {
+    const text = slackText(
+      baseSummary({ opsMissingResponseTest: 0, zeroTestOperations: [] }),
+      null,
+    );
+    expect(text).not.toContain('hub-medic');
+  });
+
+  it('does not ping for a zero-test op already parked under a ticket, but still lists it', () => {
+    // A zero-test op tracked under a Hub issue (e.g. getClusterUsageMetrics) is a known, parked gap,
+    // not an actionable new one: it stays visible with its ticket but must not page the medic weekly.
+    const text = slackText(
+      baseSummary({
+        opsMissingResponseTest: 0,
+        zeroTestOperations: ['getClusterUsageMetrics'],
+        trackedOperations: ['getClusterUsageMetrics'],
+      }),
+      null,
+    );
+    expect(text).not.toContain('hub-medic');
+    expect(text).toContain('getClusterUsageMetrics');
+  });
+
   it('has a positive-tests section and a negative-tests section, each holding its own lines', () => {
     const text = slackText(baseSummary(), null);
     const at = (needle: string) => text.indexOf(needle);

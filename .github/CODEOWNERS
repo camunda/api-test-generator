@@ -1,0 +1,12 @@
+# The Hub backend team owns this repo. A PR requests their review automatically
+# (a draft PR requests it when it is marked ready).
+*  @camunda/hub-backend
+
+# The engine and the camunda-oca config also build OCA's tests, and the test automation team stays
+# responsible for OCA. A PR touching them requests both teams; either one can review.
+/semantic-graph-extractor/  @camunda/hub-backend @camunda/test-automation-team
+/path-analyser/             @camunda/hub-backend @camunda/test-automation-team
+/materializer/              @camunda/hub-backend @camunda/test-automation-team
+/request-validation/        @camunda/hub-backend @camunda/test-automation-team
+/emitter-sdk/               @camunda/hub-backend @camunda/test-automation-team
+/configs/camunda-oca/       @camunda/test-automation-team

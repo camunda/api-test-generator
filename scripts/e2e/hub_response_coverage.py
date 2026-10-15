@@ -37,6 +37,7 @@ import sys
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 CONFIG = 'camunda-hub'
 GUIDE_URL = 'https://github.com/camunda/api-test-generator/blob/main/docs/hub-response-coverage-report.md'
+HUB_MEDIC = '<!subteam^S014VK4482H|hub-medic>'
 HTTP_METHODS = {'get', 'put', 'post', 'delete', 'patch'}
 BUCKETS = ('2xx', '400', '401', '403', '404', '409')
 # 500 is documented everywhere and cannot be provoked on purpose.
@@ -595,6 +596,13 @@ def slack(s, prev, args):
     links.append(f'<{GUIDE_URL}|📖 Guide>')
     if links:
         lines += ['', ' · '.join(links)]
+    # A zero-test op already parked under a tracking ticket (in trackedOperations, listed above with
+    # its issue) is a known gap, not an actionable new one, so it must not page the medic every week;
+    # it stays visible on the line above. Only an untracked zero-test op, or a real missing-response
+    # gap (opsMissingResponseTest already excludes held/suppressed ops), pings.
+    unexpected_zero = [o for o in s['zeroTestOperations'] if o not in set(s['trackedOperations'])]
+    if s['opsMissingResponseTest'] or unexpected_zero:
+        lines += ['', ':rotating_light: ' + HUB_MEDIC]
     return '\n'.join(lines) + '\n'
 
 

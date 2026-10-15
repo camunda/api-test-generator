@@ -707,11 +707,18 @@ A failure with no evidence of what failed (no readable report, nothing failing, 
 operations; `observed=false` from `hub-pr-evidence.ts`) cannot be told apart from the previous
 push's, so it shares one quiet reply per PR per day and pings nobody until it has happened 3 times
 that day (the reply carries a hidden `seen:N` counter), when one extra reply pings
-test-automation-medic. This mirrors AlwaysGreen's rule that one failure is not a page.
+hub-medic and test-automation-medic. This mirrors AlwaysGreen's rule that one failure is not a page.
 Racing PRs that each create the day's parent converge on the earliest one (the
 loser deletes its own); the reply lookup is paginated and fails closed.
 Any threading failure (unresolvable channel name, missing Slack history scope) falls
 back to a plain post, so an alert is never lost to the threading logic.
+
+**Current state (run log of 7 Oct, `report` job, "Notify Slack" step):** the Slack bot lacks the `channels:read`
+scope, so `conversations.list` fails with `missing_scope` and every alert is posted as a top-level message instead of a
+reply under the day's message. In practice each failed run posts its own message: nothing is edited or grouped, a failure that pings pings each time, and the 3-failure
+escalation does not fire, because a plain post returns no `seen` counter (the quiet reply's text still promises it). Giving
+the bot `channels:read` and `channels:history` turns the threaded behaviour above on. After changing the scopes, check
+that the "Notify Slack" step no longer prints "Slack threading failed".
 
 A PR-caused generator gap (the same `caused_by_pr` condition as the comment) is also tracked: the
 `generator-gap-tracker` job keeps one issue per camunda-hub PR
