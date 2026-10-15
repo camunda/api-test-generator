@@ -726,8 +726,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          bash .github/scripts/hub-coverage-fix-link-issues.sh \
-            "${RUNNER_TEMP}/verify-out.json" "${RUNNER_TEMP}/run-prs.json"
+          bash .github/scripts/hub-coverage-fix-link-issues.sh "${RUNNER_TEMP}/verify-out.json"
 
       # What the run found, for people: one comment per run on the weekly tracking issue (the full record) and one
       # reply in the weekly Slack message's thread (a line per gap). The agent's text in them is untrusted and is

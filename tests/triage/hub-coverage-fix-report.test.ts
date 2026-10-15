@@ -276,8 +276,11 @@ describe('hub-coverage-fix-report', () => {
       { resource: 'removeMember', reason: 'removeMember is already covered by the open PR #799' },
     ]);
     expect(r.slack).toContain('1 PR opened, 1 gap left for a person, 2 not attempted.');
+    // Skipped entries render one per line (so truncation keeps the ones that fit), not one joined line.
+    expect(r.slack).toContain('*Not attempted this run:*');
+    expect(r.slack).toContain('• `File` (area File already has an agent PR (recent or open))');
     expect(r.slack).toContain(
-      '• Not attempted this run: `File` (area File already has an agent PR (recent or open)) · `removeMember` (removeMember is already covered by the open PR #799)',
+      '• `removeMember` (removeMember is already covered by the open PR #799)',
     );
     expect(r.issue).toContain('left for a person, 2 not attempted.');
     expect(r.issue).toContain('**Not attempted this run**');
@@ -289,7 +292,8 @@ describe('hub-coverage-fix-report', () => {
       { resource: 'File', reason: 'known and tracked: suppressed' },
     ]);
     expect(r.slack).toContain('0 PRs opened, 0 gaps left for a person, 1 not attempted.');
-    expect(r.slack).toContain('• Not attempted this run: `File` (known and tracked: suppressed)');
+    expect(r.slack).toContain('*Not attempted this run:*');
+    expect(r.slack).toContain('• `File` (known and tracked: suppressed)');
     expect(r.issue).toContain('<!-- coverage-fix-run:555 -->');
     expect(r.issue).toContain('**Not attempted this run**');
   });
@@ -310,10 +314,33 @@ describe('hub-coverage-fix-report', () => {
     expect(r.slack).toContain('25 not attempted.');
     expect(r.slack).toContain('`op19`');
     expect(r.slack).not.toContain('`op20`');
-    expect(r.slack).toContain('· …and 5 more');
+    expect(r.slack).toContain('• …and 5 more');
     // Slack mrkdwn markup characters in the reason are neutralised.
     expect(r.slack).toContain('area &lt;X&gt; &amp; &lt;Y&gt; already has an agent PR');
     expect(r.issue).toContain('…and 5 more');
+  });
+
+  it('keeps the skipped entries that fit when the Slack message is truncated at the cap', () => {
+    // A single joined line would be dropped whole by the cap, losing every skipped entry while the headline
+    // still counts them. One line per entry means the cut (at a line boundary) retains the ones that fit.
+    const prs = Array.from({ length: 2 }, (_, i) => ({
+      ...openedPr,
+      number: 1000 + i,
+      title: 'add a lifecycle test for a resource with a fairly long descriptive title '.repeat(2),
+    }));
+    const skipped = Array.from({ length: 20 }, (_, i) => ({
+      resource: `op${i}`,
+      reason: 'its area already has an open agent PR, so it waits for the next run '.repeat(2),
+    }));
+    const r = build([], prs, '', '', skipped);
+    expect(r.slack).toContain('20 not attempted.'); // headline still counts all of them
+    expect(r.slack).toContain('*Not attempted this run:*');
+    expect(r.slack).toContain('• `op0`'); // the first skipped entries survive the cut
+    expect(r.slack).toContain('…cut here'); // the cap actually triggered
+    // Every rendered skipped bullet is a complete line, so no code span is left half-open by the cut.
+    for (const line of r.slack.split('\n').filter((l) => l.startsWith('• `op'))) {
+      expect(line.trimEnd().endsWith(')'), line.slice(-30)).toBe(true);
+    }
   });
 });
 

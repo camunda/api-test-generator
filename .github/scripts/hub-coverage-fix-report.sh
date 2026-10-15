@@ -85,7 +85,7 @@ jq -r --arg run "$run_id" --argjson base "$base" --arg runurl "$run_url" --arg i
       + (if ($opened | length) > 0 then "\n" + ($opened[:20] | map("• PR <\(.url)|#\(.number)> \(.title | slackcode(120))") | join("\n")) else "" end)
       + (if ($left | length) > 0 then "\n" + ($left[:20] | map("• \(.resource | slackcode(60)) (\(.kind | slackcode(20))): \(.action | slackcode(20)) — \(.reason | slackcode(220))") | join("\n")) else "" end)
       + (if ($left | length) > 20 then "\n…and \($left | length - 20) more, see the tracking issue." else "" end)
-      + (if ($skipped | length) > 0 then "\n• Not attempted this run: " + ($skipped[:20] | map("\(.resource | slackcode(40)) (\(.reason | clean(80) | neutral))") | join(" · ")) + (if ($skipped | length) > 20 then " · …and \($skipped | length - 20) more" else "" end) else "" end)
+      + (if ($skipped | length) > 0 then "\n*Not attempted this run:*\n" + ($skipped[:20] | map("• \(.resource | slackcode(40)) (\(.reason | clean(120) | neutral))") | join("\n")) + (if ($skipped | length) > 20 then "\n• …and \($skipped | length - 20) more" else "" end) else "" end)
       + (if $missing then "\n:warning: The agent left no usable result, so only the PRs found on GitHub are listed." else "" end)
       + (if $issue != "" then "\nDetails: <\($issue)|tracking issue>" else "" end)) | cap(3000)
     end' "$result" > "$slack_out"

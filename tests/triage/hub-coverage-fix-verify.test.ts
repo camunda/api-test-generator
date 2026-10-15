@@ -434,6 +434,12 @@ describe('prIssueLinks', () => {
     expect(prIssueLinks([linked], withIssue, RUN, 0)).toEqual([]);
   });
 
+  it('does not treat a longer issue number as the existing link (digit boundary)', () => {
+    // `relates to #420` must not count as already linking #42.
+    const other = pr(1, { body: `${PLAIN}\n\nrelates to #420` });
+    expect(prIssueLinks([other], withIssue, RUN, 0)).toEqual([{ number: 1, issue: 42 }]);
+  });
+
   it('ignores PRs at or below the baseline and non-run branches', () => {
     const old = pr(1, { number: 5 });
     expect(prIssueLinks([old], withIssue, RUN, 5)).toEqual([]);
