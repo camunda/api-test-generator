@@ -966,6 +966,14 @@ code, not by the prompt: the selector (`scripts/triage/hub-coverage-fix-select.t
 allowed PRs, as drafts, and that each PR changed only the allowed files and config entries. A test that names the
 standalone feature specs a lifecycle test replaces may be adapted under four conditions, in a PR section "Test change: needs careful
 review". The weekly Slack message gets a thread reply listing the agent's PRs still open (`.github/scripts/hub-coverage-agent-prs.sh`).
+Each verified PR is linked to its area's tracking issue: the weekly report writes a `{"<Area>": <issue-number>}` map
+(`area-issues.json`) alongside the per-area issues, the selector attaches that `issue` to each candidate, and after
+verification passes a step appends `relates to #<issue>` to the PR body (`.github/scripts/hub-coverage-fix-link-issues.sh`) so
+the PR and the issue cross-reference each other on GitHub — `relates to`, not `closes`, because one PR fixes one endpoint of
+an area issue that usually lists several. The per-run report (`.github/scripts/hub-coverage-fix-report.sh`, in the Slack thread
+reply and the tracking-issue comment) also names the gaps the agent did **not** attempt this run (the selector's `skipped`
+list, each with a reason: its area already has an open PR, another open PR covers it, it is known and tracked), so every
+eligible gap each week lands in exactly one bucket — opened, left for a person, or not attempted — and none drops silently.
 
 **A failed Slack step fails the scheduled run.** The Slack steps of the scheduled Hub workflows (nightly, triage,
 spec-bump check, re-enable check, weekly coverage report, generator-gap digest) use `continue-on-error`, so a Vault or
