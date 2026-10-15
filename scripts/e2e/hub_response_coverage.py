@@ -586,7 +586,8 @@ def matrix(s, rows):
     c = s['codes']
     out = [
         f'## Hub API test coverage ({s["operations"]} endpoints)', '',
-        f'**{s["fullyAsserted"]} of {s["operations"]} endpoints** have a test for every response the API spec lists.', '',
+        f'**{s["fullyAsserted"]} of {s["operations"]} endpoints** have a test for every response the API spec lists '
+        '(2xx/400/401/403/404/409; a documented 500 is not checked).', '',
         'Responses tested, out of those the spec lists: '
         + ' · '.join(f'{NAMES[b]} {c[b][0]} of {c[b][1]}' for b in BUCKETS) + '.', '',
         '✅ tested · ❌ the spec lists it but no test covers it · ⏸️ known and tracked elsewhere (suppressed or excluded) · '
@@ -637,7 +638,8 @@ def issue_body(s, rows, args):
     lines = [
         '_Kept up to date by the weekly **Hub response coverage** workflow. It is rewritten every Monday and '
         'closed automatically once nothing is missing. Please do not edit it by hand._', '',
-        f'**{s["fullyAsserted"]} of {s["operations"]} endpoints** have a test for every response the API spec lists; '
+        f'**{s["fullyAsserted"]} of {s["operations"]} endpoints** have a test for every response the API spec lists '
+        f'(2xx/400/401/403/404/409; a documented 500 is not checked); '
         f'**{len(gaps)}** still have something missing. The endpoints are listed in one issue per area of the API, '
         'opened gradually (at most 10 new ones per week); an area that has no issue yet is listed here with its endpoints.',
         '', AREA_INDEX_MARKER, '',
