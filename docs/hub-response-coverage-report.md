@@ -27,29 +27,24 @@ The report job starts at 05:00 UTC on Monday, and the Slack message and issues a
 The numbers below are an example.
 
 ```
-Hub API test coverage (weekly)
-camunda-hub@abc1234 · 66 endpoints · 1203 negative tests
+Hub API test coverage (weekly) · camunda-hub@abc1234 · 66 endpoints
+Two angles: does each endpoint test every status code it can return, and does it reject every kind of bad request?
+57 of 66 endpoints are tested for every status code they can return (+2). Counts 2xx/400/401/403/404/409; a documented 500 is not checked. A bracketed number is the change since the last report.
+• Invalid-request coverage: 32 of 64 endpoints are tested with every kind of bad request that applies (may be understated: some flagged kinds cannot be generated yet, so the count of endpoints still missing a kind is an upper bound)
 
-56 of 66 endpoints have a test for every response the API spec lists (+2). A number in brackets is the change since the last report.
+• Status codes not tested yet: 403 (1) · 404 (2) · 409 (3)
+• Where those gaps are (by area): Project Snapshot 2 · File 1 · Member 1
+• Other test gaps: 5 optional fields
+:warning: No test at all: getClusterUsageMetrics (known, tracked: camunda-hub#25907, camunda-hub#26448)
 
-Positive tests (the request is right)
-• Success (2xx): 64 of 66
-• Optional request fields sent in a success test: 63 of 68
-• Endpoints that never check the shape of the success response: 0
-• Lifecycle tests (create, read, delete): 4 of 6 resources. Missing: ProjectSnapshot, Version
-• Lifecycle tests (delete, restore): 4 of 4 resources
-• Lifecycle tests (add, remove): 1 of 1 links
-
-Negative tests (the request is wrong)
-• Bad request (400), Not authenticated (401), Forbidden (403), Not found (404), Conflict (409): "x of y" each
-• Every kind of bad request tested: 32 of 64 endpoints. <which kinds are missing most often>
-
-Across positive and negative tests
-• Biggest gaps ...
-• N endpoints are missing a test for a success, 400, 401, 404 or 409 response
-
-Tracking issue · Area issues: ...
+Full table · Tracking issue · Guide
 ```
+
+The message answers the report's main question first — *does every endpoint test every status code it can
+return?* (the 2xx/400/401/403/404/409 the spec lists; a documented 500 is deliberately not counted) — then
+shows the bad-request-kind axis on its own line, the actionable gaps grouped by status code and by API area,
+and finally a one-line roll-up of the dimensions outside that question (lifecycle tests, optional-field tests,
+response-shape checks) so they stay visible without dominating.
 
 When the coverage-fix agent has pull requests waiting for review, a reply appears **in the thread** of this message (a week without any such pull requests has no reply):
 
@@ -57,13 +52,13 @@ When the coverage-fix agent has pull requests waiting for review, a reply appear
 🤖 Coverage-fix agent: 1 PR waiting for review. These were opened by the agent, not a person; please review before merging: #690 ...
 ```
 
-- "x of y" means: y endpoints document that response, x of them have a test that asserts it. Not every line counts endpoints: "Optional request fields" counts **fields** (63 of 68 fields), and the lifecycle lines count **resources** or **links**.
+- The two headline numbers read "x of y": y endpoints document that response (or have at least one applicable bad-request kind), and x of them have a test that asserts it. The first headline counts only the 2xx/400/401/403/404/409 the spec lists — a documented 500 is not counted, so an endpoint with an untested 500 can still show as fully covered. The invalid-request count can be **understated**: an over-broad applicability rule marks an endpoint as a gap, so the number of endpoints still missing a kind is an upper bound. The **"Other test gaps"** line instead shows a raw count of what is still missing on the dimensions outside the main question — optional-field tests (counted in **fields**), lifecycle flows (**resources**/**links**), and response-shape checks.
 - A number in brackets is the change since the previous scheduled report. Nothing is shown when it is unchanged or there is no previous report.
 - "Endpoints with no test at all" are listed with the issue that explains each one, taken from the `knownIssue` URL on the endpoint's
   entry in `positive-suppress.json` or `request-validation.json`. An endpoint with no such entry is listed bare, which means nobody has explained it yet.
 - **What counts as covered.** A test that exists in the generated files and asserts that response. A test left out by a suppression or exclusion in the config (usually for a
   known Hub bug, but an exclusion needs only a `reason`) is **not** counted as tested: it stays in the "of" number and shows as held in the full table. The one exception is
-  the "Every kind of bad request" line, which treats a skip in two ways. A **kind** excluded in the config is
+  the "Invalid-request coverage" line, which treats a skip in two ways. A **kind** excluded in the config is
   taken out of what that endpoint needs, so the endpoint can still count as fully covered by its other kinds. An endpoint whose
   bad-request tests are **all** skipped or excluded is left out of both numbers.
 

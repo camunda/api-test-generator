@@ -468,6 +468,12 @@ def build(args):
         'optionalMissing': {r['operationId']: r['optionalMissing'] for r in rows if r['optionalMissing']},
         # Suppression explains zero coverage; it is not evidence of a test, so it stays in the list.
         'zeroTestOperations': sorted(o for o in ops if not pos_asserted[o] and not neg_tests[o]),
+        # Display-only for the weekly Slack message (not floor-guarded): actionable response gaps per
+        # status code (a 'gap' cell; 'hold' = known/parked, excluded), and endpoints with a response
+        # gap grouped by API area.
+        'codeGaps': {b: sum(1 for r in rows if r['cells'].get(b) == 'gap') for b in BUCKETS},
+        'areaResponseGaps': dict(
+            collections.Counter(r['area'] for r in rows if any(v == 'gap' for v in r['cells'].values()))),
     }
     return summary, rows
 
@@ -476,11 +482,6 @@ NAMES = {
     '2xx': 'Success (2xx)', '400': 'Bad request (400)', '401': 'Not authenticated (401)',
     '403': 'Forbidden (403)', '404': 'Not found (404)', '409': 'Conflict (409)',
 }
-
-
-def meter(got, doc, width=10):
-    filled = width if not doc else round(width * got / doc)
-    return '▰' * filled + '▱' * (width - filled)
 
 
 def request_gap_summary(s):
@@ -512,89 +513,69 @@ def known_note(urls):
     return f' (known, tracked: {", ".join(label(u) for u in urls)})' if urls else ' (known, tracked)'
 
 
-def flow_line(kind, label, s, prev, unit='resources'):
-    """'Lifecycle tests (...): 4 of 6 resources (+1). Missing: A, B (known, tracked).' or without the tail."""
-    got, total = s['lifecycle'][kind]
-    # A previous report from before this metric existed has no entry for it: no comparison, not an error.
-    old = prev.get('lifecycle', {}).get(kind) if prev else None
-    before = old[0] if old else None
-    missing = s['lifecycle'][kind + 'Missing']
-    known = set(s['lifecycle']['known'])
-    tail = ('. Missing: ' + ', '.join(n + (' (known, tracked)' if n in known else '') for n in missing)) if missing else ''
-    return f'• {label}: {got} of {total} {unit}{change(got, before)}{tail}'
-
-
 def slack(s, prev, args):
-    c = s['codes']
+    # Leads with the report's documented main question — does every endpoint test every status code it
+    # can return? (2xx/400/401/403/404/409; a documented 500 is not checked) — then the bad-request-kind
+    # axis as its own line (kept separate because its covered count can be understated: an over-broad
+    # applicability rule marks an endpoint as a gap, so the count of endpoints still missing a kind is an
+    # upper bound). Then the actionable gaps grouped by code and by area. Dimensions outside the main
+    # question (lifecycle, optional fields, response-shape) get one roll-up line so they stay visible
+    # without dominating. Numbers come straight from the summary; nothing new is computed here.
     ref = f'camunda-hub@{args.spec_ref[:7]}' if args.spec_ref else 'spec ' + s['specHash'].replace('sha256:', '')[:7]
+    n = s['operations']
     pf = prev['fullyAsserted'] if prev else None
-    pc = prev['codes'] if prev else {}
+    kind_ok, kind_total = s['requestChecks']
+    kind_before = prev['requestChecks'][0] if prev and 'requestChecks' in prev else None
 
-    def line(b):
-        before = pc.get(b, [None])[0] if prev else None
-        return f'• {NAMES[b]}: {c[b][0]} of {c[b][1]}{change(c[b][0], before)}  {meter(*c[b])}'
-
-    ranked = sorted((b for b in BUCKETS if c[b][1]), key=lambda b: c[b][0] / c[b][1])
-    worst = [b for b in ranked[:2] if c[b][0] < c[b][1]]
-    opt_before = prev['optionalFields'][0] if prev and 'optionalFields' in prev else None
-    req_before = prev['requestChecks'][0] if prev and 'requestChecks' in prev else None
-    shape_before = len(prev['shapeUnvalidated']) if prev and 'shapeUnvalidated' in prev else None
     lines = [
-        ':bar_chart: *Hub API test coverage* (weekly)',
-        f'{ref} · {s["operations"]} endpoints · {s["negativeTests"]} negative tests',
+        f':bar_chart: *Hub API test coverage* (weekly) · {ref} · {n} endpoints',
+        '_Two angles: does each endpoint test every status code it can return, '
+        'and does it reject every kind of bad request?_',
+        f'*{s["fullyAsserted"]} of {n} endpoints are tested for every status code they can return*'
+        f'{change(s["fullyAsserted"], pf)}.'
+        ' _Counts 2xx/400/401/403/404/409; a documented 500 is not checked. '
+        'A bracketed number is the change since the last report._',
+        f'• Invalid-request coverage: {kind_ok} of {kind_total} endpoints are tested with every kind '
+        f'of bad request that applies{change(kind_ok, kind_before)}'
+        ' _(may be understated: some flagged kinds cannot be generated yet, so the count of '
+        'endpoints still missing a kind is an upper bound)_',
         '',
-        f'*{s["fullyAsserted"]} of {s["operations"]} endpoints* have a test for every response the API spec lists'
-        f'{change(s["fullyAsserted"], pf)}. A number in brackets is the change since the last report.',
-        '',
-        ':white_check_mark: *Positive tests* (the request is right)',
-        line('2xx'),
-        f'• Optional request fields sent in a success test: {s["optionalFields"][0]} of {s["optionalFields"][1]}'
-        f'{change(s["optionalFields"][0], opt_before)}',
-        f'• Endpoints that never check the shape of the success response: {len(s["shapeUnvalidated"])}'
-        f'{change(len(s["shapeUnvalidated"]), shape_before)}',
-        flow_line('create', 'Lifecycle tests (create, read, delete)', s, prev),
-        flow_line('restore', 'Lifecycle tests (delete, restore)', s, prev),
-        flow_line('edge', 'Lifecycle tests (add, remove)', s, prev, unit='links'),
-        '',
-        ':no_entry: *Negative tests* (the request is wrong)',
     ]
-    lines += [line(b) for b in BUCKETS if b != '2xx']
-    lines += [
-        f'• Every kind of bad request tested: {s["requestChecks"][0]} of {s["requestChecks"][1]} endpoints'
-        f'{change(s["requestChecks"][0], req_before)}. {request_gap_summary(s)}',
-        '',
-        # These roll up both paths (the success answer is one of the responses counted), so they are not
-        # shown under either section above.
-        ':clipboard: *Across positive and negative tests*',
-    ]
-    if worst:
-        def untested(b):
-            before = pc[b][1] - pc[b][0] if b in pc else None
-            return f'{NAMES[b]}, {c[b][1] - c[b][0]} untested{change(c[b][1] - c[b][0], before)}'
-
-        lines.append('• Biggest gaps: ' + ' · '.join(untested(b) for b in worst))
-    missing_before = prev.get('opsMissingResponseTest') if prev else None
-    lines += [
-        f'• {s["opsMissingResponseTest"]} endpoints{change(s["opsMissingResponseTest"], missing_before)} are missing a test '
-        f'for a success, 400, 401, 404 or 409 response (403 is tracked separately; 500 errors are not counted).',
-    ]
+    code_bits = [f'{b} ({s["codeGaps"][b]})' for b in BUCKETS if s['codeGaps'].get(b)]
+    lines.append(
+        '• Status codes not tested yet: ' + (' · '.join(code_bits) if code_bits else 'none :tada:'))
+    areas = sorted(s['areaResponseGaps'].items(), key=lambda kv: (-kv[1], kv[0]))
+    lines.append(
+        '• Where those gaps are (by area): ' + (' · '.join(f'{a} {c}' for a, c in areas) if areas else 'none'))
+    other = []
+    lc = s['lifecycle']
+    lc_missing = len(lc['createMissing']) + len(lc['restoreMissing']) + len(lc['edgeMissing'])
+    opt_missing = s['optionalFields'][1] - s['optionalFields'][0]
+    if lc_missing:
+        other.append(f'{lc_missing} lifecycle')
+    if opt_missing:
+        other.append(f'{opt_missing} optional fields')
+    if s['shapeUnvalidated']:
+        other.append(f'{len(s["shapeUnvalidated"])} response-shape')
+    if other:
+        lines.append('• Other test gaps: ' + ' · '.join(other))
+    if s['zeroTestOperations']:
+        tracked = set(s['trackedOperations'])
+        urls = s.get('trackedUrls', {})
+        lines.append(':warning: No test at all: ' + ', '.join(
+            f'`{o}`' + (known_note(urls.get(o, [])) if o in tracked else '')
+            for o in s['zeroTestOperations']))
     if prev:
         new = sorted(set(s['operationIds']) - set(prev.get('operationIds', [])))
         if new:
             lines.append('New endpoints since last report: ' + ', '.join(f'`{o}`' for o in new))
-    if s['zeroTestOperations']:
-        tracked = set(s['trackedOperations'])
-        urls = s.get('trackedUrls', {})
-        lines.append(':warning: Endpoints with no test at all: '
-                     + ', '.join(f'`{o}`' + (known_note(urls.get(o, [])) if o in tracked else '') for o in s['zeroTestOperations']))
     links = []
     if args.run_url:
         links.append(f'<{args.run_url}|Full table>')
     if args.tracking_url:
-        links.append(f'<{args.tracking_url}|Tracking epic>')
+        links.append(f'<{args.tracking_url}|Tracking issue>')
     links.append(f'<{GUIDE_URL}|📖 Guide>')
-    if links:
-        lines += ['', ' · '.join(links)]
+    lines += ['', ' · '.join(links)]
     return '\n'.join(lines) + '\n'
 
 
@@ -605,7 +586,8 @@ def matrix(s, rows):
     c = s['codes']
     out = [
         f'## Hub API test coverage ({s["operations"]} endpoints)', '',
-        f'**{s["fullyAsserted"]} of {s["operations"]} endpoints** have a test for every response the API spec lists.', '',
+        f'**{s["fullyAsserted"]} of {s["operations"]} endpoints** have a test for every response the API spec lists '
+        '(2xx/400/401/403/404/409; a documented 500 is not checked).', '',
         'Responses tested, out of those the spec lists: '
         + ' · '.join(f'{NAMES[b]} {c[b][0]} of {c[b][1]}' for b in BUCKETS) + '.', '',
         '✅ tested · ❌ the spec lists it but no test covers it · ⏸️ known and tracked elsewhere (suppressed or excluded) · '
@@ -656,7 +638,8 @@ def issue_body(s, rows, args):
     lines = [
         '_Kept up to date by the weekly **Hub response coverage** workflow. It is rewritten every Monday and '
         'closed automatically once nothing is missing. Please do not edit it by hand._', '',
-        f'**{s["fullyAsserted"]} of {s["operations"]} endpoints** have a test for every response the API spec lists; '
+        f'**{s["fullyAsserted"]} of {s["operations"]} endpoints** have a test for every response the API spec lists '
+        f'(2xx/400/401/403/404/409; a documented 500 is not checked); '
         f'**{len(gaps)}** still have something missing. The endpoints are listed in one issue per area of the API, '
         'opened gradually (at most 10 new ones per week); an area that has no issue yet is listed here with its endpoints.',
         '', AREA_INDEX_MARKER, '',
