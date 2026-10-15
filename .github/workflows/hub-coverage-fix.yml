@@ -187,9 +187,12 @@ jobs:
         id: select
         run: |
           set -euo pipefail
+          # area-issues.json (from the weekly report artifact) maps each area to its tracking-issue number, so
+          # each candidate carries the issue a fix PR should link. A report from before it existed is tolerated.
           node scripts/triage/hub-coverage-fix-select.ts \
             "${REPORT_DIR}/summary.json" "${REPORT_DIR}/rows.json" "${GITHUB_WORKSPACE}/agent-prs.json" \
             "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${GITHUB_WORKSPACE}/open-fix-prs.json" \
+            "${REPORT_DIR}/area-issues.json" \
             > "${GITHUB_WORKSPACE}/selection.json"
           cat "${GITHUB_WORKSPACE}/selection.json"
           echo "count=$(jq '.candidates | length' "${GITHUB_WORKSPACE}/selection.json")" >> "$GITHUB_OUTPUT"
@@ -689,11 +692,16 @@ jobs:
           # manual run can check out any branch, and a modified branch must not be able to change the answer.
           gh api -H "Accept: application/vnd.github.raw" \
             "repos/${GITHUB_REPOSITORY}/contents/scripts/e2e/run-hub.sh?ref=main" > "${RUNNER_TEMP}/run-hub.sh"
+          # stdout carries {violations, links}; keep it so the linking step below can read .links. On a
+          # verification failure set -e stops here (the job fails and the linking step is skipped), which is
+          # correct: only verified PRs get linked.
           node scripts/triage/hub-coverage-fix-verify.ts \
             "${RUNNER_TEMP}/run-prs.json" "${RUNNER_TEMP}/pre/selection.json" \
             "${RUNNER_TEMP}/post/hub-coverage-fix.json" "$GITHUB_RUN_ID" "$DRY_RUN" \
             "app/qa-processes,qa-processes[bot]" "$BASELINE" "$limit" "${RUNNER_TEMP}/pre/pre-run-prs.json" \
-            "${RUNNER_TEMP}/pr-changes.json" "${RUNNER_TEMP}/run-hub.sh"
+            "${RUNNER_TEMP}/pr-changes.json" "${RUNNER_TEMP}/run-hub.sh" \
+            > "${RUNNER_TEMP}/verify-out.json"
+          cat "${RUNNER_TEMP}/verify-out.json"
 
       # The automatic live-Hub check skips PRs from the automation account (hub-pr-live-check.yml): it would run
       # the PR's own code with Hub access before anyone had checked what the code is. Here the order is the other
@@ -708,6 +716,18 @@ jobs:
           BASELINE: ${{ needs.fix.outputs.baseline }}
         run: |
           RUN_PRS="${RUNNER_TEMP}/run-prs.json" PR_CHANGES="${RUNNER_TEMP}/pr-changes.json" bash .github/scripts/hub-coverage-fix-live-check.sh
+
+      # Cross-reference each verified PR with its area's tracking issue: append `relates to #<issue>` to the PR
+      # body, which makes GitHub link the two in both directions. Deterministic — the issue per PR comes from the
+      # verifier output, not the agent. Runs only after verification passed; a link failure never fails the run.
+      - name: Link each verified PR to its tracking issue
+        if: ${{ env.DRY_RUN != 'true' }}
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          bash .github/scripts/hub-coverage-fix-link-issues.sh \
+            "${RUNNER_TEMP}/verify-out.json" "${RUNNER_TEMP}/run-prs.json"
 
       # What the run found, for people: one comment per run on the weekly tracking issue (the full record) and one
       # reply in the weekly Slack message's thread (a line per gap). The agent's text in them is untrusted and is
