@@ -227,6 +227,7 @@ fi
     issueUrl: read('issue-url.txt').trim(),
     areaLinks: read('area-links.txt').trim().split('\n').filter(Boolean),
     areaIndex: read('area-index.md').trim().split('\n').filter(Boolean),
+    areaIssues: ((raw) => (raw ? JSON.parse(raw) : undefined))(read('area-issues.json')),
     rendered: read('issue.rendered.md'),
   };
 }
@@ -303,6 +304,22 @@ describe('per-area issue lifecycle (stub gh)', () => {
       '<https://example.test/issues/5|Open (1)>',
       '<https://example.test/issues/6|Shut (1)>',
     ]);
+  });
+
+  it('writes area-issues.json mapping each area with an issue to its number', () => {
+    const r = runIssueScript('hub-coverage-area-issues.sh', areaFiles('New', 'Open', 'Shut'), [
+      { number: 5, title: areaTitle('Open'), state: 'OPEN' },
+      { number: 6, title: areaTitle('Shut'), state: 'CLOSED' },
+    ]);
+    expect(r.areaIssues).toEqual({ New: 101, Open: 5, Shut: 6 });
+  });
+
+  it('omits an area from area-issues.json when its issue opens on a later run (cap reached)', () => {
+    const r = runIssueScript('hub-coverage-area-issues.sh', areaFiles('A', 'B', 'C'), [], {
+      MAX_NEW_AREA_ISSUES: '2',
+    });
+    // A and B get issues this run; C is capped, so it has no entry (and thus no PR link until it does).
+    expect(r.areaIssues).toEqual({ A: 101, B: 102 });
   });
 
   it('opens at most MAX_NEW_AREA_ISSUES new issues and lists the rest unlinked', () => {

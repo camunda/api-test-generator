@@ -134,6 +134,12 @@ review"** that shows the check before and after. Read that section first.
 `fix/coverage-`, with the labels `nightly-api-fix`, `auto-generated` and `hub`. The body ends with
 "Found by the camunda-hub coverage-fix agent". The thread under the weekly Slack message lists the ones still open.
 
+**Each pull request links to its area's tracking issue.** The body carries a `relates to #<issue>` line pointing at the
+per-area issue whose gap it closes, so the pull request and the issue show each other on GitHub (open the issue and you see
+the pull request in its timeline). It says `relates to`, not `closes`: one pull request fixes one endpoint, while the area
+issue usually lists several, so merging the pull request does not close the issue — the next weekly report closes it once the
+area is clean. The link is added automatically after the `verify` job passes, so it is only ever on a checked pull request.
+
 **Who reviews them.** A person, always. The usual live check (`hub-pr-live-check`) skips these pull requests on purpose: it
 would run the agent's code with Hub access before anything had checked it. What happens instead depends on the kind:
 
@@ -150,7 +156,14 @@ unless it has the `do-not-close` label. So review it within 3 days, or add that 
 
 **What it tells people.** After a real run, the `verify` job posts what the agent found, including the gaps that got no PR:
 one comment on the weekly tracking issue (each gap, what the agent did and why) and one reply in the weekly Slack message's
-thread (one line per gap, with links to the PRs). Nothing is posted for a dry run, or for a run with no PR and no gap.
+thread (one line per gap, with links to the PRs). It also names the gaps the agent did **not attempt this run**, each with a
+reason (its area already has an open pull request, another open pull request covers it, or it is known and tracked), so every
+eligible gap each week shows up in exactly one place — opened, left for a person, or not attempted — and none drops out of
+sight. "Not attempted" almost always means "waiting its turn": the agent opens at most one pull request per area at a time,
+so a gap whose area already has one is picked up on a later run once that pull request merges or closes. Even a week where
+the agent finds nothing to do but set gaps aside is reported (a dedicated agent-less step posts the not-attempted list), so
+a fully-deferred week is not silent. Nothing is posted for a dry run, or for a run that opened no pull request and skipped,
+left and attempted nothing.
 
 **How it runs.** Two ways.
 

@@ -164,6 +164,7 @@ export function parseSelection(v: unknown): Selection {
     }
     const candidate: Candidate = { resource: c.resource, createOp: c.createOp, area: c.area, kind };
     if (kind === 'status' && code) candidate.code = code;
+    if (typeof c.issue === 'number' && Number.isInteger(c.issue)) candidate.issue = c.issue;
     return candidate;
   });
   return { budget: v.budget, recentCount: 0, candidates, skipped: [] };
@@ -199,6 +200,38 @@ export function assertComplete(prs: RunPr[], limit: number): void {
       `the list of the agent account's PRs holds ${prs.length} PRs, the most it can return: it may be cut off, so the run cannot be verified`,
     );
   }
+}
+
+export interface PrIssueLink {
+  number: number;
+  issue: number;
+}
+
+// For each of this run's opened PRs whose candidate has a tracking issue, the `relates to #<issue>` link the
+// workflow should add to the PR body — unless the body already carries that exact reference. Deterministic:
+// it reuses the same branch -> candidate mapping verify() uses, so the linking step never re-derives the
+// kebab/area logic in shell. A candidate with no issue (its area had no issue yet) yields no link.
+export function prIssueLinks(
+  allPrs: RunPr[],
+  selection: Selection,
+  runId: string,
+  baseline: number,
+): PrIssueLink[] {
+  const candidateByKebab = new Map(selection.candidates.map((c) => [branchKey(c), c]));
+  const links: PrIssueLink[] = [];
+  for (const p of allPrs) {
+    if (p.number <= baseline) continue;
+    const key = runResource(p.headRefName, runId);
+    if (key === null) continue;
+    const issue = candidateByKebab.get(key)?.issue;
+    if (typeof issue !== 'number') continue;
+    // A digit boundary after the number: an existing `relates to #420` must not count as linking #42.
+    if (typeof p.body === 'string' && new RegExp(`relates to #${issue}(?![0-9])`).test(p.body)) {
+      continue;
+    }
+    links.push({ number: p.number, issue });
+  }
+  return links;
 }
 
 export function verify(
@@ -366,8 +399,10 @@ if (process.argv[1] && import.meta.filename === process.argv[1]) {
       changes,
       provisioned,
     );
+    // The links are emitted whatever the verdict; the workflow only acts on them when this run passed (exit 0).
+    const links = prIssueLinks(prs, selection, runId, baseline);
     for (const v of violations) console.error(`::error::${v}`);
-    process.stdout.write(`${JSON.stringify({ violations }, null, 2)}\n`);
+    process.stdout.write(`${JSON.stringify({ violations, links }, null, 2)}\n`);
     process.exit(violations.length === 0 ? 0 : 1);
   } catch (e) {
     console.error(`::error::${e instanceof Error ? e.message : String(e)}`);

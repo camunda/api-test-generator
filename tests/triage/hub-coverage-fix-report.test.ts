@@ -31,32 +31,43 @@ const openedPr = {
   title: 'test(coverage-fix): add removeMember 403 test',
 };
 
-function build(gaps: unknown, prs: unknown[] = [openedPr], issueUrl = '', maxIssue = '') {
+function build(
+  gaps: unknown,
+  prs: unknown[] = [openedPr],
+  issueUrl = '',
+  maxIssue = '',
+  skipped?: unknown[],
+) {
   const dir = mkdtempSync(join(tmpdir(), 'cf-report-'));
   writeFileSync(join(dir, 'result.json'), JSON.stringify({ gaps }));
   writeFileSync(join(dir, 'prs.json'), JSON.stringify(prs));
-  const r = spawnSync(
-    'bash',
-    [
-      script,
-      join(dir, 'result.json'),
-      join(dir, 'prs.json'),
-      join(dir, 'issue.md'),
-      join(dir, 'slack.txt'),
-    ],
-    {
-      encoding: 'utf8',
-      env: {
-        ...process.env,
-        GITHUB_RUN_ID: RUN,
-        BASELINE: '900',
-        GITHUB_SERVER_URL: 'https://github.com',
-        GITHUB_REPOSITORY: 'camunda/api-test-generator',
-        ISSUE_URL: issueUrl,
-        ...(maxIssue ? { ISSUE_MAX_CHARS: maxIssue } : {}),
-      },
+  // A 5th arg is passed only when the test supplies a skipped list, so the no-selection path stays covered.
+  const args = [
+    script,
+    join(dir, 'result.json'),
+    join(dir, 'prs.json'),
+    join(dir, 'issue.md'),
+    join(dir, 'slack.txt'),
+  ];
+  if (skipped !== undefined) {
+    writeFileSync(
+      join(dir, 'selection.json'),
+      JSON.stringify({ budget: 0, candidates: [], skipped }),
+    );
+    args.push(join(dir, 'selection.json'));
+  }
+  const r = spawnSync('bash', args, {
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      GITHUB_RUN_ID: RUN,
+      BASELINE: '900',
+      GITHUB_SERVER_URL: 'https://github.com',
+      GITHUB_REPOSITORY: 'camunda/api-test-generator',
+      ISSUE_URL: issueUrl,
+      ...(maxIssue ? { ISSUE_MAX_CHARS: maxIssue } : {}),
     },
-  );
+  });
   expect(r.status, r.stderr).toBe(0);
   return {
     issue: readFileSync(join(dir, 'issue.md'), 'utf8'),
@@ -258,6 +269,79 @@ describe('hub-coverage-fix-report', () => {
     expect(r.issue).toContain('Error: `push failed`');
     expect(r.issue).not.toContain('Proposal:');
   });
+
+  it('lists the gaps the agent did not attempt this run, in both texts, with the headline count', () => {
+    const r = build([{ ...left }], [openedPr], '', '', [
+      { resource: 'File', reason: 'area File already has an agent PR (recent or open)' },
+      { resource: 'removeMember', reason: 'removeMember is already covered by the open PR #799' },
+    ]);
+    expect(r.slack).toContain('1 PR opened, 1 gap left for a person, 2 not attempted.');
+    // Skipped entries render one per line (so truncation keeps the ones that fit), not one joined line.
+    expect(r.slack).toContain('*Not attempted this run:*');
+    expect(r.slack).toContain('• `File` (area File already has an agent PR (recent or open))');
+    expect(r.slack).toContain(
+      '• `removeMember` (removeMember is already covered by the open PR #799)',
+    );
+    expect(r.issue).toContain('left for a person, 2 not attempted.');
+    expect(r.issue).toContain('**Not attempted this run**');
+    expect(r.issue).toContain('- `File`: `area File already has an agent PR (recent or open)`');
+  });
+
+  it('posts the not-attempted line even when no PR was opened and no gap was left for a person', () => {
+    const r = build([], [], '', '', [
+      { resource: 'File', reason: 'known and tracked: suppressed' },
+    ]);
+    expect(r.slack).toContain('0 PRs opened, 0 gaps left for a person, 1 not attempted.');
+    expect(r.slack).toContain('*Not attempted this run:*');
+    expect(r.slack).toContain('• `File` (known and tracked: suppressed)');
+    expect(r.issue).toContain('<!-- coverage-fix-run:555 -->');
+    expect(r.issue).toContain('**Not attempted this run**');
+  });
+
+  it('writes no not-attempted line when the selector reported nothing skipped', () => {
+    const r = build([{ ...left }], [openedPr], '', '', []);
+    expect(r.slack).toContain('1 gap left for a person.');
+    expect(r.slack).not.toContain('not attempted');
+    expect(r.issue).not.toContain('Not attempted');
+  });
+
+  it('caps the not-attempted list and neutralises its text', () => {
+    const many = Array.from({ length: 25 }, (_, i) => ({
+      resource: `op${i}`,
+      reason: 'area <X> & <Y> already has an agent PR',
+    }));
+    const r = build([], [], '', '', many);
+    expect(r.slack).toContain('25 not attempted.');
+    expect(r.slack).toContain('`op19`');
+    expect(r.slack).not.toContain('`op20`');
+    expect(r.slack).toContain('• …and 5 more');
+    // Slack mrkdwn markup characters in the reason are neutralised.
+    expect(r.slack).toContain('area &lt;X&gt; &amp; &lt;Y&gt; already has an agent PR');
+    expect(r.issue).toContain('…and 5 more');
+  });
+
+  it('keeps the skipped entries that fit when the Slack message is truncated at the cap', () => {
+    // A single joined line would be dropped whole by the cap, losing every skipped entry while the headline
+    // still counts them. One line per entry means the cut (at a line boundary) retains the ones that fit.
+    const prs = Array.from({ length: 2 }, (_, i) => ({
+      ...openedPr,
+      number: 1000 + i,
+      title: 'add a lifecycle test for a resource with a fairly long descriptive title '.repeat(2),
+    }));
+    const skipped = Array.from({ length: 20 }, (_, i) => ({
+      resource: `op${i}`,
+      reason: 'its area already has an open agent PR, so it waits for the next run '.repeat(2),
+    }));
+    const r = build([], prs, '', '', skipped);
+    expect(r.slack).toContain('20 not attempted.'); // headline still counts all of them
+    expect(r.slack).toContain('*Not attempted this run:*');
+    expect(r.slack).toContain('• `op0`'); // the first skipped entries survive the cut
+    expect(r.slack).toContain('…cut here'); // the cap actually triggered
+    // Every rendered skipped bullet is a complete line, so no code span is left half-open by the cut.
+    for (const line of r.slack.split('\n').filter((l) => l.startsWith('• `op'))) {
+      expect(line.trimEnd().endsWith(')'), line.slice(-30)).toBe(true);
+    }
+  });
 });
 
 describe('the workflows that carry the report', () => {
@@ -294,5 +378,54 @@ describe('the workflows that carry the report', () => {
       expect(String(s.if), String(s.name)).toContain("DRY_RUN != 'true'");
       expect(s['continue-on-error'], String(s.name)).toBe(true);
     }
+  });
+
+  const jobOf = (file: string, job: string): Record<string, unknown> => {
+    const wf: unknown = load(readFileSync(join(root, file), 'utf8'));
+    const jobs = isRec(wf) && isRec(wf.jobs) ? wf.jobs : {};
+    return isRec(jobs[job]) ? jobs[job] : {};
+  };
+
+  it('links issues on verification success, independent of the live-check step outcome', () => {
+    const steps = stepsOf('hub-coverage-fix.yml', 'verify');
+    const link = steps.find(
+      (s) => String(s.name) === 'Link each verified PR to its tracking issue',
+    );
+    expect(link, 'linking step must exist').toBeTruthy();
+    const cond = String(isRec(link) ? link.if : '');
+    // Explicit gate, so a failed live-check step (which runs just before) cannot skip linking via the
+    // implicit success() a plain `if` would add; still skipped when verification itself failed.
+    expect(cond).toContain('always()');
+    expect(cond).toContain("steps.verify.outcome == 'success'");
+    expect(isRec(link) ? link['continue-on-error'] : undefined).toBe(true);
+  });
+
+  it('reports a skipped-only run from a dedicated agent-less job', () => {
+    const job = jobOf('hub-coverage-fix.yml', 'report-skipped');
+    expect(Object.keys(job).length, 'report-skipped job must exist').toBeGreaterThan(0);
+    const cond = String(job.if);
+    // Only a zero-candidate run that still set gaps aside, and only a real run.
+    expect(cond).toContain("needs.fix.outputs.count == '0'");
+    expect(cond).toContain("needs.fix.outputs.skipped != '0'");
+    const perms = isRec(job.permissions) ? job.permissions : {};
+    expect(perms.issues).toBe('write');
+    // It only reports: it must never gain PR-write, run the agent, or verify PRs.
+    expect(perms['pull-requests']).toBeUndefined();
+    const names = stepsOf('hub-coverage-fix.yml', 'report-skipped').map((s) => String(s.name));
+    expect(names).toContain('Write the run report');
+    expect(names).toContain('Comment on the tracking issue');
+    expect(names).toContain('Reply in the weekly Slack thread');
+    expect(names).not.toContain('Verify the PRs');
+  });
+
+  it('hands the selection to the skipped-only report on a zero-candidate run', () => {
+    const fix = jobOf('hub-coverage-fix.yml', 'fix');
+    const outputs = isRec(fix.outputs) ? fix.outputs : {};
+    expect(String(outputs.skipped)).toContain('steps.select.outputs.skipped');
+    const upload = stepsOf('hub-coverage-fix.yml', 'fix').find((s) =>
+      String(s.name).includes('Upload the selection for the skipped-only report'),
+    );
+    expect(upload, 'fix job must upload the selection on count==0').toBeTruthy();
+    expect(String(isRec(upload) ? upload.if : '')).toContain("count == '0'");
   });
 });

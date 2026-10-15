@@ -8,6 +8,9 @@
 # Appends one Slack-formatted entry per area to REPORT_DIR/area-links.txt, and one markdown line per
 # area to REPORT_DIR/area-index.md (a link to its issue; an area with no issue yet lists its endpoints),
 # which the summary script puts into the tracking issue.
+# Also writes REPORT_DIR/area-issues.json, a {"<Area>": <issue-number>} map for every area that has an
+# issue this run (areas whose issue opens on a later run are omitted). The coverage-fix selector reads it
+# so a fix PR can link `relates to #<issue>` to its area's tracking issue.
 set -euo pipefail
 
 today=$(date -u +%F)
@@ -18,6 +21,8 @@ existing=$(gh issue list --state all --limit 300 --search "in:title \"$prefix\""
   --json number,title,state)
 new=0
 current=$(mktemp)
+# area<TAB>issue-number, one line per area that has an issue this run; folded into area-issues.json below.
+pairs=$(mktemp)
 while read -r entry; do
   title=$(jq -r '.title' <<< "$entry")
   file=$(jq -r '.file' <<< "$entry")
@@ -44,7 +49,12 @@ while read -r entry; do
   fi
   echo "<$url|$label>" >> "$REPORT_DIR/area-links.txt"
   jq -r --arg n "${url##*/}" '"- [ ] #\($n) **\(.area)**: \(.gaps) \(if .gaps == 1 then "endpoint" else "endpoints" end)"' <<< "$entry" >> "$REPORT_DIR/area-index.md"
+  printf '%s\t%s\n' "$(jq -r '.area' <<< "$entry")" "${url##*/}" >> "$pairs"
 done < <(jq -c '.[]' "$REPORT_DIR/areas.json")
+
+# Fold the area -> issue-number pairs into area-issues.json (an empty object when no area has an issue).
+jq -R -s 'split("\n") | map(select(length > 0) | split("\t") | {(.[0]): (.[1] | tonumber)}) | add // {}' \
+  "$pairs" > "$REPORT_DIR/area-issues.json"
 
 # Close open area issues whose area no longer has a gap (the summary issue is not one).
 jq -r --arg p "$prefix" --arg s "$ISSUE_TITLE" --arg x "$suffix" \
