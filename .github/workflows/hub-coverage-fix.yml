@@ -741,9 +741,12 @@ jobs:
             fi
           fi
           echo "issue_url=${issue_url}" >> "$GITHUB_OUTPUT"
+          # The selection from the pre-agent snapshot carries the `skipped` list (eligible gaps not attempted
+          # this run), so the report can name them instead of dropping them silently.
           ISSUE_URL="$issue_url" bash .github/scripts/hub-coverage-fix-report.sh \
             "${RUNNER_TEMP}/post/hub-coverage-fix.json" "${RUNNER_TEMP}/run-prs.json" \
-            "${RUNNER_TEMP}/issue-comment.md" "${RUNNER_TEMP}/slack.txt"
+            "${RUNNER_TEMP}/issue-comment.md" "${RUNNER_TEMP}/slack.txt" \
+            "${RUNNER_TEMP}/pre/selection.json"
           if [ "$VERIFY_OUTCOME" != "success" ]; then
             for f in "${RUNNER_TEMP}/issue-comment.md" "${RUNNER_TEMP}/slack.txt"; do
               if [ -s "$f" ]; then

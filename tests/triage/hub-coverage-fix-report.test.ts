@@ -31,32 +31,43 @@ const openedPr = {
   title: 'test(coverage-fix): add removeMember 403 test',
 };
 
-function build(gaps: unknown, prs: unknown[] = [openedPr], issueUrl = '', maxIssue = '') {
+function build(
+  gaps: unknown,
+  prs: unknown[] = [openedPr],
+  issueUrl = '',
+  maxIssue = '',
+  skipped?: unknown[],
+) {
   const dir = mkdtempSync(join(tmpdir(), 'cf-report-'));
   writeFileSync(join(dir, 'result.json'), JSON.stringify({ gaps }));
   writeFileSync(join(dir, 'prs.json'), JSON.stringify(prs));
-  const r = spawnSync(
-    'bash',
-    [
-      script,
-      join(dir, 'result.json'),
-      join(dir, 'prs.json'),
-      join(dir, 'issue.md'),
-      join(dir, 'slack.txt'),
-    ],
-    {
-      encoding: 'utf8',
-      env: {
-        ...process.env,
-        GITHUB_RUN_ID: RUN,
-        BASELINE: '900',
-        GITHUB_SERVER_URL: 'https://github.com',
-        GITHUB_REPOSITORY: 'camunda/api-test-generator',
-        ISSUE_URL: issueUrl,
-        ...(maxIssue ? { ISSUE_MAX_CHARS: maxIssue } : {}),
-      },
+  // A 5th arg is passed only when the test supplies a skipped list, so the no-selection path stays covered.
+  const args = [
+    script,
+    join(dir, 'result.json'),
+    join(dir, 'prs.json'),
+    join(dir, 'issue.md'),
+    join(dir, 'slack.txt'),
+  ];
+  if (skipped !== undefined) {
+    writeFileSync(
+      join(dir, 'selection.json'),
+      JSON.stringify({ budget: 0, candidates: [], skipped }),
+    );
+    args.push(join(dir, 'selection.json'));
+  }
+  const r = spawnSync('bash', args, {
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      GITHUB_RUN_ID: RUN,
+      BASELINE: '900',
+      GITHUB_SERVER_URL: 'https://github.com',
+      GITHUB_REPOSITORY: 'camunda/api-test-generator',
+      ISSUE_URL: issueUrl,
+      ...(maxIssue ? { ISSUE_MAX_CHARS: maxIssue } : {}),
     },
-  );
+  });
   expect(r.status, r.stderr).toBe(0);
   return {
     issue: readFileSync(join(dir, 'issue.md'), 'utf8'),
@@ -257,6 +268,52 @@ describe('hub-coverage-fix-report', () => {
     const r = build([{ ...left, proposal: null, file_error: 'push failed' }], []);
     expect(r.issue).toContain('Error: `push failed`');
     expect(r.issue).not.toContain('Proposal:');
+  });
+
+  it('lists the gaps the agent did not attempt this run, in both texts, with the headline count', () => {
+    const r = build([{ ...left }], [openedPr], '', '', [
+      { resource: 'File', reason: 'area File already has an agent PR (recent or open)' },
+      { resource: 'removeMember', reason: 'removeMember is already covered by the open PR #799' },
+    ]);
+    expect(r.slack).toContain('1 PR opened, 1 gap left for a person, 2 not attempted.');
+    expect(r.slack).toContain(
+      '• Not attempted this run: `File` (area File already has an agent PR (recent or open)) · `removeMember` (removeMember is already covered by the open PR #799)',
+    );
+    expect(r.issue).toContain('left for a person, 2 not attempted.');
+    expect(r.issue).toContain('**Not attempted this run**');
+    expect(r.issue).toContain('- `File`: `area File already has an agent PR (recent or open)`');
+  });
+
+  it('posts the not-attempted line even when no PR was opened and no gap was left for a person', () => {
+    const r = build([], [], '', '', [
+      { resource: 'File', reason: 'known and tracked: suppressed' },
+    ]);
+    expect(r.slack).toContain('0 PRs opened, 0 gaps left for a person, 1 not attempted.');
+    expect(r.slack).toContain('• Not attempted this run: `File` (known and tracked: suppressed)');
+    expect(r.issue).toContain('<!-- coverage-fix-run:555 -->');
+    expect(r.issue).toContain('**Not attempted this run**');
+  });
+
+  it('writes no not-attempted line when the selector reported nothing skipped', () => {
+    const r = build([{ ...left }], [openedPr], '', '', []);
+    expect(r.slack).toContain('1 gap left for a person.');
+    expect(r.slack).not.toContain('not attempted');
+    expect(r.issue).not.toContain('Not attempted');
+  });
+
+  it('caps the not-attempted list and neutralises its text', () => {
+    const many = Array.from({ length: 25 }, (_, i) => ({
+      resource: `op${i}`,
+      reason: 'area <X> & <Y> already has an agent PR',
+    }));
+    const r = build([], [], '', '', many);
+    expect(r.slack).toContain('25 not attempted.');
+    expect(r.slack).toContain('`op19`');
+    expect(r.slack).not.toContain('`op20`');
+    expect(r.slack).toContain('· …and 5 more');
+    // Slack mrkdwn markup characters in the reason are neutralised.
+    expect(r.slack).toContain('area &lt;X&gt; &amp; &lt;Y&gt; already has an agent PR');
+    expect(r.issue).toContain('…and 5 more');
   });
 });
 
