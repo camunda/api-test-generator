@@ -346,11 +346,15 @@ describe('hub-coverage-fix-report', () => {
       resource: `op${i}`,
       reason: 'its area already has an open agent PR, so it waits for the next run '.repeat(2),
     }));
-    const r = build([], prs, '', '', skipped);
+    const r = build([], prs, 'https://github.com/camunda/api-test-generator/issues/684', '', skipped);
     expect(r.slack).toContain('20 not attempted.'); // headline still counts all of them
     expect(r.slack).toContain('*Not attempted this run:*');
     expect(r.slack).toContain('• `op0`'); // the first skipped entries survive the cut
     expect(r.slack).toContain('…cut here'); // the cap actually triggered
+    // The footer is reserved space, so the scope note and Details link survive even a truncated report.
+    expect(r.slack).toContain(':information_source: Auto-fixes only create-read-delete');
+    expect(r.slack).toContain('<https://github.com/camunda/api-test-generator/issues/684|tracking issue>');
+    expect(r.slack.length).toBeLessThan(3000); // body + footer stays within the Slack cap
     // Every rendered skipped bullet is a complete line, so no code span is left half-open by the cut.
     for (const line of r.slack.split('\n').filter((l) => l.startsWith('• `op'))) {
       expect(line.trimEnd().endsWith(')'), line.slice(-30)).toBe(true);
