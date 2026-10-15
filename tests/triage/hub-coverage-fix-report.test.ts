@@ -115,6 +115,20 @@ describe('hub-coverage-fix-report', () => {
     expect(r.issue).not.toContain('evil.example');
   });
 
+  it('includes the scope note so a reader knows the counts cover only auto-fixable gaps', () => {
+    const r = build(
+      [{ ...left }],
+      [openedPr],
+      'https://github.com/camunda/api-test-generator/issues/684',
+    );
+    expect(r.slack).toContain(
+      '> :information_source: Auto-fixes only create-read-delete and config-only 403/404 gaps; the full backlog is in the weekly report and per-area issues.',
+    );
+    expect(r.issue).toContain(
+      '> ℹ️ Auto-fixes only create-read-delete and config-only 403/404 gaps; the full backlog is in the weekly report and per-area issues.',
+    );
+  });
+
   it('only counts PRs of this run: not older ones, not another run, not closed ones', () => {
     const others = [
       { ...openedPr, number: 5 },
@@ -191,8 +205,8 @@ describe('hub-coverage-fix-report', () => {
     expect(r.slack).not.toContain('<!channel>');
     expect(r.slack).toContain('&lt;!channel&gt;');
     expect(r.slack).toContain('a&lt;b&gt;&amp;c');
-    expect(r.slack.length).toBeLessThan(900);
-    expect(r.issue.length).toBeLessThan(2500);
+    expect(r.slack.length).toBeLessThan(1100);
+    expect(r.issue.length).toBeLessThan(2800);
     expect(r.slack).not.toContain('\n  ');
   });
 
@@ -332,11 +346,15 @@ describe('hub-coverage-fix-report', () => {
       resource: `op${i}`,
       reason: 'its area already has an open agent PR, so it waits for the next run '.repeat(2),
     }));
-    const r = build([], prs, '', '', skipped);
+    const r = build([], prs, 'https://github.com/camunda/api-test-generator/issues/684', '', skipped);
     expect(r.slack).toContain('20 not attempted.'); // headline still counts all of them
     expect(r.slack).toContain('*Not attempted this run:*');
     expect(r.slack).toContain('• `op0`'); // the first skipped entries survive the cut
     expect(r.slack).toContain('…cut here'); // the cap actually triggered
+    // The footer is reserved space, so the scope note and Details link survive even a truncated report.
+    expect(r.slack).toContain(':information_source: Auto-fixes only create-read-delete');
+    expect(r.slack).toContain('<https://github.com/camunda/api-test-generator/issues/684|tracking issue>');
+    expect(r.slack.length).toBeLessThan(3000); // body + footer stays within the Slack cap
     // Every rendered skipped bullet is a complete line, so no code span is left half-open by the cut.
     for (const line of r.slack.split('\n').filter((l) => l.startsWith('• `op'))) {
       expect(line.trimEnd().endsWith(')'), line.slice(-30)).toBe(true);
@@ -398,6 +416,19 @@ describe('the workflows that carry the report', () => {
     expect(cond).toContain('always()');
     expect(cond).toContain("steps.verify.outcome == 'success'");
     expect(isRec(link) ? link['continue-on-error'] : undefined).toBe(true);
+  });
+
+  it('anchors the Slack Details link to this run comment in both reporting jobs', () => {
+    for (const job of ['verify', 'report-skipped']) {
+      const comment = stepsOf('hub-coverage-fix.yml', job).find(
+        (s) => String(s.name) === 'Comment on the tracking issue',
+      );
+      const run = String(isRec(comment) ? comment.run : '');
+      // Capture the posted/edited comment's URL and swap it into the Slack Details link.
+      expect(run, job).toContain("--jq '.html_url'");
+      expect(run, job).toContain('comment_url');
+      expect(run, job).toContain('slack.txt');
+    }
   });
 
   it('reports a skipped-only run from a dedicated agent-less job', () => {

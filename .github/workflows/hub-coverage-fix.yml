@@ -807,11 +807,16 @@ jobs:
           existing="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/issues/${num}/comments?per_page=100" \
             --jq ".[] | select(.body | contains(\"${marker}\")) | .id" | head -n 1)"
           if [ -n "$existing" ]; then
-            gh api -X PATCH "repos/${GITHUB_REPOSITORY}/issues/comments/${existing}" -F body=@"${RUNNER_TEMP}/issue-comment.md" > /dev/null
+            comment_url="$(gh api -X PATCH "repos/${GITHUB_REPOSITORY}/issues/comments/${existing}" -F body=@"${RUNNER_TEMP}/issue-comment.md" --jq '.html_url')"
           else
-            gh api -X POST "repos/${GITHUB_REPOSITORY}/issues/${num}/comments" -F body=@"${RUNNER_TEMP}/issue-comment.md" > /dev/null
+            comment_url="$(gh api -X POST "repos/${GITHUB_REPOSITORY}/issues/${num}/comments" -F body=@"${RUNNER_TEMP}/issue-comment.md" --jq '.html_url')"
           fi
-          echo "Commented on ${ISSUE_URL}"
+          echo "Commented on ${comment_url:-$ISSUE_URL}"
+          # Point the Slack "Details" link at this run's comment (the full record), not the issue top.
+          if [ -n "${comment_url:-}" ] && [ -s "${RUNNER_TEMP}/slack.txt" ]; then
+            python3 -c 'import sys; p=sys.argv[3]; s=open(p).read(); open(p,"w").write(s.replace(sys.argv[1], sys.argv[2]))' \
+              "$ISSUE_URL" "$comment_url" "${RUNNER_TEMP}/slack.txt"
+          fi
 
       # The weekly report run saved its Slack message id as a small artifact of its own. A report from before that
       # existed, or a report run that did not post (a dry run), has none, and then no Slack reply is made.
@@ -956,11 +961,16 @@ jobs:
           existing="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/issues/${num}/comments?per_page=100" \
             --jq ".[] | select(.body | contains(\"${marker}\")) | .id" | head -n 1)"
           if [ -n "$existing" ]; then
-            gh api -X PATCH "repos/${GITHUB_REPOSITORY}/issues/comments/${existing}" -F body=@"${RUNNER_TEMP}/issue-comment.md" > /dev/null
+            comment_url="$(gh api -X PATCH "repos/${GITHUB_REPOSITORY}/issues/comments/${existing}" -F body=@"${RUNNER_TEMP}/issue-comment.md" --jq '.html_url')"
           else
-            gh api -X POST "repos/${GITHUB_REPOSITORY}/issues/${num}/comments" -F body=@"${RUNNER_TEMP}/issue-comment.md" > /dev/null
+            comment_url="$(gh api -X POST "repos/${GITHUB_REPOSITORY}/issues/${num}/comments" -F body=@"${RUNNER_TEMP}/issue-comment.md" --jq '.html_url')"
           fi
-          echo "Commented on ${ISSUE_URL}"
+          echo "Commented on ${comment_url:-$ISSUE_URL}"
+          # Point the Slack "Details" link at this run's comment (the full record), not the issue top.
+          if [ -n "${comment_url:-}" ] && [ -s "${RUNNER_TEMP}/slack.txt" ]; then
+            python3 -c 'import sys; p=sys.argv[3]; s=open(p).read(); open(p,"w").write(s.replace(sys.argv[1], sys.argv[2]))' \
+              "$ISSUE_URL" "$comment_url" "${RUNNER_TEMP}/slack.txt"
+          fi
 
       - name: Download the weekly Slack message id
         continue-on-error: true
