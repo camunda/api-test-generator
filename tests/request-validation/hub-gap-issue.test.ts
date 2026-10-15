@@ -440,43 +440,53 @@ const baseSummary = (over: Record<string, unknown> = {}) => ({
 });
 
 describe('weekly Slack message', () => {
-  it('leads with the documented main question — endpoints testing every response', () => {
+  it('leads with the documented main question — endpoints tested for every status code', () => {
     const text = slackText(baseSummary(), null);
-    expect(text).toContain('*8 of 10 endpoints test every documented response*');
+    expect(text).toContain('*8 of 10 endpoints are tested for every status code they can return*');
+    // The two-angle intro frames the headline and the invalid-request line.
+    expect(text).toContain('Two angles:');
   });
 
-  it('shows the bad-request-kind axis on its own line, with the upper-bound caveat', () => {
+  it('notes that a documented 500 is not counted, so the headline is not over-claimed', () => {
     const text = slackText(baseSummary(), null);
-    expect(text).toContain('Every applicable bad-request kind tested: 5 of 10 endpoints');
+    expect(text).toContain('a documented 500 is not checked');
+    expect(text).toContain('2xx/400/401/403/404/409');
+  });
+
+  it('shows the bad-request-kind axis on its own line, flagged as possibly understated', () => {
+    const text = slackText(baseSummary(), null);
+    expect(text).toContain(
+      'Invalid-request coverage: 5 of 10 endpoints are tested with every kind of bad request that applies',
+    );
+    // The caveat now names the direction: the covered count may be understated; the missing count is the bound.
+    expect(text).toContain('may be understated');
     expect(text).toContain('upper bound');
   });
 
-  it('lists missing response tests grouped by status code, omitting codes with no gap', () => {
+  it('lists status codes not tested yet, omitting codes with no gap', () => {
     const text = slackText(baseSummary(), null);
     // baseSummary codeGaps: 400:1, 403:2, 404:1, 409:2 ; 2xx and 401 are 0, so omitted
-    expect(text).toContain('Missing a response test: 400 (1) · 403 (2) · 404 (1) · 409 (2)');
+    expect(text).toContain('Status codes not tested yet: 400 (1) · 403 (2) · 404 (1) · 409 (2)');
     const clean = slackText(
       baseSummary({ codeGaps: { '2xx': 0, '400': 0, '401': 0, '403': 0, '404': 0, '409': 0 } }),
       null,
     );
-    expect(clean).toContain('Missing a response test: none');
+    expect(clean).toContain('Status codes not tested yet: none');
   });
 
-  it('lists areas with a response gap, most first', () => {
+  it('lists where the response gaps are, by area, most first', () => {
     const text = slackText(
       baseSummary({ areaResponseGaps: { File: 2, Project: 1, Catalog: 2 } }),
       null,
     );
     // sorted by count desc then name: Catalog 2, File 2, Project 1
-    expect(text).toContain('Areas with a response gap: Catalog 2 · File 2 · Project 1');
+    expect(text).toContain('Where those gaps are (by area): Catalog 2 · File 2 · Project 1');
   });
 
   it('rolls up the out-of-scope dimensions on one line so they stay visible', () => {
     const text = slackText(baseSummary(), null);
     // lifecycle missing 2+1+1=4 ; optional fields 9-6=3 ; response-shape 3
-    expect(text).toContain(
-      'Other gaps (outside the main question): 4 lifecycle · 3 optional fields · 3 response-shape',
-    );
+    expect(text).toContain('Other test gaps: 4 lifecycle · 3 optional fields · 3 response-shape');
   });
 
   it('shows the change in brackets on the headline and on the kind line', () => {
@@ -484,13 +494,13 @@ describe('weekly Slack message', () => {
       baseSummary({ fullyAsserted: 8, requestChecks: [5, 10] }),
       baseSummary({ fullyAsserted: 7, requestChecks: [7, 10] }),
     );
-    expect(text).toContain('documented response* (+1).');
-    expect(text).toContain('bad-request kind tested: 5 of 10 endpoints (-2)');
+    expect(text).toContain('they can return* (+1).');
+    expect(text).toContain('every kind of bad request that applies (-2)');
   });
 
   it('shows no change figures at all for the first report', () => {
     const text = slackText(baseSummary(), null);
-    expect(text).toContain('test every documented response*. A number in brackets');
+    expect(text).toContain('they can return*. _Counts');
     expect(text).not.toMatch(/\([+-]\d+\)/);
   });
 

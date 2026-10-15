@@ -514,11 +514,13 @@ def known_note(urls):
 
 
 def slack(s, prev, args):
-    # Leads with the report's documented main question — does every endpoint test every response the
-    # spec lists? — then the bad-request-kind axis as its own line (kept separate because that column
-    # is an upper bound), then the actionable gaps grouped by code and by area. Dimensions outside the
-    # main question (lifecycle, optional fields, response-shape) get one roll-up line so they stay
-    # visible without dominating. Numbers come straight from the summary; nothing new is computed here.
+    # Leads with the report's documented main question — does every endpoint test every status code it
+    # can return? (2xx/400/401/403/404/409; a documented 500 is not checked) — then the bad-request-kind
+    # axis as its own line (kept separate because its covered count can be understated: an over-broad
+    # applicability rule marks an endpoint as a gap, so the count of endpoints still missing a kind is an
+    # upper bound). Then the actionable gaps grouped by code and by area. Dimensions outside the main
+    # question (lifecycle, optional fields, response-shape) get one roll-up line so they stay visible
+    # without dominating. Numbers come straight from the summary; nothing new is computed here.
     ref = f'camunda-hub@{args.spec_ref[:7]}' if args.spec_ref else 'spec ' + s['specHash'].replace('sha256:', '')[:7]
     n = s['operations']
     pf = prev['fullyAsserted'] if prev else None
@@ -527,18 +529,24 @@ def slack(s, prev, args):
 
     lines = [
         f':bar_chart: *Hub API test coverage* (weekly) · {ref} · {n} endpoints',
-        f'*{s["fullyAsserted"]} of {n} endpoints test every documented response*'
-        f'{change(s["fullyAsserted"], pf)}. A number in brackets is the change since the last report.',
-        f'• Every applicable bad-request kind tested: {kind_ok} of {kind_total} endpoints'
-        f'{change(kind_ok, kind_before)}'
-        ' _(some flagged kinds cannot be generated yet, so treat this as an upper bound)_',
+        '_Two angles: does each endpoint test every status code it can return, '
+        'and does it reject every kind of bad request?_',
+        f'*{s["fullyAsserted"]} of {n} endpoints are tested for every status code they can return*'
+        f'{change(s["fullyAsserted"], pf)}.'
+        ' _Counts 2xx/400/401/403/404/409; a documented 500 is not checked. '
+        'A bracketed number is the change since the last report._',
+        f'• Invalid-request coverage: {kind_ok} of {kind_total} endpoints are tested with every kind '
+        f'of bad request that applies{change(kind_ok, kind_before)}'
+        ' _(may be understated: some flagged kinds cannot be generated yet, so the count of '
+        'endpoints still missing a kind is an upper bound)_',
         '',
     ]
     code_bits = [f'{b} ({s["codeGaps"][b]})' for b in BUCKETS if s['codeGaps'].get(b)]
-    lines.append('• Missing a response test: ' + (' · '.join(code_bits) if code_bits else 'none :tada:'))
+    lines.append(
+        '• Status codes not tested yet: ' + (' · '.join(code_bits) if code_bits else 'none :tada:'))
     areas = sorted(s['areaResponseGaps'].items(), key=lambda kv: (-kv[1], kv[0]))
     lines.append(
-        '• Areas with a response gap: ' + (' · '.join(f'{a} {c}' for a, c in areas) if areas else 'none'))
+        '• Where those gaps are (by area): ' + (' · '.join(f'{a} {c}' for a, c in areas) if areas else 'none'))
     other = []
     lc = s['lifecycle']
     lc_missing = len(lc['createMissing']) + len(lc['restoreMissing']) + len(lc['edgeMissing'])
@@ -550,7 +558,7 @@ def slack(s, prev, args):
     if s['shapeUnvalidated']:
         other.append(f'{len(s["shapeUnvalidated"])} response-shape')
     if other:
-        lines.append('• Other gaps (outside the main question): ' + ' · '.join(other))
+        lines.append('• Other test gaps: ' + ' · '.join(other))
     if s['zeroTestOperations']:
         tracked = set(s['trackedOperations'])
         urls = s.get('trackedUrls', {})
