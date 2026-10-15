@@ -434,118 +434,74 @@ const baseSummary = (over: Record<string, unknown> = {}) => ({
   },
   zeroTestOperations: [],
   trackedOperations: [],
+  codeGaps: { '2xx': 0, '400': 1, '401': 0, '403': 2, '404': 1, '409': 2 },
+  areaResponseGaps: { File: 2, Project: 1 },
   ...over,
 });
 
 describe('weekly Slack message', () => {
-  it('has a positive-tests section and a negative-tests section, each holding its own lines', () => {
+  it('leads with the documented main question — endpoints tested for every status code', () => {
     const text = slackText(baseSummary(), null);
-    const at = (needle: string) => text.indexOf(needle);
-    expect(at('Positive tests')).toBeGreaterThan(-1);
-    expect(at('Negative tests')).toBeGreaterThan(at('Positive tests'));
-    // success lines sit before the error heading, error lines after it
-    for (const ok of [
-      'Success (2xx): 10 of 10',
-      'Optional request fields sent in a success test: 6 of 9',
-      'never check the shape',
-    ]) {
-      expect(at(ok)).toBeGreaterThan(at('Positive tests'));
-      expect(at(ok)).toBeLessThan(at('Negative tests'));
-    }
-    for (const bad of [
-      'Bad request (400): 4 of 5',
-      'Not authenticated (401)',
-      'Forbidden (403)',
-      'Not found (404)',
-      'Conflict (409): 1 of 3',
-      'Every kind of bad request tested: 5 of 10',
-    ]) {
-      expect(at(bad)).toBeGreaterThan(at('Negative tests'));
-    }
+    expect(text).toContain('*8 of 10 endpoints are tested for every status code they can return*');
+    // The two-angle intro frames the headline and the invalid-request line.
+    expect(text).toContain('Two angles:');
   });
 
-  it('shows the change since the last report on each count, and nothing when there is none', () => {
-    const prev = baseSummary({
-      codes: {
-        '2xx': [9, 10],
-        '400': [4, 5],
-        '401': [10, 10],
-        '403': [8, 10],
-        '404': [3, 4],
-        '409': [1, 3],
-      },
-      optionalFields: [2, 9],
-      requestChecks: [7, 10],
-    });
+  it('notes that a documented 500 is not counted, so the headline is not over-claimed', () => {
+    const text = slackText(baseSummary(), null);
+    expect(text).toContain('a documented 500 is not checked');
+    expect(text).toContain('2xx/400/401/403/404/409');
+  });
+
+  it('shows the bad-request-kind axis on its own line, flagged as possibly understated', () => {
+    const text = slackText(baseSummary(), null);
+    expect(text).toContain(
+      'Invalid-request coverage: 5 of 10 endpoints are tested with every kind of bad request that applies',
+    );
+    // The caveat now names the direction: the covered count may be understated; the missing count is the bound.
+    expect(text).toContain('may be understated');
+    expect(text).toContain('upper bound');
+  });
+
+  it('lists status codes not tested yet, omitting codes with no gap', () => {
+    const text = slackText(baseSummary(), null);
+    // baseSummary codeGaps: 400:1, 403:2, 404:1, 409:2 ; 2xx and 401 are 0, so omitted
+    expect(text).toContain('Status codes not tested yet: 400 (1) · 403 (2) · 404 (1) · 409 (2)');
+    const clean = slackText(
+      baseSummary({ codeGaps: { '2xx': 0, '400': 0, '401': 0, '403': 0, '404': 0, '409': 0 } }),
+      null,
+    );
+    expect(clean).toContain('Status codes not tested yet: none');
+  });
+
+  it('lists where the response gaps are, by area, most first', () => {
     const text = slackText(
-      baseSummary({ codes: { ...baseSummary().codes, '409': [3, 3], '2xx': [10, 10] } }),
-      prev,
+      baseSummary({ areaResponseGaps: { File: 2, Project: 1, Catalog: 2 } }),
+      null,
     );
-    expect(text).toContain('Success (2xx): 10 of 10 (+1)');
-    expect(text).toContain('Conflict (409): 3 of 3 (+2)');
-    expect(text).toContain('Optional request fields sent in a success test: 6 of 9 (+4)');
-    expect(text).toContain('Every kind of bad request tested: 5 of 10 endpoints (-2)');
-    // an unchanged count carries no bracket
-    expect(text).toMatch(/Bad request \(400\): 4 of 5 {2}/);
-    expect(text).not.toMatch(/Bad request \(400\): 4 of 5 \(/);
+    // sorted by count desc then name: Catalog 2, File 2, Project 1
+    expect(text).toContain('Where those gaps are (by area): Catalog 2 · File 2 · Project 1');
   });
 
-  it('shows the change on the roll-ups across both kinds of test, too', () => {
-    const prev = baseSummary({
-      opsMissingResponseTest: 5,
-      codes: { ...baseSummary().codes, '409': [0, 3], '404': [2, 4] },
-    });
-    const text = slackText(baseSummary(), prev);
-    // 409: 2 untested now, 3 before; 404: 1 untested now, 2 before
-    expect(text).toContain('Conflict (409), 2 untested (-1)');
-    expect(text).toContain('2 endpoints (-3) are missing a test');
-    expect(slackText(baseSummary(), baseSummary())).toContain('2 endpoints are missing a test');
-    expect(slackText(baseSummary(), baseSummary())).not.toMatch(/untested \(/);
-  });
-
-  it('lists the lifecycle tests per resource under the positive tests, naming what is missing', () => {
+  it('rolls up the out-of-scope dimensions on one line so they stay visible', () => {
     const text = slackText(baseSummary(), null);
-    const at = (needle: string) => text.indexOf(needle);
-    expect(text).toContain(
-      'Lifecycle tests (create, read, delete): 4 of 6 resources. Missing: ProjectSnapshot, Version (known, tracked)',
-    );
-    expect(text).toContain(
-      'Lifecycle tests (delete, restore): 4 of 5 resources. Missing: Version (known, tracked)',
-    );
-    expect(text).toContain('Lifecycle tests (add, remove): 1 of 2 links. Missing: addTag');
-    expect(at('Lifecycle tests (create, read, delete)')).toBeGreaterThan(at('Positive tests'));
-    expect(at('Lifecycle tests (create, read, delete)')).toBeLessThan(at('Negative tests'));
-    const full = baseSummary({
-      lifecycle: {
-        create: [6, 6],
-        createMissing: [],
-        restore: [5, 5],
-        restoreMissing: [],
-        edge: [2, 2],
-        edgeMissing: [],
-        known: [],
-      },
-    });
-    expect(slackText(full, null)).toContain('(create, read, delete): 6 of 6 resources\n');
-    expect(slackText(full, null)).not.toContain('Missing:');
+    // lifecycle missing 2+1+1=4 ; optional fields 9-6=3 ; response-shape 3
+    expect(text).toContain('Other test gaps: 4 lifecycle · 3 optional fields · 3 response-shape');
   });
 
-  it('shows the change in resources with a lifecycle test', () => {
-    const prev = baseSummary({
-      lifecycle: {
-        create: [3, 6],
-        createMissing: [],
-        restore: [4, 5],
-        restoreMissing: [],
-        edge: [0, 2],
-        edgeMissing: [],
-        known: [],
-      },
-    });
-    const text = slackText(baseSummary(), prev);
-    expect(text).toContain('(create, read, delete): 4 of 6 resources (+1)');
-    expect(text).not.toContain('(delete, restore): 4 of 5 resources (');
-    expect(text).toContain('Lifecycle tests (add, remove): 1 of 2 links (+1)');
+  it('shows the change in brackets on the headline and on the kind line', () => {
+    const text = slackText(
+      baseSummary({ fullyAsserted: 8, requestChecks: [5, 10] }),
+      baseSummary({ fullyAsserted: 7, requestChecks: [7, 10] }),
+    );
+    expect(text).toContain('they can return* (+1).');
+    expect(text).toContain('every kind of bad request that applies (-2)');
+  });
+
+  it('shows no change figures at all for the first report', () => {
+    const text = slackText(baseSummary(), null);
+    expect(text).toContain('they can return*. _Counts');
+    expect(text).not.toMatch(/\([+-]\d+\)/);
   });
 
   it('links the tracking issues next to an endpoint with no test at all', () => {
@@ -563,82 +519,18 @@ describe('weekly Slack message', () => {
       null,
     );
     expect(text).toContain(
-      '`a` (known, tracked: <https://github.com/camunda/camunda-hub/issues/25907|camunda-hub#25907>, <https://github.com/camunda/camunda-hub/issues/26448|camunda-hub#26448>)',
+      'No test at all: `a` (known, tracked: <https://github.com/camunda/camunda-hub/issues/25907|camunda-hub#25907>, <https://github.com/camunda/camunda-hub/issues/26448|camunda-hub#26448>)',
     );
     // tracked but no URL on record, and not tracked at all
     expect(text).toContain('`b` (known, tracked), `c`');
     expect(text).not.toContain('`c` (');
   });
 
-  it('shows no change for a lifecycle count a previous report did not have yet', () => {
-    const { edge: _edge, edgeMissing: _edgeMissing, ...lifecycle } = baseSummary().lifecycle;
-    const text = slackText(baseSummary(), baseSummary({ lifecycle }));
-    expect(text).toContain('Lifecycle tests (add, remove): 1 of 2 links. Missing: addTag');
-    // counts the older report did have still show their change
-    expect(slackText(baseSummary(), baseSummary({ lifecycle: undefined }))).toContain(
-      'Lifecycle tests (add, remove): 1 of 2 links. Missing',
-    );
-  });
-
-  it('ends with a link to the guide that explains the report', () => {
-    expect(slackText(baseSummary(), null)).toContain(
-      '<https://github.com/camunda/api-test-generator/blob/main/docs/hub-response-coverage-report.md|📖 Guide>',
-    );
-  });
-
-  it('shows the headline change in the same bracket format, and nothing when unchanged', () => {
-    const up = slackText(baseSummary({ fullyAsserted: 8 }), baseSummary({ fullyAsserted: 7 }));
-    expect(up).toContain(
-      '*8 of 10 endpoints* have a test for every response the API spec lists (+1).',
-    );
-    const down = slackText(baseSummary({ fullyAsserted: 8 }), baseSummary({ fullyAsserted: 9 }));
-    expect(down).toContain('lists (-1).');
-    const same = slackText(baseSummary(), baseSummary());
-    expect(same).toContain('the API spec lists. A number in brackets');
-    expect(same).not.toContain('since last report');
-  });
-
-  it('shows the change in endpoints that never check the success shape, too', () => {
-    const prev = baseSummary({ shapeUnvalidated: ['a', 'b', 'c', 'd', 'e'] });
-    expect(slackText(baseSummary(), prev)).toContain('the success response: 3 (-2)');
-    expect(slackText(baseSummary(), baseSummary())).not.toContain('the success response: 3 (');
-  });
-
-  it('keeps the roll-ups that mix positive and negative under their own heading, after the negative section', () => {
-    // 2xx is the worst bucket here, so the "biggest gaps" line names a success-path count
-    const text = slackText(
-      baseSummary({ codes: { ...baseSummary().codes, '2xx': [2, 10], '409': [3, 3] } }),
-      null,
-    );
-    const at = (needle: string) => text.indexOf(needle);
-    expect(at('*Across positive and negative tests*')).toBeGreaterThan(
-      at('Every kind of bad request tested'),
-    );
-    for (const mixed of [
-      'Biggest gaps: Success (2xx), 8 untested',
-      'endpoints are missing a test for a success',
-    ]) {
-      expect(at(mixed)).toBeGreaterThan(at('*Across positive and negative tests*'));
-    }
-    // and nothing mixed is left between the error heading and the roll-up heading
-    const errorSection = text.slice(
-      at('Negative tests'),
-      at('*Across positive and negative tests*'),
-    );
-    expect(errorSection).not.toContain('Biggest gaps');
-    expect(errorSection).not.toContain('Success (2xx)');
-  });
-
-  it('shows no change figures at all for the first report', () => {
+  it('ends with the full-table, tracking-issue and guide links', () => {
     const text = slackText(baseSummary(), null);
-    expect(text).not.toMatch(/of \d+ \([+-]\d+\)/);
-  });
-
-  it('explains the bracket and keeps the links', () => {
-    const text = slackText(baseSummary(), null);
-    expect(text).toContain('A number in brackets is the change since the last report.');
     expect(text).toContain('<http://run|Full table>');
-    expect(text).toContain('<http://track|Tracking epic>');
+    expect(text).toContain('<http://track|Tracking issue>');
+    expect(text).toContain('|📖 Guide>');
   });
 });
 
