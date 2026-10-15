@@ -70,6 +70,8 @@ jobs:
     # What the verify job needs, taken from steps that finished before the agent started.
     outputs:
       count: ${{ steps.select.outputs.count }}
+      # How many eligible gaps the selector set aside; the report-skipped job posts them when count is 0.
+      skipped: ${{ steps.select.outputs.skipped }}
       baseline: ${{ steps.baseline.outputs.number }}
       # The weekly report run this run read: its tracking issue and Slack message get the run's report.
       report_run_id: ${{ steps.report-run.outputs.run_id }}
@@ -197,6 +199,8 @@ jobs:
           cat "${GITHUB_WORKSPACE}/selection.json"
           echo "count=$(jq '.candidates | length' "${GITHUB_WORKSPACE}/selection.json")" >> "$GITHUB_OUTPUT"
           echo "budget=$(jq '.budget' "${GITHUB_WORKSPACE}/selection.json")" >> "$GITHUB_OUTPUT"
+          # The eligible gaps the agent did not take this run; the report-skipped job posts them when count is 0.
+          echo "skipped=$(jq '.skipped | length' "${GITHUB_WORKSPACE}/selection.json")" >> "$GITHUB_OUTPUT"
           # Recent agent PRs, in the shape the playbook describes for $RECENT_COVERAGE_FIX_PRS_FILE.
           jq --arg now "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '
             [ .[] | select(.headRefName | startswith("fix/coverage-"))
@@ -218,6 +222,16 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
           printf '{"run_url":"%s","gaps":[],"counts":{"considered":0,"pr_opened":0,"report_only":0,"skipped":0},"agent_started":false}\n' \
             "${{ steps.report-run.outputs.run_url }}" > "${GITHUB_WORKSPACE}/hub-coverage-fix.json"
+
+      # On a zero-candidate run the verify job (which reports) does not run, so the report-skipped job does
+      # instead; hand it the selection so it can post the gaps nobody attempted.
+      - name: Upload the selection for the skipped-only report
+        if: ${{ steps.select.outputs.count == '0' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: hub-coverage-fix-selection-${{ github.run_id }}
+          path: ${{ github.workspace }}/selection.json
+          if-no-files-found: error
 
       # --- Credentials ---------------------------------------------------------
       - name: Fetch Anthropic key + GitHub PAT from Vault
@@ -847,6 +861,150 @@ jobs:
 
       - name: Reply in the weekly Slack thread
         if: ${{ always() && env.DRY_RUN != 'true' && steps.slack-ready.outputs.ts != '' && steps.slack-token.outputs.SLACK_BOT_TOKEN != '' }}
+        continue-on-error: true
+        uses: slackapi/slack-github-action@v2
+        with:
+          method: chat.postMessage
+          token: ${{ steps.slack-token.outputs.SLACK_BOT_TOKEN }}
+          payload: |
+            {
+              "channel": "#camunda-hub-nightly-test-results",
+              "thread_ts": ${{ toJSON(steps.slack-ready.outputs.ts) }},
+              "text": ${{ toJSON(steps.slack-ready.outputs.text) }},
+              "mrkdwn": true
+            }
+
+  # When the selector finds no candidate but set gaps aside (all already covered, in a busy area, or known and
+  # tracked), the fix job early-exits and the verify job — which posts the run report — does not run. This small
+  # agent-less job posts the "not attempted" list in that case, so a week where every eligible gap is deferred is
+  # not silent. It runs no agent, opens no PR, and makes no verification claim: it only reports.
+  report-skipped:
+    name: Report the gaps nobody attempted (no candidates this run)
+    needs: fix
+    if: >-
+      ${{ always()
+        && needs.fix.outputs.count == '0'
+        && needs.fix.outputs.skipped != '0' && needs.fix.outputs.skipped != ''
+        && needs.fix.outputs.report_run_id != ''
+        && (github.event_name == 'workflow_run' || github.event.inputs.dry_run == 'false') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      # Read the report run's artifacts (download-artifact across runs) and check out this repo's scripts.
+      contents: read
+      actions: read
+      # Write: one comment per run on the weekly tracking issue. It never opens or touches a PR.
+      issues: write
+      # Vault login (OIDC) for the Slack bot token, to reply in the weekly Slack thread.
+      id-token: write
+    steps:
+      - name: Checkout api-test-generator
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Download the selection
+        uses: actions/download-artifact@v4
+        with:
+          name: hub-coverage-fix-selection-${{ github.run_id }}
+          path: ${{ runner.temp }}/sel
+
+      - name: Download the weekly report
+        id: weekly
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: hub-coverage-report
+          path: ${{ runner.temp }}/weekly
+          run-id: ${{ needs.fix.outputs.report_run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Write the run report
+        id: report
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          issue_url=""
+          if [ -s "${RUNNER_TEMP}/weekly/issue-url.txt" ]; then
+            candidate="$(tr -d '[:space:]' < "${RUNNER_TEMP}/weekly/issue-url.txt")"
+            if printf '%s' "$candidate" | grep -qE "^https://github.com/${GITHUB_REPOSITORY}/issues/[0-9]+$"; then
+              issue_url="$candidate"
+            fi
+          fi
+          echo "issue_url=${issue_url}" >> "$GITHUB_OUTPUT"
+          # An agent-less run: no agent result and no PRs, only the selector's skipped list.
+          printf '{"gaps":[]}\n' > "${RUNNER_TEMP}/empty-result.json"
+          printf '[]\n' > "${RUNNER_TEMP}/empty-prs.json"
+          ISSUE_URL="$issue_url" bash .github/scripts/hub-coverage-fix-report.sh \
+            "${RUNNER_TEMP}/empty-result.json" "${RUNNER_TEMP}/empty-prs.json" \
+            "${RUNNER_TEMP}/issue-comment.md" "${RUNNER_TEMP}/slack.txt" \
+            "${RUNNER_TEMP}/sel/selection.json"
+
+      - name: Comment on the tracking issue
+        if: ${{ steps.report.outcome == 'success' && steps.report.outputs.issue_url != '' }}
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_URL: ${{ steps.report.outputs.issue_url }}
+        run: |
+          set -euo pipefail
+          [ -s "${RUNNER_TEMP}/issue-comment.md" ] || { echo "Nothing to report for the tracking issue."; exit 0; }
+          num="${ISSUE_URL##*/}"
+          marker="<!-- coverage-fix-run:${GITHUB_RUN_ID} -->"
+          existing="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/issues/${num}/comments?per_page=100" \
+            --jq ".[] | select(.body | contains(\"${marker}\")) | .id" | head -n 1)"
+          if [ -n "$existing" ]; then
+            gh api -X PATCH "repos/${GITHUB_REPOSITORY}/issues/comments/${existing}" -F body=@"${RUNNER_TEMP}/issue-comment.md" > /dev/null
+          else
+            gh api -X POST "repos/${GITHUB_REPOSITORY}/issues/${num}/comments" -F body=@"${RUNNER_TEMP}/issue-comment.md" > /dev/null
+          fi
+          echo "Commented on ${ISSUE_URL}"
+
+      - name: Download the weekly Slack message id
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: hub-coverage-slack-ts
+          path: ${{ runner.temp }}/slack-ts
+          run-id: ${{ needs.fix.outputs.report_run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Check the Slack reply can be made
+        id: slack-ready
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          ts=""
+          if [ -s "${RUNNER_TEMP}/slack-ts/slack-ts.txt" ]; then
+            candidate="$(tr -d '[:space:]' < "${RUNNER_TEMP}/slack-ts/slack-ts.txt")"
+            if printf '%s' "$candidate" | grep -qE '^[0-9]+\.[0-9]+$'; then ts="$candidate"; fi
+          fi
+          if [ ! -s "${RUNNER_TEMP}/slack.txt" ]; then
+            echo "Nothing to report to Slack."
+          elif [ -z "$ts" ]; then
+            echo "::warning::No Slack message id for the weekly report run: the note was not sent to Slack."
+          else
+            echo "ts=${ts}" >> "$GITHUB_OUTPUT"
+            {
+              echo 'text<<SLACK_TEXT_EOF'
+              cat "${RUNNER_TEMP}/slack.txt"
+              echo 'SLACK_TEXT_EOF'
+            } >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Fetch Slack bot token from Vault
+        id: slack-token
+        if: ${{ steps.slack-ready.outputs.ts != '' }}
+        continue-on-error: true
+        uses: ./.github/actions/slack-token
+        with:
+          vault-url: ${{ secrets.VAULT_ADDR }}
+          vault-jwt-path: ${{ secrets.VAULT_JWT_PATH }}
+          vault-jwt-role: ${{ secrets.VAULT_JWT_ROLE }}
+          vault-jwt-audience: ${{ secrets.VAULT_JWT_AUDIENCE }}
+
+      - name: Reply in the weekly Slack thread
+        if: ${{ steps.slack-ready.outputs.ts != '' && steps.slack-token.outputs.SLACK_BOT_TOKEN != '' }}
         continue-on-error: true
         uses: slackapi/slack-github-action@v2
         with:

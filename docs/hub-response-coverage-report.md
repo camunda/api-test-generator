@@ -165,8 +165,10 @@ thread (one line per gap, with links to the PRs). It also names the gaps the age
 reason (its area already has an open pull request, another open pull request covers it, or it is known and tracked), so every
 eligible gap each week shows up in exactly one place — opened, left for a person, or not attempted — and none drops out of
 sight. "Not attempted" almost always means "waiting its turn": the agent opens at most one pull request per area at a time,
-so a gap whose area already has one is picked up on a later run once that pull request merges or closes. Nothing is posted
-for a dry run, or for a run that opened no pull request and skipped, left and attempted nothing.
+so a gap whose area already has one is picked up on a later run once that pull request merges or closes. Even a week where
+the agent finds nothing to do but set gaps aside is reported (a dedicated agent-less step posts the not-attempted list), so
+a fully-deferred week is not silent. Nothing is posted for a dry run, or for a run that opened no pull request and skipped,
+left and attempted nothing.
 
 **How it runs.** Two ways.
 

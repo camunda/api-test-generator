@@ -379,4 +379,39 @@ describe('the workflows that carry the report', () => {
       expect(s['continue-on-error'], String(s.name)).toBe(true);
     }
   });
+
+  const jobOf = (file: string, job: string): Record<string, unknown> => {
+    const wf: unknown = load(readFileSync(join(root, file), 'utf8'));
+    const jobs = isRec(wf) && isRec(wf.jobs) ? wf.jobs : {};
+    return isRec(jobs[job]) ? jobs[job] : {};
+  };
+
+  it('reports a skipped-only run from a dedicated agent-less job', () => {
+    const job = jobOf('hub-coverage-fix.yml', 'report-skipped');
+    expect(Object.keys(job).length, 'report-skipped job must exist').toBeGreaterThan(0);
+    const cond = String(job.if);
+    // Only a zero-candidate run that still set gaps aside, and only a real run.
+    expect(cond).toContain("needs.fix.outputs.count == '0'");
+    expect(cond).toContain("needs.fix.outputs.skipped != '0'");
+    const perms = isRec(job.permissions) ? job.permissions : {};
+    expect(perms.issues).toBe('write');
+    // It only reports: it must never gain PR-write, run the agent, or verify PRs.
+    expect(perms['pull-requests']).toBeUndefined();
+    const names = stepsOf('hub-coverage-fix.yml', 'report-skipped').map((s) => String(s.name));
+    expect(names).toContain('Write the run report');
+    expect(names).toContain('Comment on the tracking issue');
+    expect(names).toContain('Reply in the weekly Slack thread');
+    expect(names).not.toContain('Verify the PRs');
+  });
+
+  it('hands the selection to the skipped-only report on a zero-candidate run', () => {
+    const fix = jobOf('hub-coverage-fix.yml', 'fix');
+    const outputs = isRec(fix.outputs) ? fix.outputs : {};
+    expect(String(outputs.skipped)).toContain('steps.select.outputs.skipped');
+    const upload = stepsOf('hub-coverage-fix.yml', 'fix').find((s) =>
+      String(s.name).includes('Upload the selection for the skipped-only report'),
+    );
+    expect(upload, 'fix job must upload the selection on count==0').toBeTruthy();
+    expect(String(isRec(upload) ? upload.if : '')).toContain("count == '0'");
+  });
 });

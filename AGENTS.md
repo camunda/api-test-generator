@@ -974,6 +974,8 @@ an area issue that usually lists several. The per-run report (`.github/scripts/h
 reply and the tracking-issue comment) also names the gaps the agent did **not** attempt this run (the selector's `skipped`
 list, each with a reason: its area already has an open PR, another open PR covers it, it is known and tracked), so every
 eligible gap each week lands in exactly one bucket — opened, left for a person, or not attempted — and none drops silently.
+A run where the selector finds no candidate but set gaps aside still posts that list: the `verify` job does not run then,
+so a dedicated agent-less `report-skipped` job (its own `issues: write`, no agent, no PRs) reports it instead.
 
 **A failed Slack step fails the scheduled run.** The Slack steps of the scheduled Hub workflows (nightly, triage,
 spec-bump check, re-enable check, weekly coverage report, generator-gap digest) use `continue-on-error`, so a Vault or
