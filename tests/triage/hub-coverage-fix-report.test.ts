@@ -386,6 +386,20 @@ describe('the workflows that carry the report', () => {
     return isRec(jobs[job]) ? jobs[job] : {};
   };
 
+  it('links issues on verification success, independent of the live-check step outcome', () => {
+    const steps = stepsOf('hub-coverage-fix.yml', 'verify');
+    const link = steps.find(
+      (s) => String(s.name) === 'Link each verified PR to its tracking issue',
+    );
+    expect(link, 'linking step must exist').toBeTruthy();
+    const cond = String(isRec(link) ? link.if : '');
+    // Explicit gate, so a failed live-check step (which runs just before) cannot skip linking via the
+    // implicit success() a plain `if` would add; still skipped when verification itself failed.
+    expect(cond).toContain('always()');
+    expect(cond).toContain("steps.verify.outcome == 'success'");
+    expect(isRec(link) ? link['continue-on-error'] : undefined).toBe(true);
+  });
+
   it('reports a skipped-only run from a dedicated agent-less job', () => {
     const job = jobOf('hub-coverage-fix.yml', 'report-skipped');
     expect(Object.keys(job).length, 'report-skipped job must exist').toBeGreaterThan(0);

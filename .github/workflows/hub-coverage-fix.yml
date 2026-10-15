@@ -733,9 +733,11 @@ jobs:
 
       # Cross-reference each verified PR with its area's tracking issue: append `relates to #<issue>` to the PR
       # body, which makes GitHub link the two in both directions. Deterministic — the issue per PR comes from the
-      # verifier output, not the agent. Runs only after verification passed; a link failure never fails the run.
+      # verifier output, not the agent. Gated explicitly on verification passing, NOT on the preceding live-check
+      # step: linking is independent, so a live-check dispatch failure must not suppress it. A link failure never
+      # fails the run.
       - name: Link each verified PR to its tracking issue
-        if: ${{ env.DRY_RUN != 'true' }}
+        if: ${{ always() && steps.verify.outcome == 'success' && env.DRY_RUN != 'true' }}
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
