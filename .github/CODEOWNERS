@@ -9,4 +9,4 @@
 /materializer/              @camunda/hub-backend @camunda/test-automation-team
 /request-validation/        @camunda/hub-backend @camunda/test-automation-team
 /emitter-sdk/               @camunda/hub-backend @camunda/test-automation-team
-/configs/camunda-oca/       @camunda/test-automation-team
+/configs/camunda-oca/       @camunda/hub-backend @camunda/test-automation-team
