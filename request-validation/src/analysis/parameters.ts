@@ -1,24 +1,46 @@
 import type { OperationModel, ParameterModel, ValidationScenario } from '../model/types.js';
+import { INVALID_BY_FORMAT } from '../util/formatValues.js';
+import { buildSiblingValues } from '../util/paramSchema.js';
 import { makeId } from './common.js';
 
 interface Opts {
   onlyOperations?: Set<string>;
   capPerOperation?: number;
+  /**
+   * Field name -> capability-gate info (#404). An optional gated param is left out of the sibling
+   * values, because the environment rejects any non-blank value for it.
+   */
+  capabilityGates?: ReadonlyMap<string, unknown>;
+  /** Formats the server does not check (config `unenforcedStringFormats`); no scenario targets them. */
+  unenforcedStringFormats?: readonly string[];
 }
 
 function collectQueryParams(op: OperationModel): ParameterModel[] {
   return op.parameters.filter((p) => p.in === 'query');
 }
 
-function buildQueryParamMap(op: OperationModel): Record<string, string> {
-  const q: Record<string, string> = {};
-  for (const p of collectQueryParams(op)) {
-    const t = p.schema?.type;
-    if (t === 'integer' || t === 'number') q[p.name] = '1';
-    else if (t === 'boolean') q[p.name] = 'true';
-    else q[p.name] = 'x';
-  }
-  return q;
+/**
+ * Every query parameter set to a value its own schema accepts. A scenario overwrites the one
+ * parameter it tests, so each other parameter must be valid or the server rejects that one first
+ * and the scenario never reaches the target.
+ */
+function buildQueryParamMap(
+  op: OperationModel,
+  gates?: ReadonlyMap<string, unknown>,
+): Record<string, string> {
+  return buildSiblingValues(collectQueryParams(op), gates);
+}
+
+/**
+ * A request with nothing wrong: a placeholder for every path token plus a valid value for every
+ * query param. A path token left out is sent as `__MISSING_PARAM__`, so the route would fail
+ * before any validation and the scenario would test the route, not the target.
+ */
+function buildBaseline(
+  op: OperationModel,
+  gates?: ReadonlyMap<string, unknown>,
+): Record<string, string> {
+  return { ...buildParams(op.path, {}), ...buildQueryParamMap(op, gates) };
 }
 
 /**
@@ -35,15 +57,29 @@ function isOmittableParam(p: ParameterModel): boolean {
 }
 
 /** The schema type a type-mismatch scenario would break for `p`, or undefined if none can be built. */
-function typeMismatchTargetType(p: ParameterModel): string | undefined {
+function typeMismatchTargetType(
+  p: ParameterModel,
+  unenforced: readonly string[] = [],
+): string | undefined {
   if (!p.schema?.type) return undefined;
   // Only a query value is rendered as the bad value the scenario sends (a header or cookie would be
   // written into the URL instead), and path params are often strictly string serialized.
   if (p.in !== 'query') return undefined;
   const paramType = Array.isArray(p.schema.type) ? p.schema.type[0] : p.schema.type;
-  // Plain string parameters without enum/format have no real type mismatch.
-  if (paramType === 'string' && !p.schema.enum && !p.schema.format) return undefined;
+  // A query value is always a string, so a string has a wrong "type" only through an enum or a
+  // format the validator checks. A custom format (`TenantId`) accepts any value that fits its
+  // pattern, so a made-up bad value would get 200, not 400.
+  if (paramType === 'string' && !p.schema.enum && invalidStringValue(p, unenforced) === undefined) {
+    return undefined;
+  }
   return wrongTypeValue(paramType) === undefined ? undefined : paramType;
+}
+
+/** A value that breaks the parameter's checkable string format, or undefined if it has none. */
+function invalidStringValue(p: ParameterModel, unenforced: readonly string[]): string | undefined {
+  const format = p.schema?.format;
+  if (typeof format !== 'string' || unenforced.includes(format)) return undefined;
+  return INVALID_BY_FORMAT[format];
 }
 
 /** A query parameter with an enum. Only a query value is rendered as the bad value the scenario sends. */
@@ -56,8 +92,13 @@ export function isParamMissingEligible(op: OperationModel): boolean {
   return op.parameters.some(isOmittableParam);
 }
 
-export function isParamTypeMismatchEligible(op: OperationModel): boolean {
-  return op.parameters.some((p) => typeMismatchTargetType(p) !== undefined);
+export function isParamTypeMismatchEligible(
+  op: OperationModel,
+  unenforcedStringFormats: readonly string[] = [],
+): boolean {
+  return op.parameters.some(
+    (p) => typeMismatchTargetType(p, unenforcedStringFormats) !== undefined,
+  );
 }
 
 export function isParamEnumViolationEligible(op: OperationModel): boolean {
@@ -72,14 +113,12 @@ export function generateParamMissing(ops: OperationModel[], opts: Opts): Validat
     for (const p of op.parameters) {
       if (!isOmittableParam(p)) continue; // a path param can't be omitted without changing the path shape
       if (opts.capPerOperation && produced >= opts.capPerOperation) break;
-      let params: Record<string, string> | undefined;
-      if (p.in === 'query') {
-        const allQ = buildQueryParamMap(op);
-        delete allQ[p.name];
-        params = Object.keys(allQ).length ? allQ : undefined;
-      } else {
-        params = buildParams(op.path, {});
-      }
+      // Path placeholders and the other query params stay, so only the target is missing.
+      const baseline = buildBaseline(op, opts.capabilityGates);
+      delete baseline[p.name];
+      const params: Record<string, string> | undefined = Object.keys(baseline).length
+        ? baseline
+        : undefined;
       out.push({
         id: makeId([op.operationId, 'paramMissing', p.in, p.name]),
         operationId: op.operationId,
@@ -105,11 +144,11 @@ export function generateParamTypeMismatch(ops: OperationModel[], opts: Opts): Va
     if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId)) continue;
     let produced = 0;
     for (const p of op.parameters) {
-      const paramType = typeMismatchTargetType(p);
+      const paramType = typeMismatchTargetType(p, opts.unenforcedStringFormats);
       if (paramType === undefined) continue;
       if (opts.capPerOperation && produced >= opts.capPerOperation) break;
-      // Start with all required query params (so we don't unintentionally create identical empty queries)
-      const allQ = buildQueryParamMap(op);
+      // Start from valid path placeholders and query params, then break only the target.
+      const allQ = buildBaseline(op, opts.capabilityGates);
       // Overwrite the specific param with a wrong typed value (stringified to keep buildUrl logic simple).
       // Branch on the type the eligibility rule resolved, not the raw schema type, which may be a union
       // such as ['string', 'null'] that matches no branch and would leave the valid value in place.
@@ -118,8 +157,9 @@ export function generateParamTypeMismatch(ops: OperationModel[], opts: Opts): Va
       } else if (paramType === 'integer' || paramType === 'number') {
         allQ[p.name] = 'NaNValue';
       } else if (paramType === 'string') {
-        // If we reached here we have format/enum; provide a clearly invalid token
-        allQ[p.name] = '__INVALID_STRING__';
+        // An enum or a checkable format got us here; break the format, else use a token outside the enum.
+        allQ[p.name] =
+          invalidStringValue(p, opts.unenforcedStringFormats ?? []) ?? '__INVALID_STRING__';
       } else if (paramType === 'array') {
         allQ[p.name] = 'notArray';
       } else if (paramType === 'object') {
@@ -169,7 +209,8 @@ export function generateParamEnumViolation(
         path: op.path,
         type: 'param-enum-violation',
         target: `${p.in}.${p.name}`,
-        params: buildParams(op.path, { extraQuery: { [p.name]: String(invalid) } }),
+        // Path tokens and every other query param stay valid, so the 400 can only come from the enum.
+        params: { ...buildBaseline(op, opts.capabilityGates), [p.name]: String(invalid) },
         expectedStatus: 400,
         description: `Enum violation for ${p.in} parameter ${p.name}`,
         headersAuth: true,

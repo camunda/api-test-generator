@@ -27,29 +27,24 @@ The report job starts at 05:00 UTC on Monday, and the Slack message and issues a
 The numbers below are an example.
 
 ```
-Hub API test coverage (weekly)
-camunda-hub@abc1234 · 66 endpoints · 1203 negative tests
+Hub API test coverage (weekly) · camunda-hub@abc1234 · 66 endpoints
+Two angles: does each endpoint test every status code it can return, and does it reject every kind of bad request?
+57 of 66 endpoints are tested for every status code they can return (+2). Counts 2xx/400/401/403/404/409; a documented 500 is not checked. A bracketed number is the change since the last report.
+• Invalid-request coverage: 32 of 64 endpoints are tested with every kind of bad request that applies (may be understated: some flagged kinds cannot be generated yet, so the count of endpoints still missing a kind is an upper bound)
 
-56 of 66 endpoints have a test for every response the API spec lists (+2). A number in brackets is the change since the last report.
+• Status codes not tested yet: 403 (1) · 404 (2) · 409 (3)
+• Where those gaps are (by area): Project Snapshot 2 · File 1 · Member 1
+• Other test gaps: 5 optional fields
+:warning: No test at all: getClusterUsageMetrics (known, tracked: camunda-hub#25907, camunda-hub#26448)
 
-Positive tests (the request is right)
-• Success (2xx): 64 of 66
-• Optional request fields sent in a success test: 63 of 68
-• Endpoints that never check the shape of the success response: 0
-• Lifecycle tests (create, read, delete): 4 of 6 resources. Missing: ProjectSnapshot, Version
-• Lifecycle tests (delete, restore): 4 of 4 resources
-• Lifecycle tests (add, remove): 1 of 1 links
-
-Negative tests (the request is wrong)
-• Bad request (400), Not authenticated (401), Forbidden (403), Not found (404), Conflict (409): "x of y" each
-• Every kind of bad request tested: 32 of 64 endpoints. <which kinds are missing most often>
-
-Across positive and negative tests
-• Biggest gaps ...
-• N endpoints are missing a test for a success, 400, 401, 404 or 409 response
-
-Tracking issue · Area issues: ...
+Full table · Tracking issue · Guide
 ```
+
+The message answers the report's main question first — *does every endpoint test every status code it can
+return?* (the 2xx/400/401/403/404/409 the spec lists; a documented 500 is deliberately not counted) — then
+shows the bad-request-kind axis on its own line, the actionable gaps grouped by status code and by API area,
+and finally a one-line roll-up of the dimensions outside that question (lifecycle tests, optional-field tests,
+response-shape checks) so they stay visible without dominating.
 
 When the coverage-fix agent has pull requests waiting for review, a reply appears **in the thread** of this message (a week without any such pull requests has no reply):
 
@@ -57,13 +52,13 @@ When the coverage-fix agent has pull requests waiting for review, a reply appear
 🤖 Coverage-fix agent: 1 PR waiting for review. These were opened by the agent, not a person; please review before merging: #690 ...
 ```
 
-- "x of y" means: y endpoints document that response, x of them have a test that asserts it. Not every line counts endpoints: "Optional request fields" counts **fields** (63 of 68 fields), and the lifecycle lines count **resources** or **links**.
+- The two headline numbers read "x of y": y endpoints document that response (or have at least one applicable bad-request kind), and x of them have a test that asserts it. The first headline counts only the 2xx/400/401/403/404/409 the spec lists — a documented 500 is not counted, so an endpoint with an untested 500 can still show as fully covered. The invalid-request count can be **understated**: an over-broad applicability rule marks an endpoint as a gap, so the number of endpoints still missing a kind is an upper bound. The **"Other test gaps"** line instead shows a raw count of what is still missing on the dimensions outside the main question — optional-field tests (counted in **fields**), lifecycle flows (**resources**/**links**), and response-shape checks.
 - A number in brackets is the change since the previous scheduled report. Nothing is shown when it is unchanged or there is no previous report.
 - "Endpoints with no test at all" are listed with the issue that explains each one, taken from the `knownIssue` URL on the endpoint's
   entry in `positive-suppress.json` or `request-validation.json`. An endpoint with no such entry is listed bare, which means nobody has explained it yet.
 - **What counts as covered.** A test that exists in the generated files and asserts that response. A test left out by a suppression or exclusion in the config (usually for a
   known Hub bug, but an exclusion needs only a `reason`) is **not** counted as tested: it stays in the "of" number and shows as held in the full table. The one exception is
-  the "Every kind of bad request" line, which treats a skip in two ways. A **kind** excluded in the config is
+  the "Invalid-request coverage" line, which treats a skip in two ways. A **kind** excluded in the config is
   taken out of what that endpoint needs, so the endpoint can still count as fully covered by its other kinds. An endpoint whose
   bad-request tests are **all** skipped or excluded is left out of both numbers.
 
@@ -139,6 +134,12 @@ review"** that shows the check before and after. Read that section first.
 `fix/coverage-`, with the labels `nightly-api-fix`, `auto-generated` and `hub`. The body ends with
 "Found by the camunda-hub coverage-fix agent". The thread under the weekly Slack message lists the ones still open.
 
+**Each pull request links to its area's tracking issue.** The body carries a `relates to #<issue>` line pointing at the
+per-area issue whose gap it closes, so the pull request and the issue show each other on GitHub (open the issue and you see
+the pull request in its timeline). It says `relates to`, not `closes`: one pull request fixes one endpoint, while the area
+issue usually lists several, so merging the pull request does not close the issue — the next weekly report closes it once the
+area is clean. The link is added automatically after the `verify` job passes, so it is only ever on a checked pull request.
+
 **Who reviews them.** A person, always. The usual live check (`hub-pr-live-check`) skips these pull requests on purpose: it
 would run the agent's code with Hub access before anything had checked it. What happens instead depends on the kind:
 
@@ -155,7 +156,19 @@ unless it has the `do-not-close` label. So review it within 3 days, or add that 
 
 **What it tells people.** After a real run, the `verify` job posts what the agent found, including the gaps that got no PR:
 one comment on the weekly tracking issue (each gap, what the agent did and why) and one reply in the weekly Slack message's
-thread (one line per gap, with links to the PRs). Nothing is posted for a dry run, or for a run with no PR and no gap.
+thread (one line per gap, with links to the PRs). It also names the gaps the agent did **not attempt this run**, each with a
+reason (its area already has an open pull request, another open pull request covers it, or it is known and tracked), so every
+eligible gap each week shows up in exactly one place — opened, left for a person, or not attempted — and none drops out of
+sight. "Not attempted" almost always means "waiting its turn": the agent opens at most one pull request per area at a time,
+so a gap whose area already has one is picked up on a later run once that pull request merges or closes. Even a week where
+the agent finds nothing to do but set gaps aside is reported (a dedicated agent-less step posts the not-attempted list), so
+a fully-deferred week is not silent. Nothing is posted for a dry run, or for a run that opened no pull request and skipped,
+left and attempted nothing.
+
+Both the Slack reply and the issue comment open with a short note that the counts cover **only what the agent auto-fixes**
+(resources with no create-read-delete test, and config-only 403/404 gaps) — the full backlog is in the weekly report and the
+per-area issues. So "1 gap left for a person" is the agent's own scope, not the total number of gaps. The Slack reply's
+**Details** link points at that run's own comment on the tracking issue (not just the issue top), so it lands on the full record.
 
 **How it runs.** Two ways.
 

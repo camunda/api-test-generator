@@ -49,6 +49,28 @@ Four more posts show up only when needed:
 | A draft PR from the coverage-fix agent | Read its "In plain words" section first. Review it like any PR, within 3 days: a PR with no activity for 3 days is closed unless it has the `do-not-close` label |
 | Not sure | Ask in `#ask-qa` (tag `@test-automation-medic`) and include the run link |
 
+## Which copy of Hub's API each run reads
+
+The generator reads Hub's API description (the "spec") from one of two places:
+
+- **Fresh from camunda-hub** — it fetches the current API description straight from the camunda-hub repo
+  when the run starts, so it reflects Hub as it is right now.
+- **The pinned copy** — a frozen snapshot saved in the generator (`configs/camunda-hub/spec-pin.json`). It
+  changes only when someone merges a spec-bump PR, so it stays put even when Hub moves on.
+
+| Run | Reads Hub's API from… |
+|---|---|
+| PR check (on a camunda-hub PR) | Fresh from **your camunda-hub PR** (Hub is built from that PR) |
+| Nightly | Fresh from camunda-hub `main` (newest) |
+| Weekly coverage report | Fresh from camunda-hub `main` (newest) |
+| Spec-bump check | Compares newest camunda-hub `main` against the pinned copy, then opens the bump PR |
+| `hub-ondemand-test` (run by hand) | Fresh from the branch you pick (default `main`) |
+| The generator's own self-checks (CI "hub invariants", local `npm test`) | The **pinned copy** |
+
+So only the generator's own self-checks use the pinned copy. Everything that tests a real Hub reads the
+fresh spec — which is why "the pinned copy is behind" never fails a nightly or a PR check; it just
+triggers a spec-bump PR.
+
 ## Who owns what
 
 **The Hub team owns this project**: the alerts, the Hub settings, and the generator itself,

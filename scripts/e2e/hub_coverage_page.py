@@ -202,7 +202,7 @@ def render(s, rows):
     c = s['codes']
     bars = ''.join(bar(b, label, c[b][0], c[b][1], bar_note(b, s)) for b, label in BUCKETS)
     ref = (s.get('specRef') or '')[:7] or s['specHash'].replace('sha256:', '')[:7]
-    verdict = 'Every response the spec lists is tested for every endpoint.' if s['fullyAsserted'] == s['operations'] else 'Not full.'
+    verdict = 'Every response the spec lists is tested for every endpoint (2xx/400/401/403/404/409; a documented 500 is not checked).' if s['fullyAsserted'] == s['operations'] else 'Not full.'
     fnd = findings(s)
     findings_html = f'<section aria-labelledby="gaps"><h2 id="gaps">Where the gaps are</h2><div class="findings">{fnd}</div></section>' if fnd else ''
     return f"""<title>Hub Endpoint Coverage</title>
@@ -210,7 +210,7 @@ def render(s, rows):
 <main>
   <header>
     <h1>Hub endpoint coverage</h1>
-    <p class="lede"><b>{verdict}</b> {c['2xx'][0]} of {c['2xx'][1]} endpoints have a success test, but only {s['fullyAsserted']} of {s['operations']} have a test for every response the spec lists. {s['opsMissingResponseTest']} endpoints are missing a test for a success, 400, 401, 404 or 409 response, and {len(s['missing']['403'])} have an untested 403.</p>
+    <p class="lede"><b>{verdict}</b> {c['2xx'][0]} of {c['2xx'][1]} endpoints have a success test, but only {s['fullyAsserted']} of {s['operations']} have a test for every response the spec lists (2xx/400/401/403/404/409; a documented 500 is not checked). {s['opsMissingResponseTest']} endpoints are missing a test for a success, 400, 401, 404 or 409 response, and {len(s['missing']['403'])} have an untested 403.</p>
     <p class="meta"><span>camunda-hub@{esc(ref)}</span><span>{s['operations']} endpoints</span><span>{s['negativeTests']} negative tests</span><span>secured + rbac profiles</span><span>tracked in <a href="{ISSUES}{EPIC}" rel="noopener">#{EPIC}</a></span></p>
   </header>
   <section aria-labelledby="codes"><h2 id="codes">Responses tested, out of those the spec lists</h2><ol class="bars">{bars}</ol></section>

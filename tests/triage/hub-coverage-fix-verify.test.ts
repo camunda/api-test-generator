@@ -5,6 +5,7 @@ import {
   parsePreRun,
   parseRunPrs,
   parseSelection,
+  prIssueLinks,
   type RunPr,
   reportedPrUrls,
   verify,
@@ -408,5 +409,61 @@ describe('parsers', () => {
     ]);
     expect(p?.author).toBe('app/qa-processes');
     expect(p?.labels).toEqual(['nightly-api-fix']);
+  });
+});
+
+describe('prIssueLinks', () => {
+  // The default pr() branch is fix/coverage-project-snapshot-RUN, which maps to the ProjectSnapshot candidate.
+  const withIssue: Selection = {
+    ...selection,
+    candidates: selection.candidates.map((c) =>
+      c.resource === 'ProjectSnapshot' ? { ...c, issue: 42 } : c,
+    ),
+  };
+
+  it('links an opened PR whose candidate carries a tracking issue', () => {
+    expect(prIssueLinks([pr(1)], withIssue, RUN, 0)).toEqual([{ number: 1, issue: 42 }]);
+  });
+
+  it('skips a PR whose candidate has no issue', () => {
+    expect(prIssueLinks([pr(1)], selection, RUN, 0)).toEqual([]);
+  });
+
+  it('skips a PR whose body already carries the link (idempotent)', () => {
+    const linked = pr(1, { body: `${PLAIN}\n\nrelates to #42` });
+    expect(prIssueLinks([linked], withIssue, RUN, 0)).toEqual([]);
+  });
+
+  it('does not treat a longer issue number as the existing link (digit boundary)', () => {
+    // `relates to #420` must not count as already linking #42.
+    const other = pr(1, { body: `${PLAIN}\n\nrelates to #420` });
+    expect(prIssueLinks([other], withIssue, RUN, 0)).toEqual([{ number: 1, issue: 42 }]);
+  });
+
+  it('ignores PRs at or below the baseline and non-run branches', () => {
+    const old = pr(1, { number: 5 });
+    expect(prIssueLinks([old], withIssue, RUN, 5)).toEqual([]);
+    const stray = pr(9, { headRefName: 'feature/not-this-run' });
+    expect(prIssueLinks([stray], withIssue, RUN, 0)).toEqual([]);
+  });
+});
+
+describe('parseSelection keeps the issue number', () => {
+  it('reads issue when present and omits it otherwise', () => {
+    const parsed = parseSelection({
+      budget: 1,
+      candidates: [
+        {
+          resource: 'ProjectSnapshot',
+          createOp: 'createProjectSnapshot',
+          area: 'Project Snapshot',
+          kind: 'lifecycle',
+          issue: 42,
+        },
+        { resource: 'Version', createOp: 'createVersion', area: 'Version', kind: 'lifecycle' },
+      ],
+    });
+    expect(parsed.candidates[0].issue).toBe(42);
+    expect(parsed.candidates[1].issue).toBeUndefined();
   });
 });

@@ -13,7 +13,7 @@
 //
 //   node hub-coverage-fix-select.ts <summary.json> <rows.json> <agent-prs.json> [now-iso]
 
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 
 export const WINDOW_DAYS = 7;
 export const BRANCH_PREFIX = 'fix/coverage-';
@@ -57,6 +57,9 @@ export interface Candidate {
   area: string;
   kind: 'lifecycle' | 'status';
   code?: StatusCode;
+  // The tracking issue number for this candidate's area, when the weekly report opened one. A fix PR links
+  // `relates to #<issue>` to it. Absent when the area has no issue yet (its issue opens on a later run).
+  issue?: number;
 }
 
 export interface Skipped {
@@ -103,6 +106,7 @@ export function select(
   known: string[] = [],
   openFixPrs: OpenFixPr[] = [],
   statusGaps: StatusGap[] = [],
+  areaIssues: Record<string, number> = {},
 ): Selection {
   const agentPrs = prs.filter((p) => p.headRefName.startsWith(BRANCH_PREFIX));
   const recent = agentPrs.filter((p) => isRecent(p.createdAt, now));
@@ -168,7 +172,10 @@ export function select(
     } else if (takenAreas.has(area)) {
       skipped.push({ resource, reason: `area ${area} already has a candidate in this run` });
     } else {
-      candidates.push({ resource, createOp, area, kind: 'lifecycle' });
+      const candidate: Candidate = { resource, createOp, area, kind: 'lifecycle' };
+      const issue = areaIssues[area];
+      if (typeof issue === 'number') candidate.issue = issue;
+      candidates.push(candidate);
       takenAreas.add(area);
     }
   }
@@ -195,13 +202,16 @@ export function select(
     } else if (takenAreas.has(area)) {
       skipped.push({ resource: label, reason: `area ${area} already has a candidate in this run` });
     } else {
-      candidates.push({
+      const candidate: Candidate = {
         resource: gap.operationId,
         createOp: gap.operationId,
         area,
         kind: 'status',
         code: gap.code,
-      });
+      };
+      const issue = areaIssues[area];
+      if (typeof issue === 'number') candidate.issue = issue;
+      candidates.push(candidate);
       takenAreas.add(area);
     }
   }
@@ -255,6 +265,23 @@ export function parseOpenFixPrs(prs: unknown): OpenFixPr[] {
     }
     return { number: p.number, url: p.url, diff: p.diff };
   });
+}
+
+// area-issues.json maps each API area with a tracking issue this run to its issue number. Optional: an older
+// report has no such file, and then no candidate carries an issue (the fix PR simply gets no `relates to` link).
+export function parseAreaIssues(v: unknown): Record<string, number> {
+  if (v === undefined || v === null) return {};
+  if (!isRecord(v)) throw new Error('area-issues.json is not an object');
+  const out: Record<string, number> = {};
+  for (const [area, n] of Object.entries(v)) {
+    if (typeof n !== 'number' || !Number.isInteger(n) || n <= 0) {
+      throw new Error(
+        `area-issues.json entry for "${area}" is not a positive integer issue number`,
+      );
+    }
+    out[area] = n;
+  }
+  return out;
 }
 
 export function parseRows(rows: unknown): Row[] {
@@ -331,10 +358,11 @@ export function parsePrs(prs: unknown): AgentPr[] {
 }
 
 if (process.argv[1] && import.meta.filename === process.argv[1]) {
-  const [summaryPath, rowsPath, prsPath, nowIso, openFixPath] = process.argv.slice(2);
+  const [summaryPath, rowsPath, prsPath, nowIso, openFixPath, areaIssuesPath] =
+    process.argv.slice(2);
   if (!summaryPath || !rowsPath || !prsPath) {
     console.error(
-      'usage: hub-coverage-fix-select.ts <summary.json> <rows.json> <agent-prs.json> [now-iso] [open-fix-prs.json]',
+      'usage: hub-coverage-fix-select.ts <summary.json> <rows.json> <agent-prs.json> [now-iso] [open-fix-prs.json] [area-issues.json]',
     );
     process.exit(2);
   }
@@ -342,6 +370,9 @@ if (process.argv[1] && import.meta.filename === process.argv[1]) {
   try {
     const summary = readJson(summaryPath);
     const rows = parseRows(readJson(rowsPath));
+    // The area-issues file is optional: a report from before it existed simply yields no issue links.
+    const areaIssues =
+      areaIssuesPath && existsSync(areaIssuesPath) ? parseAreaIssues(readJson(areaIssuesPath)) : {};
     const selection = select(
       parseCreateMissing(summary),
       rows,
@@ -350,6 +381,7 @@ if (process.argv[1] && import.meta.filename === process.argv[1]) {
       parseKnown(summary),
       openFixPath ? parseOpenFixPrs(readJson(openFixPath)) : [],
       parseStatusGaps(summary, rows),
+      areaIssues,
     );
     process.stdout.write(`${JSON.stringify(selection, null, 2)}\n`);
   } catch (e) {

@@ -8,7 +8,7 @@ import type {
 import { buildBaselineBody } from '../schema/baseline.js';
 import { isMultipartOnly } from '../util/multipartSkip.js';
 import {
-  buildValidValue,
+  buildSiblingValues,
   isUrlCollapsingPathSegment,
   type ResolvedParamSchema,
   resolveParamSchema,
@@ -240,11 +240,10 @@ export function generateNotFoundFakeId(ops: OperationModel[], opts: Opts): Valid
     if (!allFaked) continue;
     // Populate required query params with valid placeholders so the request
     // doesn't fail with an unrelated 400.
-    for (const q of op.parameters) {
-      if (q.in !== 'query' || !q.required) continue;
-      const r = resolveParamSchema(q);
-      params[q.name] = r ? buildValidValue(r) : 'x';
-    }
+    Object.assign(
+      params,
+      buildSiblingValues(op.parameters.filter((q) => q.in === 'query' && q.required)),
+    );
     const target = pathParams.map((p) => p.name).join('+');
     out.push({
       id: makeId([op.operationId, 'notFound', target]),

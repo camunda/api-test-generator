@@ -1,7 +1,7 @@
 import type { OperationModel, ParameterModel, ValidationScenario } from '../model/types.js';
 import { type CapabilityGateInfo, isBlankValue } from '../util/capabilityGate.js';
 import {
-  buildValidValue,
+  buildSiblingValues,
   isUrlCollapsingPathSegment,
   type ResolvedParamSchema,
   resolveParamSchema,
@@ -148,11 +148,12 @@ export function generateParamConstraintViolations(
       if (!violations.length) continue;
       const gate = !p.required ? opts.capabilityGates?.get(p.name) : undefined;
       // Use valid placeholders for all params first
-      const validMap: Record<string, string> = {};
-      for (const pp of op.parameters.filter((pp) => pp.in === p.in)) {
-        const rr = resolveParamSchema(pp);
-        if (rr) validMap[pp.name] = buildValidValue(rr);
-      }
+      // Path and query siblings both, so a path-target scenario still sends the required query
+      // params and a query-target one sends valid path values.
+      const validMap = buildSiblingValues(
+        op.parameters.filter((pp) => pp.in === 'path' || pp.in === 'query'),
+        opts.capabilityGates,
+      );
       for (const v of violations) {
         if (opts.capPerOperation && produced >= opts.capPerOperation) break;
         const params = buildParams(op.path, { ...validMap, [p.name]: v.invalid });
