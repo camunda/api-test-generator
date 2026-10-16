@@ -87,6 +87,8 @@ describe('parameter kinds: applicability matches what the generator can build', 
       'NaNValue',
       'notBoolean',
       '__INVALID_STRING__',
+      // A checkable string format now sends a value that breaks that format (was the generic token).
+      'not-a-date',
       'notArray',
       'notObject',
     ]);
