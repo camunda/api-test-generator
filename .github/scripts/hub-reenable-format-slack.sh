@@ -48,5 +48,6 @@ jq -r '
   if length == 0 then "" else
     ":gear: *camunda-hub known-issue re-enable check*\n" + (map(line(.)) | join("\n"))
     + ([(if $run != "" then "<" + $run + "|Open the workflow run>" else empty end), (if $book != "" then "<" + $book + "|📖 Cookbook>" else empty end)] | if length > 0 then "\n" + join(" · ") else "" end)
+    + "\n:rotating_light: " + $medic
   end
-' --arg run "${RUN_URL:-}" --arg book "${COOKBOOK_URL:-}" "$FILE"
+' --arg run "${RUN_URL:-}" --arg book "${COOKBOOK_URL:-}" --arg medic '<!subteam^S014VK4482H|hub-medic>' "$FILE"

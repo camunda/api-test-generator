@@ -37,6 +37,7 @@ import sys
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 CONFIG = 'camunda-hub'
 GUIDE_URL = 'https://github.com/camunda/api-test-generator/blob/main/docs/hub-response-coverage-report.md'
+HUB_MEDIC = '<!subteam^S014VK4482H|hub-medic>'
 HTTP_METHODS = {'get', 'put', 'post', 'delete', 'patch'}
 BUCKETS = ('2xx', '400', '401', '403', '404', '409')
 # 500 is documented everywhere and cannot be provoked on purpose.
@@ -576,6 +577,17 @@ def slack(s, prev, args):
         links.append(f'<{args.tracking_url}|Tracking issue>')
     links.append(f'<{GUIDE_URL}|📖 Guide>')
     lines += ['', ' · '.join(links)]
+    # Ping hub-medic whenever the report lists any actionable gap. Gate on the report's full
+    # active-gap set: a code-bucket gap (opsMissingResponseTest excludes 403 — see codeGap in
+    # build_summary), a bad-request-kind gap (requestCheckGaps), an endpoint with no test, or an
+    # "Other test gaps" dimension (lifecycle / optional-field / response-shape, the `other` list).
+    if (
+        any(s['codeGaps'].get(b) for b in BUCKETS)
+        or s['requestCheckGaps']
+        or s['zeroTestOperations']
+        or other
+    ):
+        lines += ['', ':rotating_light: ' + HUB_MEDIC]
     return '\n'.join(lines) + '\n'
 
 
