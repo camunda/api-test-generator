@@ -458,11 +458,24 @@ const baseSummary = (over: Record<string, unknown> = {}) => ({
 
 describe('weekly Slack message', () => {
   const HUB_MEDIC = '<!subteam^S014VK4482H|hub-medic>';
-  // baseSummary's defaults carry gaps, so clear all three gap sources for the "no ping" baseline.
+  // baseSummary's defaults carry gaps in every dimension, so clear them all for the "no ping"
+  // baseline: code buckets, bad-request kinds, no-test ops, and the "Other test gaps" dimensions
+  // (lifecycle / optional-field / response-shape).
   const noGaps = {
     codeGaps: { '2xx': 0, '400': 0, '401': 0, '403': 0, '404': 0, '409': 0 },
     requestCheckGaps: {},
     zeroTestOperations: [],
+    optionalFields: [9, 9],
+    shapeUnvalidated: [],
+    lifecycle: {
+      create: [6, 6],
+      createMissing: [],
+      restore: [5, 5],
+      restoreMissing: [],
+      edge: [2, 2],
+      edgeMissing: [],
+      known: [],
+    },
   };
 
   it('pings hub-medic for a response-code gap, including a 403-only gap', () => {
@@ -477,6 +490,26 @@ describe('weekly Slack message', () => {
 
   it('pings hub-medic when an endpoint has no test at all', () => {
     expect(slackText(baseSummary({ ...noGaps, zeroTestOperations: ['x'] }), null)).toContain(
+      HUB_MEDIC,
+    );
+  });
+
+  it('pings hub-medic for a lifecycle-only gap', () => {
+    const onlyLifecycle = {
+      ...noGaps,
+      lifecycle: { ...noGaps.lifecycle, createMissing: ['Version'] },
+    };
+    expect(slackText(baseSummary(onlyLifecycle), null)).toContain(HUB_MEDIC);
+  });
+
+  it('pings hub-medic for an optional-field-only gap', () => {
+    expect(slackText(baseSummary({ ...noGaps, optionalFields: [8, 9] }), null)).toContain(
+      HUB_MEDIC,
+    );
+  });
+
+  it('pings hub-medic for a response-shape-only gap', () => {
+    expect(slackText(baseSummary({ ...noGaps, shapeUnvalidated: ['a'] }), null)).toContain(
       HUB_MEDIC,
     );
   });

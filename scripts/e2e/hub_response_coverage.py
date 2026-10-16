@@ -577,10 +577,16 @@ def slack(s, prev, args):
         links.append(f'<{args.tracking_url}|Tracking issue>')
     links.append(f'<{GUIDE_URL}|📖 Guide>')
     lines += ['', ' · '.join(links)]
-    # Ping hub-medic whenever the report lists any actionable gap. opsMissingResponseTest
-    # excludes 403 (see codeGap in build_summary), and bad-request-kind gaps live in
-    # requestCheckGaps, so gate on the report's full active-gap set, not just those two.
-    if any(s['codeGaps'].get(b) for b in BUCKETS) or s['requestCheckGaps'] or s['zeroTestOperations']:
+    # Ping hub-medic whenever the report lists any actionable gap. Gate on the report's full
+    # active-gap set: a code-bucket gap (opsMissingResponseTest excludes 403 — see codeGap in
+    # build_summary), a bad-request-kind gap (requestCheckGaps), an endpoint with no test, or an
+    # "Other test gaps" dimension (lifecycle / optional-field / response-shape, the `other` list).
+    if (
+        any(s['codeGaps'].get(b) for b in BUCKETS)
+        or s['requestCheckGaps']
+        or s['zeroTestOperations']
+        or other
+    ):
         lines += ['', ':rotating_light: ' + HUB_MEDIC]
     return '\n'.join(lines) + '\n'
 
