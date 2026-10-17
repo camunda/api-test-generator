@@ -18,7 +18,7 @@ import type {
 // step, and the consuming step declares HTTP 409). See #342 for the
 // omitWhenUnbound half of the same contract.
 import { computeUniqueBindings } from '../playwright/ctxSeeding.js';
-import { camelCase } from '../playwright/stepRenderer.js';
+import { camelCase, stepNeedsAwaitForOp } from '../playwright/stepRenderer.js';
 import { type OperationMapSource, toPythonLiteral } from './sdk-mapping.js';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -103,6 +103,7 @@ export function pythonSuiteFileName(
 export function buildPythonUrlExpression(
   pathTemplate: string,
   _pathParams?: { name: string; var: string }[],
+  serverOverride?: string,
 ): string {
   // Strip the leading '/': httpx.AsyncClient.base_url carries its own path
   // segment (e.g. 'http://localhost:8080/v2/'), and per RFC 3986 relative
@@ -122,7 +123,27 @@ export function buildPythonUrlExpression(
     // param-name placeholder text (Copilot PR #574 review).
     return `{ctx.get("${varName}") if ctx.get("${varName}") is not None else "${paramName}"}`;
   });
-  return `f'${result}'`;
+  // Item 5A: an operation whose path item declares its own OpenAPI `servers`
+  // override is NOT served under the client's `/v2` base — the cluster-admin
+  // API lives at `{host}:{port}/cluster/v2/...`. Resolving such a path
+  // relatively against `base_url` yields `/v2/cluster/v2/...` → 404 "No
+  // endpoint". Prefix it with the API root instead, which makes the URL
+  // ABSOLUTE; httpx passes an absolute url through `_merge_url` untouched, so
+  // no second client fixture is needed. `root_base_url()` mirrors playwright's
+  // `buildBaseUrl(true)` precedence.
+  //
+  // `!== undefined`, never a truthiness check: an OpenAPI `servers[].url` can
+  // legitimately be the empty string (relative to the current host), which is
+  // a real override and must not be conflated with "no override" — the same
+  // distinction playwright's `resolveScenarioServerOverride` makes.
+  //
+  // Resolution is per STEP (the caller passes `step.serverOverride`), not per
+  // test. Python emits one `url_N` per step, so a scenario mixing override and
+  // non-override steps routes each request to its own base correctly — the
+  // hazard that forces playwright's scenario-level resolver to throw does not
+  // apply here.
+  const prefix = serverOverride !== undefined ? '{root_base_url()}' : '';
+  return `f'${prefix}${result}'`;
 }
 
 /**
@@ -139,6 +160,82 @@ const EMBEDDED_PLACEHOLDER_RE = /\$\{([^}]+)\}/g;
 // — reusing a `g`-flagged RegExp's own `.test()` mutates its `lastIndex`,
 // corrupting later calls against a different string.
 const HAS_PLACEHOLDER_RE = /\$\{[^}]+\}/;
+// A WHOLE-STRING placeholder: the entire value is `${var}`, so it renders as a
+// bare `ctx.get('var')` and is therefore `None` when the binding was never
+// produced. The concatenated form ('proc-${a}-x') renders as a '+' chain whose
+// parts degrade to '' and can never be None, so it is deliberately NOT matched
+// here — wrapping those bodies would be pure churn.
+const WHOLE_STRING_PLACEHOLDER_RE = /^\$\{([^}]+)\}$/;
+
+/**
+ * True when `value` contains at least one whole-string `${var}` binding (at any
+ * nesting depth, including inside arrays) that could resolve to None at
+ * runtime. `${RANDOM}` is excluded: it is a planner-minted literal seed token,
+ * not a ctx binding, and always renders as the literal string.
+ *
+ * Used to decide whether a rendered body literal needs `prune_nulls(...)`
+ * around it (Item 6a).
+ */
+function hasNullCapablePlaceholder(value: unknown): boolean {
+  if (typeof value === 'string') {
+    const whole = WHOLE_STRING_PLACEHOLDER_RE.exec(value);
+    return whole !== null && whole[1] !== 'RANDOM';
+  }
+  if (Array.isArray(value)) {
+    return value.some((item) => hasNullCapablePlaceholder(item));
+  }
+  if (isRecord(value)) {
+    return Object.values(value).some((item) => hasNullCapablePlaceholder(item));
+  }
+  return false;
+}
+
+/**
+ * Read the value at a planner leaf path (`page.after`, `filter.$or[].incidentKey`)
+ * in a body template. A `name[]` segment descends into element 0, matching how
+ * the planner's `setLeafPlaceholder` writes the leaf.
+ */
+function valueAtLeafPath(root: unknown, leafPath: string): unknown {
+  let cursor = root;
+  for (const segment of leafPath.split('.')) {
+    const isArray = segment.endsWith('[]');
+    if (!isRecord(cursor)) return undefined;
+    cursor = cursor[isArray ? segment.slice(0, -2) : segment];
+    if (isArray) {
+      if (!Array.isArray(cursor)) return undefined;
+      cursor = cursor[0];
+    }
+  }
+  return cursor;
+}
+
+/**
+ * The ctx bindings that carry a variant scenario's own field(s) — the leaves
+ * named in `populatesSubShape.leafPaths`, which the planner writes into the
+ * final request body as whole-string `${var}` placeholders.
+ *
+ * Such a binding is None when no earlier step produced the value (e.g. a cursor
+ * warm-up that returned an empty page). `prune_nulls` then drops the field, and
+ * the request passes without exercising what the variant exists to test. The
+ * caller emits an assertion on each binding so that case fails visibly instead.
+ * Literal leaves (minted values) and `${RANDOM}` can never be None, so they get
+ * no guard.
+ */
+function variantLeafBindings(scenario: EndpointScenario): { leafPath: string; binding: string }[] {
+  const leafPaths = scenario.populatesSubShape?.leafPaths ?? [];
+  const plan = scenario.requestPlan ?? [];
+  const final = plan[plan.length - 1];
+  if (leafPaths.length === 0 || final?.bodyKind !== 'json') return [];
+  const guards: { leafPath: string; binding: string }[] = [];
+  for (const leafPath of leafPaths) {
+    const value = valueAtLeafPath(final.bodyTemplate, leafPath);
+    const whole = typeof value === 'string' ? WHOLE_STRING_PLACEHOLDER_RE.exec(value) : null;
+    if (whole !== null && whole[1] !== 'RANDOM') {
+      guards.push({ leafPath, binding: whole[1] });
+    }
+  }
+  return guards;
+}
 
 /**
  * Render a string that may contain one or more embedded `${var}` bindings
@@ -147,7 +244,7 @@ const HAS_PLACEHOLDER_RE = /\$\{[^}]+\}/;
  * no binding is silently dropped by only matching a whole-string placeholder
  * (Copilot PR #574 review).
  */
-function renderPythonTemplateString(value: string): string {
+function renderPythonTemplateString(value: string, pruneAware = false): string {
   const whole = /^\$\{([^}]+)\}$/.exec(value);
   if (whole) {
     if (whole[1] === 'RANDOM') {
@@ -159,7 +256,9 @@ function renderPythonTemplateString(value: string): string {
     // ctx keys are the planner's original binding variable names (e.g.
     // tenantIdVar) — must match the ctx.set(...) calls emitted for
     // scenario.bindings verbatim, so no casing transform here (#354).
-    return `ctx.get('${whole[1]}')`;
+    // Under prune_nulls, mark an unbound placeholder with a sentinel so a literal
+    // JSON null in the template is preserved rather than pruned with it.
+    return pruneAware ? `unbound(ctx.get('${whole[1]}'))` : `ctx.get('${whole[1]}')`;
   }
   if (!HAS_PLACEHOLDER_RE.test(value)) {
     return renderPythonStringLiteral(value);
@@ -206,18 +305,20 @@ function renderPythonTemplateString(value: string): string {
  * Booleans/None map to Python spelling; whole-string `${var}` placeholders
  * become `ctx.get('snake_var')` lookups; everything else is escaped.
  */
-function renderPythonValue(value: unknown): string {
+function renderPythonValue(value: unknown, pruneAware = false): string {
   if (value === null || value === undefined) return 'None';
   if (typeof value === 'boolean') return value ? 'True' : 'False';
   if (typeof value === 'number') return String(value);
   if (typeof value === 'string') {
-    return renderPythonTemplateString(value);
+    return renderPythonTemplateString(value, pruneAware);
   }
   if (Array.isArray(value)) {
-    return `[${value.map((v) => renderPythonValue(v)).join(', ')}]`;
+    return `[${value.map((v) => renderPythonValue(v, pruneAware)).join(', ')}]`;
   }
   if (typeof value === 'object') {
-    const entries = Object.entries(value).map(([k, v]) => `'${k}': ${renderPythonValue(v)}`);
+    const entries = Object.entries(value).map(
+      ([k, v]) => `'${k}': ${renderPythonValue(v, pruneAware)}`,
+    );
     return `{${entries.join(', ')}}`;
   }
   return 'None';
@@ -230,9 +331,10 @@ function renderPythonValue(value: unknown): string {
 export function renderPythonBody(
   bodyTemplate: unknown,
   _bindings: Record<string, string | undefined>,
+  pruneAware = false,
 ): string {
   if (!bodyTemplate) return '{}';
-  return renderPythonValue(bodyTemplate);
+  return renderPythonValue(bodyTemplate, pruneAware);
 }
 
 /**
@@ -251,17 +353,26 @@ function renderPythonDictAssignment(
   record: Record<string, unknown>,
   omitWhenUnboundFieldNames: ReadonlySet<string>,
 ): string[] {
-  const inlineEntries: string[] = [];
-  const deferred: { fieldName: string; binding: string }[] = [];
-  for (const [fieldName, fieldValue] of Object.entries(record)) {
-    const whole = typeof fieldValue === 'string' ? /^\$\{([^}]+)\}$/.exec(fieldValue) : null;
-    if (whole && omitWhenUnboundFieldNames.has(fieldName)) {
-      deferred.push({ fieldName, binding: whole[1] });
-      continue;
-    }
-    inlineEntries.push(`'${fieldName}': ${renderPythonValue(fieldValue)}`);
-  }
-  const lines = [`    ${varName} = {${inlineEntries.join(', ')}}`];
+  const { inline, deferred } = splitInlineAndDeferred(record, omitWhenUnboundFieldNames);
+  const needsPrune = hasNullCapablePlaceholder(inline.map(([, v]) => v));
+  const inlineEntries = inline.map(
+    ([fieldName, fieldValue]) => `'${fieldName}': ${renderPythonValue(fieldValue, needsPrune)}`,
+  );
+  // Item 6a: a whole-string `${var}` binding renders inline as `ctx.get('var')`,
+  // which is None when the producer never bound it — and an explicit JSON null
+  // in a body is a *present but unusable* value the broker rejects (a null
+  // cursor is 400 "At least one of [from, after, before, limit] is required").
+  // `prune_nulls` drops those nulls and any container they thereby emptied.
+  //
+  // Only the INLINE values are considered: a field deferred to the
+  // `omitWhenUnbound` block below is already null-guarded by its own
+  // `if __x_val is not None`, so counting it would wrap a literal that can
+  // never produce a null (e.g. a multipart `fields` template consisting solely
+  // of `tenantId` renders `data_N = {}`). Wrapping only when the template can
+  // actually produce a null keeps every other body byte-identical. The deferred
+  // assignments still work: `prune_nulls` returns a dict to mutate.
+  const literal = `{${inlineEntries.join(', ')}}`;
+  const lines = [`    ${varName} = ${needsPrune ? `prune_nulls(${literal})` : literal}`];
   for (const { fieldName, binding } of deferred) {
     const local = `__${toSnakeCase(fieldName)}_val`;
     lines.push(`    ${local} = ctx.get('${binding}')`);
@@ -269,6 +380,77 @@ function renderPythonDictAssignment(
     lines.push(`        ${varName}['${fieldName}'] = ${local}`);
   }
   return lines;
+}
+
+/**
+ * Split a record template's fields into those rendered INLINE in the literal
+ * and those DEFERRED to a runtime-conditional `omitWhenUnbound` assignment.
+ *
+ * Single source of truth for both the emitted literal and the null-prune
+ * decision, so the two can never disagree about which fields are inline.
+ */
+function splitInlineAndDeferred(
+  record: Record<string, unknown>,
+  omitWhenUnboundFieldNames: ReadonlySet<string>,
+): {
+  inline: [string, unknown][];
+  deferred: { fieldName: string; binding: string }[];
+} {
+  const inline: [string, unknown][] = [];
+  const deferred: { fieldName: string; binding: string }[] = [];
+  for (const [fieldName, fieldValue] of Object.entries(record)) {
+    const whole =
+      typeof fieldValue === 'string' ? WHOLE_STRING_PLACEHOLDER_RE.exec(fieldValue) : null;
+    if (whole !== null && omitWhenUnboundFieldNames.has(fieldName)) {
+      deferred.push({ fieldName, binding: whole[1] });
+      continue;
+    }
+    inline.push([fieldName, fieldValue]);
+  }
+  return { inline, deferred };
+}
+
+/**
+ * Whether rendering `step`'s payload will wrap the literal in `prune_nulls`,
+ * i.e. whether any value it emits INLINE can resolve to None at runtime.
+ *
+ * This is the single source of truth for both the per-step wrap decision and
+ * the suite-level `from support.prune import prune_nulls` import, so the two
+ * can never disagree (an import emitted for a suite that never wraps is dead
+ * code; a wrap without the import is a runtime NameError that fails every test
+ * in the file).
+ *
+ * Fields deferred to the `omitWhenUnbound` block are excluded — they are
+ * already null-guarded by their own `if __x_val is not None`.
+ */
+function stepPayloadNeedsPrune(
+  step: RequestStep,
+  omitWhenUnboundFieldNames: ReadonlySet<string>,
+): boolean {
+  const payload =
+    step.bodyKind === 'multipart'
+      ? (step.multipartTemplate ?? step.bodyTemplate)
+      : step.bodyTemplate;
+  if (payload === undefined) return false;
+  if (step.bodyKind === 'multipart' && isRecord(payload)) {
+    // Only `fields` is considered. `files` is rendered by
+    // `renderPythonMultipartFiles`, which never wraps its values in
+    // `prune_nulls` (a file entry is a `(filename, bytes)` tuple or a
+    // `resolve_fixture(...)` call, not a JSON value), so counting a placeholder
+    // there would emit the import for a suite that never calls the helper —
+    // dead code the Layer-3 invariant reports as an unused import.
+    const fields = payload.fields;
+    const inlineFields = isRecord(fields)
+      ? splitInlineAndDeferred(fields, omitWhenUnboundFieldNames).inline.map(([, v]) => v)
+      : fields;
+    return hasNullCapablePlaceholder(inlineFields);
+  }
+  if (isRecord(payload)) {
+    return hasNullCapablePlaceholder(
+      splitInlineAndDeferred(payload, omitWhenUnboundFieldNames).inline.map(([, v]) => v),
+    );
+  }
+  return hasNullCapablePlaceholder(payload);
 }
 
 /**
@@ -384,11 +566,45 @@ export function renderPythonSuite(
       const bindings = scenario.bindings ?? {};
       return Object.entries(bindings).some(([k, v]) => v !== '__PENDING__' && unique.has(k));
     });
+  // Item 5A: a step whose operation declares a path-level OpenAPI `servers`
+  // override is served outside the client's `/v2` base (cluster-admin), so its
+  // URL is built absolute against the API root via `root_base_url()`. Import
+  // the helper only when some step actually needs it, so every suite without
+  // such a step stays byte-identical to before.
+  const needsRootBaseUrl = collection.scenarios.some((scenario) =>
+    (scenario.requestPlan ?? []).some((step) => step.serverOverride !== undefined),
+  );
+  if (needsRootBaseUrl) {
+    lines.push('from support.base_url import root_base_url');
+  }
+  // Item 6a: a body whose template contains a whole-string `${var}` binding can
+  // serialise an explicit JSON null when that binding was never produced (the
+  // normal case for a cursor on a single-page response), which the broker
+  // rejects. Such bodies are wrapped in `prune_nulls(...)`. Import the helper
+  // only when some step actually needs it, so suites without a null-capable
+  // placeholder stay byte-identical.
+  const needsPruneNulls = collection.scenarios.some((scenario) =>
+    (scenario.requestPlan ?? []).some((step) =>
+      stepPayloadNeedsPrune(step, omitWhenUnboundFieldNames),
+    ),
+  );
+  if (needsPruneNulls) {
+    lines.push('from support.prune import prune_nulls, unbound');
+  }
   if (hasMultipartStep) {
     lines.push('from support.fixtures import resolve_fixture');
   }
   if (hasSeedBindings) {
     lines.push('from support.seeding import init_spec_salt, seed_binding');
+  }
+  const needsAwaitEventually = collection.scenarios.some((scenario) => {
+    const ecOps = new Set(
+      scenario.operations.filter((o) => o.eventuallyConsistent).map((o) => o.operationId),
+    );
+    return (scenario.requestPlan ?? []).some((step) => stepNeedsAwaitForOp(step, ecOps));
+  });
+  if (needsAwaitEventually) {
+    lines.push('from support.await_eventually import await_eventually');
   }
   lines.push('from typing import Any, Dict');
   lines.push('');
@@ -533,14 +749,32 @@ export function renderPythonSuite(
       );
     }
     const isErrorScenario = scenario.expectedResult?.kind === 'error';
+    const ecOps = new Set(
+      scenario.operations.filter((o) => o.eventuallyConsistent).map((o) => o.operationId),
+    );
+    const variantGuards = variantLeafBindings(scenario);
     for (let i = 0; i < requestPlan.length; i++) {
       const isFinal = i === requestPlan.length - 1;
+      if (isFinal) {
+        for (const { leafPath, binding } of variantGuards) {
+          lines.push(
+            `    # This variant exists to send ${leafPath}; without a value it would test nothing.`,
+          );
+          lines.push(`    assert ctx.get('${binding}') is not None, (`);
+          lines.push(
+            `        "variant field unbound: no earlier step produced '${binding}' for ${leafPath}, "`,
+          );
+          lines.push(`        "so this request would not exercise the field this variant tests"`);
+          lines.push('    )');
+        }
+      }
       renderPythonRequestStep(
         lines,
         requestPlan[i],
         i,
         omitWhenUnboundFieldNames,
         isFinal && !isErrorScenario ? scenario.responseShapeFields : undefined,
+        stepNeedsAwaitForOp(requestPlan[i], ecOps),
       );
       const waits = requestPlan[i].eventualWaitsAfter ?? [];
       for (let w = 0; w < waits.length; w++) {
@@ -560,6 +794,7 @@ function renderPythonRequestStep(
   index: number,
   omitWhenUnboundFieldNames: ReadonlySet<string>,
   responseShapeFields?: EndpointScenario['responseShapeFields'],
+  awaitEventually = false,
 ): void {
   const stepNum = index + 1;
   const responseVar = `response_${stepNum}`;
@@ -575,7 +810,11 @@ function renderPythonRequestStep(
   lines.push(`    # Step ${stepNum}: ${step.operationId}`);
 
   if (step.pathTemplate) {
-    const urlExpr = buildPythonUrlExpression(step.pathTemplate, step.pathParams);
+    const urlExpr = buildPythonUrlExpression(
+      step.pathTemplate,
+      step.pathParams,
+      step.serverOverride,
+    );
     lines.push(`    url_${stepNum} = ${urlExpr}`);
     requestArgs.push(`url_${stepNum}`);
   }
@@ -598,7 +837,15 @@ function renderPythonRequestStep(
         }
         requestArgs.push(`data=data_${stepNum}`);
       }
-      if (filesTemplate !== undefined) {
+      const isDocumentUpload =
+        step.operationId === 'createDocument' || step.operationId === 'createDocuments';
+      const hasNoFiles = !isRecord(filesTemplate) || Object.keys(filesTemplate).length === 0;
+      if (isDocumentUpload && hasNoFiles) {
+        // An empty files dict makes httpx send form-urlencoded, which the broker rejects with 415.
+        const field = step.operationId === 'createDocuments' ? 'files' : 'file';
+        lines.push(`    files_${stepNum} = {'${field}': ('hello.txt', b'Hello, world!')}`);
+        requestArgs.push(`files=files_${stepNum}`);
+      } else if (filesTemplate !== undefined) {
         lines.push(`    files_${stepNum} = ${renderPythonMultipartFiles(filesTemplate)}`);
         requestArgs.push(`files=files_${stepNum}`);
       }
@@ -612,8 +859,15 @@ function renderPythonRequestStep(
       );
       requestArgs.push(`json=body_${stepNum}`);
     } else {
-      const bodyExpr = renderPythonBody(payloadTemplate, {});
-      lines.push(`    body_${stepNum} = ${bodyExpr}`);
+      // Item 6a: same null-pruning rule as the dict path above, applied to a
+      // non-record body (an array or scalar template). No bundled template
+      // currently takes this shape with a placeholder, but the rule is about
+      // the class "a body that can serialise an explicit null", not about the
+      // dict case, so it is enforced here too rather than left to drift.
+      const prune = hasNullCapablePlaceholder(payloadTemplate);
+      const bodyExpr = renderPythonBody(payloadTemplate, {}, prune);
+      const wrapped = prune ? `prune_nulls(${bodyExpr})` : bodyExpr;
+      lines.push(`    body_${stepNum} = ${wrapped}`);
       requestArgs.push(`json=body_${stepNum}`);
     }
   }
@@ -624,21 +878,29 @@ function renderPythonRequestStep(
   // request() method to avoid a TypeError at test-run time (Copilot PR #574 review).
   const bodylessConvenienceVerbs = new Set(['get', 'delete', 'options', 'head']);
   const hasBodyArg = requestArgs.some((arg) => /^(json|data|files)=/.test(arg));
+  const callLines: string[] = [];
   if (hasBodyArg && bodylessConvenienceVerbs.has(methodName)) {
-    lines.push(`    ${responseVar} = await client.request(`);
-    lines.push(`        '${step.method.toUpperCase()}',`);
-    for (const arg of requestArgs) {
-      lines.push(`        ${arg},`);
-    }
+    callLines.push('client.request(');
+    callLines.push(`    '${step.method.toUpperCase()}',`);
+  } else {
+    callLines.push(`client.${methodName}(`);
+  }
+  for (const arg of requestArgs) callLines.push(`    ${arg},`);
+  callLines.push(')');
+  if (awaitEventually) {
+    lines.push(`    ${responseVar} = await await_eventually(`);
+    lines.push(`        lambda: ${callLines[0]}`);
+    for (const l of callLines.slice(1, -1)) lines.push(`        ${l}`);
+    lines.push('        ),');
+    lines.push(`        operation_id='${step.operationId}',`);
+    lines.push(`        method='${step.method.toUpperCase()}',`);
+    if (!step.extract?.length) lines.push('        require_items=False,');
     lines.push('    )');
   } else {
-    lines.push(`    ${responseVar} = await client.${methodName}(`);
-    for (const arg of requestArgs) {
-      lines.push(`        ${arg},`);
-    }
-    lines.push('    )');
+    lines.push(`    ${responseVar} = await ${callLines[0]}`);
+    for (const l of callLines.slice(1)) lines.push(`    ${l}`);
   }
-  lines.push(`    assert ${responseVar}.status_code == ${step.expect.status}`);
+  lines.push(`    assert ${responseVar}.status_code == ${step.expect.status}, ${responseVar}.text`);
 
   const needsResponseData =
     (step.extract && step.extract.length > 0) ||

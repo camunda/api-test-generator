@@ -17,6 +17,7 @@ import {
   getVariantOutputDir,
 } from '../../path-analyser/src/configResolver.js';
 import { loadGlobalContextSeedsAbox } from '../../path-analyser/src/ontology/loader.js';
+import { PENDING_BINDING } from '../../path-analyser/src/types.js';
 import { loadRequestValidationConfig } from '../../request-validation/src/config.js';
 
 /**
@@ -268,6 +269,13 @@ interface OperationNode {
   operationId: string;
   method: string;
   path: string;
+  /**
+   * The path item's own OpenAPI `servers` override, when it differs from the
+   * document root server — set by the extractor's `resolveServerOverride` for
+   * the cluster-admin paths, which are served at the API root rather than
+   * under `/v2`.
+   */
+  serverOverride?: string;
   parameters?: ParameterEntry[];
   requestBodySemanticTypes?: SemanticTypeEntry[];
   responseSemanticTypes?: Record<string, SemanticTypeEntry[]>;
@@ -303,6 +311,8 @@ interface VariantScenario {
   variantKey?: string;
   hasEventuallyConsistent?: boolean;
   populatesSubShape?: { rootPath: string; leafPaths: string[]; leafSemantics?: string[] };
+  /** semantic type -> the operationId that produces it in this chain. */
+  productionMap?: Record<string, string>;
   operations: { operationId: string }[];
 }
 interface VariantScenarioFile {
@@ -1937,6 +1947,130 @@ describeForThisConfig('bundled-spec invariants: planner variant output (#37)', (
         }
       }
     }
+    expect(offenders).toEqual([]);
+  });
+
+  it('no variant chain contains a warm-up step whose only contribution is a self-produced optional semantic nothing downstream requires (Item 9)', () => {
+    // The defect this pins: every paginated search AUTHORITATIVELY returns the
+    // standard `page` envelope's cursors (`page.startCursor` / `page.endCursor`,
+    // `provider: true`) and OPTIONALLY accepts them (`page.before` /
+    // `page.after`). `tryProducerChainVariant`'s `buildAdditional` therefore
+    // collected `{StartCursor, EndCursor}` from the chosen producer's own
+    // optional inputs and handed them to BFS as hard `additionalNeeded`. BFS
+    // then scheduled an EARLIER producer for a value the chain already yields
+    // one step later, picking the first cursor producer in spec-path order:
+    // `searchAgentDefinitions` — the alphabetically-first paginated resource
+    // and the one with no create operation, so its page can never become
+    // non-empty and the emitted `await_eventually` wait for items never
+    // resolves. 9 of P3's 10 pass->fail live regressions were this.
+    //
+    // Class-scoped, not instance-scoped: the assertion is the fix's own rule
+    // ("a producer's authoritative output is not a need") generalised over the
+    // whole bundled spec. No semantic name and no operationId is
+    // special-cased, so it also catches the same mistake on any other
+    // self-produced optional semantic (a filter echo, a tenant id, ...).
+    //
+    // Deliberately NOT flagged: a step that supplies something a LATER step or
+    // the endpoint genuinely REQUIRES (a real prerequisite such as
+    // `createDeployment` -> `createProcessInstance`), and a step that produces
+    // the variant's own leaf semantic (the leaf producer must be scheduled
+    // even when it already produces that value — that is the load-bearing
+    // `searchAgentInstances` filtering by `agentDefinitionKey` case).
+    if (!existsSync(VARIANT_SCENARIOS_DIR)) return; // no variants generated yet
+
+    /** 2xx/3xx response semantics: what an operation authoritatively returns. */
+    function responseSemanticsOf(opId: string): Set<string> {
+      const out = new Set<string>();
+      for (const [statusCode, entries] of Object.entries(
+        findOperation(opId).responseSemanticTypes ?? {},
+      )) {
+        if (!statusCode.startsWith('2') && !statusCode.startsWith('3')) continue;
+        for (const e of entries) if (e.provider) out.add(e.semanticType);
+      }
+      return out;
+    }
+    /** Semantics an operation accepts but does not need. */
+    function optionalInputsOf(opId: string): Set<string> {
+      const op = findOperation(opId);
+      const out = new Set<string>();
+      for (const e of op.requestBodySemanticTypes ?? []) {
+        if (!e.required) out.add(e.semanticType);
+      }
+      for (const p of op.parameters ?? []) {
+        if (!p.required && p.semanticType) out.add(p.semanticType);
+      }
+      return out;
+    }
+    /** Semantics an operation cannot be called without. */
+    function requiredInputsOf(opId: string): Set<string> {
+      const op = findOperation(opId);
+      const out = new Set<string>();
+      for (const e of op.requestBodySemanticTypes ?? []) {
+        if (e.required) out.add(e.semanticType);
+      }
+      for (const p of op.parameters ?? []) {
+        if (p.required && p.semanticType) out.add(p.semanticType);
+      }
+      return out;
+    }
+
+    const offenders: {
+      file: string;
+      scenario: string;
+      step: string;
+      contributesOnly: string[];
+    }[] = [];
+
+    for (const f of readdirSync(VARIANT_SCENARIOS_DIR)) {
+      if (!f.endsWith('-scenarios.json')) continue;
+      // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+      const file = JSON.parse(
+        readFileSync(join(VARIANT_SCENARIOS_DIR, f), 'utf8'),
+      ) as VariantScenarioFile;
+      const endpointOpId = file.endpoint.operationId;
+
+      for (const sc of file.scenarios) {
+        const ops = sc.operations.map((o) => o.operationId);
+        const productionMap = sc.productionMap ?? {};
+        const leafSemantics = new Set(sc.populatesSubShape?.leafSemantics ?? []);
+
+        // The final step is the endpoint call under test, never a warm-up.
+        for (let i = 0; i < ops.length - 1; i++) {
+          const step = ops[i];
+          if (step === endpointOpId) continue;
+
+          const contributes = new Set(
+            Object.entries(productionMap)
+              .filter(([, producer]) => producer === step)
+              .map(([semantic]) => semantic),
+          );
+          if (contributes.size === 0) continue;
+          // The leaf's own producer is load-bearing by definition.
+          if ([...contributes].some((s) => leafSemantics.has(s))) continue;
+
+          const selfProducedOptional = new Set(
+            [...responseSemanticsOf(step)].filter((s) => optionalInputsOf(step).has(s)),
+          );
+          // Everything it adds is a value its own call already returns.
+          if (![...contributes].every((s) => selfProducedOptional.has(s))) continue;
+
+          const requiredDownstream = new Set<string>();
+          for (const later of [...ops.slice(i + 1), endpointOpId]) {
+            for (const s of requiredInputsOf(later)) requiredDownstream.add(s);
+          }
+          // ...and nothing later in the chain actually needs it.
+          if ([...contributes].some((s) => requiredDownstream.has(s))) continue;
+
+          offenders.push({
+            file: f,
+            scenario: sc.id,
+            step,
+            contributesOnly: [...contributes].sort(),
+          });
+        }
+      }
+    }
+
     expect(offenders).toEqual([]);
   });
 });
@@ -4743,21 +4877,32 @@ describeForThisConfig(
             binding,
             `${op.operationId}: ${semantic} variant must bind ${varName}`,
           ).toBeDefined();
-          // PR 4 note: the binding may be either
-          //   - `fc:cma:<sem>:<suffix>` — variant fallback path
-          //     (`bindSemanticInput` for clientMintedAttribute), used
-          //     when the producer-chain BFS could not satisfy the leaf;
-          //   - `__PENDING__` — variant producer-chain path, where the
-          //     value is extracted at runtime from a search step in the
-          //     chain;
-          //   - `<sem>_<suffix>` — variant fallback path for
-          //     non-clientMintedAttribute classifications (only
-          //     reached when the semantic is not clientMinted; included
-          //     here for completeness even though clientMintedAttribute
-          //     semantics never take this branch).
-          // Asserting any of these specifically would couple this
-          // invariant to the BFS outcome rather than to the suite-
-          // partition contract.
+          // PR 4 note: this invariant deliberately does not assert the
+          // binding's VALUE — doing so would couple it to the BFS
+          // outcome rather than to the suite-partition contract it
+          // exists to guard. That axis is owned by the sibling block
+          // 'no clientMintedAttribute binding is left __PENDING__'
+          // below, which checks the value for every emitted scenario.
+          //
+          // For reference, the shapes a binding can take:
+          //   - `fc:cma:<sem>:<suffix>` — the minted value
+          //     (`bindSemanticInput` for clientMintedAttribute). This is
+          //     the ONLY acceptable outcome for a clientMintedAttribute
+          //     semantic: it has no runtime producer by declaration, so
+          //     nothing can ever extract it.
+          //   - `<sem>_<suffix>` — variant fallback for
+          //     non-clientMintedAttribute classifications (never reached
+          //     here; listed for completeness).
+          //   - `__PENDING__` — "an upstream chain step extracts this at
+          //     runtime". This comment historically documented it as an
+          //     acceptable outcome of the variant producer-chain path,
+          //     which was the cover for the tag-'null' defect: a
+          //     clientMintedAttribute leaf was chained onto a
+          //     `provider: false` response echo that never sent the
+          //     value, so the binding stayed `__PENDING__` and the
+          //     emitter sent `null`. It is now unreachable for a
+          //     clientMintedAttribute semantic, and the block below
+          //     fails the run if one reappears.
         });
 
         it(`${semantic} :: ${op.operationId}: emitted variant spec references ctx.${varName} (#162 PR 4)`, () => {
@@ -4826,6 +4971,128 @@ describeForThisConfig(
         });
       }
     }
+  },
+);
+
+describeForThisConfig(
+  'bundled-spec invariants: no clientMintedAttribute binding is left __PENDING__',
+  () => {
+    // A `clientMintedAttribute` semantic (`kind: 'attribute'` +
+    // `clientMinted: true` in the ABox) has no authoritative producer BY
+    // DECLARATION, so `bindSemanticInput` — the chokepoint the ontology
+    // `$comment` names — mints a deterministic `fc:cma:<sem>:<suffix>`
+    // value for it. A `__PENDING__` binding means "an upstream step in
+    // this chain extracts the value at runtime", which can never happen
+    // for a semantic nothing produces. The emitter then substitutes
+    // `null` into the request body and the broker 400s, e.g.
+    // "The provided tag 'null' is not valid."
+    //
+    // How it happened (the defect this guards): `generateOptionalSubShape
+    // Variants` resolves producer candidates as
+    // `authoritative.length > 0 ? authoritative : inclusive`. For `Tag`,
+    // `producersByType` is empty (correct — client-minted) but the
+    // INCLUSIVE index `responseProducersByType` is non-empty, because six
+    // ops echo tags back in their 200 responses with `provider: false`
+    // (`createProcessInstance.tags[]`, `searchProcessInstances.items[].tags[]`,
+    // `getUserTask.tags[]`, …). A chain built around such an echo extracts
+    // from a response where the producer never SENT a tag, so the binding
+    // stayed `__PENDING__`. Measured at the fix commit: 24 of 30
+    // clientMintedAttribute leaf bindings were `__PENDING__` (17 of them
+    // `Tag`, matching 17 live tag-null 400s exactly).
+    //
+    // Class-scoped: the semantic list is derived from the ABox, and every
+    // scenario in BOTH emitted suites is scanned, so this covers Tag,
+    // BusinessId, HistoryItemId, LoopIterationId and any future
+    // clientMintedAttribute semantic — and any planner path that leaves
+    // one unbound, not just the producer-candidate selection site.
+    //
+    // The sibling block above ('clientMintedAttribute setter sites')
+    // deliberately does NOT assert the binding's value — it guards the
+    // suite-partition contract instead. It used to document `__PENDING__`
+    // as an acceptable outcome of the variant producer-chain path; that
+    // documentation was the bug's cover and has been corrected. This
+    // invariant owns the value axis: for a client-minted semantic there
+    // is no runtime producer, so `__PENDING__` is never acceptable.
+
+    interface SemanticTypeDecl {
+      name?: string;
+      kind?: string;
+      clientMinted?: boolean;
+    }
+
+    function clientMintedVarNames(): Map<string, string> {
+      // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+      const abox = JSON.parse(
+        readFileSync(join(REPO_ROOT, 'configs', CONFIG_NAME, 'ontology', 'semantics.json'), 'utf8'),
+      ) as { semanticTypes?: SemanticTypeDecl[] };
+      const map = new Map<string, string>();
+      for (const spec of abox.semanticTypes ?? []) {
+        if (spec?.kind !== 'attribute' || spec?.clientMinted !== true) continue;
+        if (typeof spec.name !== 'string' || spec.name.length === 0) continue;
+        // `<camelCase(sem)>Var` — the varName convention `bindSemanticInput`
+        // and every emitter rely on.
+        const varName = `${spec.name.charAt(0).toLowerCase()}${spec.name.slice(1)}Var`;
+        map.set(varName, spec.name);
+      }
+      return map;
+    }
+
+    const CLIENT_MINTED_VARS = clientMintedVarNames();
+
+    it('the ABox declares at least one clientMintedAttribute semantic (guard against a vacuous pass)', () => {
+      expect(
+        CLIENT_MINTED_VARS.size,
+        `expected at least one kind:'attribute' + clientMinted:true semantic in configs/${CONFIG_NAME}/ontology/semantics.json`,
+      ).toBeGreaterThan(0);
+    });
+
+    it('no scenario in either emitted suite binds a clientMintedAttribute semantic to __PENDING__', () => {
+      const offenders: {
+        suite: string;
+        file: string;
+        scenario: string;
+        binding: string;
+        semantic: string;
+      }[] = [];
+      let scanned = 0;
+      const suites: [string, string][] = [
+        ['variant-output', VARIANT_SCENARIOS_DIR],
+        ['feature-output', FEATURE_SCENARIOS_DIR],
+      ];
+      for (const [suite, dir] of suites) {
+        if (!existsSync(dir)) continue;
+        for (const f of readdirSync(dir)) {
+          if (!f.endsWith('-scenarios.json')) continue;
+          // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+          const parsed = JSON.parse(readFileSync(join(dir, f), 'utf8')) as {
+            scenarios?: { id?: string; bindings?: Record<string, unknown> }[];
+          };
+          for (const scenario of parsed.scenarios ?? []) {
+            for (const [varName, value] of Object.entries(scenario.bindings ?? {})) {
+              const semantic = CLIENT_MINTED_VARS.get(varName);
+              if (!semantic) continue;
+              scanned += 1;
+              if (value !== PENDING_BINDING) continue;
+              offenders.push({
+                suite,
+                file: f,
+                scenario: scenario.id ?? '<unknown>',
+                binding: varName,
+                semantic,
+              });
+            }
+          }
+        }
+      }
+      expect(
+        scanned,
+        'expected at least one clientMintedAttribute binding across the emitted suites — the scan found none, so this invariant would pass vacuously',
+      ).toBeGreaterThan(0);
+      expect(
+        offenders,
+        `a clientMintedAttribute semantic has no runtime producer, so its binding must be minted (fc:cma:…), never ${PENDING_BINDING}; the emitter would send null and the broker 400s`,
+      ).toEqual([]);
+    });
   },
 );
 
@@ -10420,6 +10687,196 @@ describeForThisConfig(
   },
 );
 
+// ---------------------------------------------------------------------------
+// NESTED enum-typed request-body field seeding (extends #338 to any depth)
+// ---------------------------------------------------------------------------
+//
+// The #338 invariant above iterates only the TOP-LEVEL keys of `bodyTemplate`
+// (`Object.entries(step.bodyTemplate ?? {})`), so an enum-typed leaf nested
+// inside a required array-of-objects was never checked. That gap let
+// `createAgentInstance`'s `history[].role` (an `allOf` `$ref` to
+// `AgentInstanceHistoryRoleEnum`) ship as `"role": "placeholder"`, which the
+// broker rejects with `400 Unexpected value 'placeholder' for enum field
+// 'role'` — 28 live Python failures across `createAgentInstance` /
+// `updateAgentInstance` and their variants.
+//
+// Root cause was `scalarSeedLiteral` in `path-analyser/src/index.ts`, which
+// resolved format → declared type → `'placeholder'` and never consulted
+// `node.enum`. This invariant is the class-scoped guard: it walks the schema
+// to ANY depth and asserts every emitted leaf whose schema declares an enum is
+// a member of that enum, so a sibling nested-enum field cannot regress the same
+// way. Scope mirrors `synthesizeObjectFromPrefix` (required properties only),
+// which is the code path that synthesises these literals.
+describeForThisConfig(
+  'bundled-spec invariants: nested enum-typed request-body field seeding',
+  () => {
+    it('no emitted bodyTemplate seeds "placeholder" (or any non-member) for an enum-typed leaf at any nesting depth', () => {
+      if (!existsSync(FEATURE_SCENARIOS_DIR)) {
+        throw new Error(
+          `Feature output directory not found at ${FEATURE_SCENARIOS_DIR}. Run 'npm run pipeline' first.`,
+        );
+      }
+      if (!existsSync(BUNDLED_SPEC_PATH)) {
+        throw new Error(
+          `Bundled spec not found at ${BUNDLED_SPEC_PATH}. Run 'npm run fetch-spec' first.`,
+        );
+      }
+
+      const spec = loadBundledSpec();
+
+      /**
+       * Collect every enum constraint in a request-body schema, keyed by the
+       * canonical dot + `[]` path notation the body walker below reproduces
+       * (e.g. `history[].role`). Descends through `allOf`/`oneOf` and array
+       * `items` to any depth; `depth` guards against cyclic `$ref`s.
+       */
+      function collectEnumPathsDeep(
+        schema: SpecNode | undefined,
+        prefix: string,
+        out: Map<string, unknown[]>,
+        depth: number,
+      ): void {
+        if (!schema || depth > 8) return;
+        const resolved = resolveSpecNode(schema, spec, new Set());
+        if (!resolved) return;
+        const ownEnum = effectiveEnumFromSpec(resolved, spec, new Set());
+        if (ownEnum && ownEnum.length > 0 && prefix.length > 0 && !out.has(prefix)) {
+          out.set(prefix, ownEnum);
+        }
+        if (resolved.type === 'array' && resolved.items) {
+          collectEnumPathsDeep(resolved.items, `${prefix}[]`, out, depth + 1);
+        } else {
+          const { required, properties } = mergeSchemaShape(resolved, spec, new Set());
+          for (const field of required) {
+            const sub = properties[field];
+            if (!sub) continue;
+            collectEnumPathsDeep(sub, prefix ? `${prefix}.${field}` : field, out, depth + 1);
+          }
+        }
+        for (const variant of resolved.oneOf ?? []) {
+          collectEnumPathsDeep(variant, prefix, out, depth + 1);
+        }
+      }
+
+      const enumPathsByOp = new Map<string, Map<string, unknown[]>>();
+      for (const pathItem of Object.values(spec.paths ?? {})) {
+        for (const op of Object.values(pathItem)) {
+          if (!op.operationId) continue;
+          const body = resolveSpecNode(op.requestBody, spec, new Set());
+          const jsonBody = body?.content?.['application/json']?.schema;
+          if (!jsonBody) continue;
+          const paths = new Map<string, unknown[]>();
+          collectEnumPathsDeep(jsonBody, '', paths, 0);
+          if (paths.size > 0) enumPathsByOp.set(op.operationId, paths);
+        }
+      }
+
+      interface NestedScenarioFile {
+        scenarios: {
+          id: string;
+          requestPlan?: { operationId: string; bodyTemplate?: unknown }[];
+        }[];
+      }
+
+      type NestedOffenderReason = 'placeholder-var' | 'placeholder-literal' | 'non-enum-member';
+      const offenders: {
+        file: string;
+        scenario: string;
+        operationId: string;
+        path: string;
+        value: unknown;
+        expectedEnum: unknown[];
+        reason: NestedOffenderReason;
+      }[] = [];
+      const placeholderPattern = /^\$\{[^}]+\}$/;
+
+      function classifyLeaf(value: unknown, expectedEnum: unknown[]): NestedOffenderReason | null {
+        if (typeof value === 'string' && placeholderPattern.test(value)) return 'placeholder-var';
+        if (value === 'placeholder') return 'placeholder-literal';
+        if (!expectedEnum.includes(value)) return 'non-enum-member';
+        return null;
+      }
+
+      // Non-vacuity: count how many enum-typed leaves were actually checked, and
+      // remember the deepest path seen, so this invariant cannot pass by never
+      // matching anything (e.g. after a notation drift between the schema walker
+      // and the body walker).
+      let leavesChecked = 0;
+      let maxDepthSeen = 0;
+
+      function walkBody(
+        value: unknown,
+        path: string,
+        enumPaths: Map<string, unknown[]>,
+        info: { file: string; scenario: string; operationId: string },
+      ): void {
+        const expected = enumPaths.get(path);
+        if (expected) {
+          leavesChecked += 1;
+          maxDepthSeen = Math.max(maxDepthSeen, path.split(/[.[]/).filter(Boolean).length);
+          const reason = classifyLeaf(value, expected);
+          if (reason) {
+            offenders.push({ ...info, path, value, expectedEnum: expected, reason });
+          }
+          return;
+        }
+        if (Array.isArray(value)) {
+          for (const elem of value) walkBody(elem, `${path}[]`, enumPaths, info);
+          return;
+        }
+        if (isSpecRecord(value)) {
+          for (const [k, v] of Object.entries(value)) {
+            walkBody(v, path ? `${path}.${k}` : k, enumPaths, info);
+          }
+        }
+      }
+
+      for (const dir of [FEATURE_SCENARIOS_DIR, VARIANT_SCENARIOS_DIR]) {
+        if (!existsSync(dir)) continue;
+        for (const f of readdirSync(dir)) {
+          if (!f.endsWith('-scenarios.json')) continue;
+          // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+          const file = JSON.parse(readFileSync(join(dir, f), 'utf8')) as NestedScenarioFile;
+          for (const scenario of file.scenarios ?? []) {
+            for (const step of scenario.requestPlan ?? []) {
+              const enumPaths = enumPathsByOp.get(step.operationId);
+              if (!enumPaths || step.bodyTemplate === undefined) continue;
+              walkBody(step.bodyTemplate, '', enumPaths, {
+                file: f,
+                scenario: scenario.id,
+                operationId: step.operationId,
+              });
+            }
+          }
+        }
+      }
+
+      // Non-vacuity guards: the nested case must actually be exercised. On the
+      // pinned camunda-oca spec `history[].role` is the only required nested
+      // enum leaf that gets synthesised, so at least one leaf at depth >= 2
+      // must have been checked.
+      expect(
+        leavesChecked,
+        'Expected the nested-enum invariant to check at least one enum-typed bodyTemplate leaf; ' +
+          'the schema walker and body walker path notations may have drifted apart.',
+      ).toBeGreaterThan(0);
+      expect(
+        maxDepthSeen,
+        'Expected at least one enum-typed leaf nested below the top level (e.g. history[].role) ' +
+          'to be checked; a depth of 1 means the nested case is not being exercised.',
+      ).toBeGreaterThanOrEqual(2);
+
+      expect(
+        offenders,
+        'A scenario bodyTemplate seeds an invalid value for an enum-typed leaf nested inside the ' +
+          'request body. The planner must emit a literal that is a member of the declared enum at ' +
+          'ANY depth, not just for top-level fields (#338 covers those). Servers reject ' +
+          '"placeholder" and non-member literals with HTTP 400.',
+      ).toEqual([]);
+    });
+  },
+);
+
 // Operations are emitted per-SDK with these layouts (see the respective
 // emitters): JS  -> <opId>/<opId>.<mode>.test.ts, C# -> <opId>/<opId>.<mode>.Tests.cs,
 // Python (flat) -> test_<snake_op_id>.py. These helpers walk the real output
@@ -10527,13 +10984,32 @@ describeForThisConfig('bundled-spec invariants: emitted Python SDK suite (#133)'
     // since a `witness_response_N = await client...` eventual-wait poll call
     // also matches a bare `await client\.\w+\(` scan and would let an
     // aggregate count mask a genuinely missing step N call.
+    //
+    // P3 (eventual-consistency polling) intentionally changed the shape of
+    // eventually-consistent steps: the emitter now lowers them to
+    // `response_N = await await_eventually(` wrapping `lambda: client.<method>(`
+    // instead of a bare `response_N = await client.<method>(`. Both shapes are
+    // accepted here, and both still require the real `client.<method>(` call,
+    // so a step lowered to a comment only is still caught.
     const offenders: string[] = [];
+    let wrappedSteps = 0;
     for (const file of files) {
       const src = readFileSync(join(PYTHON_SDK_DIR, file), 'utf8');
       const stepNumbers = Array.from(src.matchAll(/# Step (\d+):/g)).map((m) => Number(m[1]));
-      const missingSteps = stepNumbers.filter(
-        (n) => !new RegExp(`response_${n} = await client\\.\\w+\\(`).test(src),
-      );
+      const missingSteps: number[] = [];
+      for (const n of stepNumbers) {
+        if (
+          new RegExp(`response_${n} = await await_eventually\\(\\s*lambda: client\\.\\w+\\(`).test(
+            src,
+          )
+        ) {
+          wrappedSteps += 1;
+          continue;
+        }
+        if (!new RegExp(`response_${n} = await client\\.\\w+\\(`).test(src)) {
+          missingSteps.push(n);
+        }
+      }
       if (missingSteps.length > 0) {
         offenders.push(`${file} (missing client call for step(s): ${missingSteps.join(', ')})`);
       }
@@ -10542,6 +11018,14 @@ describeForThisConfig('bundled-spec invariants: emitted Python SDK suite (#133)'
       offenders,
       'Emitted Python SDK test file(s) have step comments with no corresponding client call.',
     ).toEqual([]);
+    // Non-vacuity: the wrapped shape must actually be exercised. Without this,
+    // an emitter rename (or a regex drift) would silently drop every wrapped
+    // step into `missingSteps`... or, worse, a future relaxation could make the
+    // wrapper branch match nothing while the suite still passed on direct calls.
+    expect(
+      wrappedSteps,
+      'Expected at least 100 await_eventually-wrapped Python steps; the wrapper regex may have drifted from the emitter.',
+    ).toBeGreaterThanOrEqual(100);
   });
 
   it('every planned scenario has a materialized Python SDK test file (#133)', () => {
@@ -10585,6 +11069,175 @@ describeForThisConfig('bundled-spec invariants: emitted Python SDK suite (#133)'
       missing,
       'Planned scenarios exist but no Python SDK test file was materialized for these operationIds',
     ).toEqual([]);
+  });
+
+  it('every emitted Python request URL for a serverOverride operation resolves against the API root, not the /v2 base (Item 5A)', () => {
+    if (!existsSync(PYTHON_SDK_DIR)) {
+      throw new Error(
+        `Python SDK output directory not found at ${PYTHON_SDK_DIR}. Run 'npm run codegen:all' (or 'npm run testsuite:generate') first.`,
+      );
+    }
+    const graph = loadGraph();
+    // The set of operations whose path item declares its own OpenAPI
+    // `servers` override (cluster-admin: served at the API root, not under
+    // `/v2`). Derived from the graph, never hardcoded to a path prefix, so a
+    // future path-item override on any operation is covered by the same rule.
+    const overrideOps = new Set(
+      graph.operations.filter((o) => o.serverOverride !== undefined).map((o) => o.operationId),
+    );
+    // Guard against the invariant silently passing because the graph drifted
+    // (e.g. the extractor stopped emitting serverOverride). The bundled spec
+    // has exactly 22 cluster-admin operations.
+    expect(
+      overrideOps.size,
+      'Expected the bundled spec to carry serverOverride operations (cluster-admin); the extractor may have stopped emitting the field.',
+    ).toBeGreaterThan(0);
+
+    const files = readdirSync(PYTHON_SDK_DIR).filter(
+      (f) => f.startsWith('test_') && f.endsWith('.py'),
+    );
+    // Per file, walk the `# Step N: <opId>` comments and the `url_N = f'...'`
+    // assignment that follows each, and assert the base matches the operation's
+    // override status. An override op MUST be absolute (`{root_base_url()}`);
+    // a non-override op MUST NOT be (catches over-application, which would
+    // send ordinary `/v2` requests to the root and 404 them).
+    const offenders: string[] = [];
+    let checkedOverrideSteps = 0;
+    for (const file of files) {
+      const src = readFileSync(join(PYTHON_SDK_DIR, file), 'utf8');
+      const stepOp = new Map<number, string>();
+      for (const m of src.matchAll(/# Step (\d+): (\S+)/g)) {
+        stepOp.set(Number(m[1]), String(m[2]));
+      }
+      for (const m of src.matchAll(/url_(\d+) = f'([^']*)'/g)) {
+        const n = Number(m[1]);
+        const urlExpr = String(m[2]);
+        const opId = stepOp.get(n);
+        if (opId === undefined) continue;
+        const isAbsolute = urlExpr.startsWith('{root_base_url()}');
+        if (overrideOps.has(opId)) {
+          checkedOverrideSteps += 1;
+          if (!isAbsolute) {
+            offenders.push(
+              `${file} url_${n} (${opId}): serverOverride operation emitted relative to the /v2 base — '${urlExpr}'`,
+            );
+          }
+        } else if (isAbsolute) {
+          offenders.push(
+            `${file} url_${n} (${opId}): non-override operation wrongly emitted against the API root — '${urlExpr}'`,
+          );
+        }
+      }
+      // A file that routes any step to the root must import the helper, else
+      // the emitted NameError would fail every test in it at runtime.
+      if (
+        src.includes('{root_base_url()}') &&
+        !src.includes('from support.base_url import root_base_url')
+      ) {
+        offenders.push(`${file}: uses root_base_url() but does not import it`);
+      }
+    }
+    expect(
+      checkedOverrideSteps,
+      'Expected at least one emitted serverOverride request step to check; the emitter may have stopped emitting cluster-admin URLs.',
+    ).toBeGreaterThan(0);
+    expect(
+      offenders,
+      'Python request URLs must resolve against the API root exactly for serverOverride operations (Item 5A)',
+    ).toEqual([]);
+  });
+
+  it('no emitted Python request body can serialise an explicit JSON null from an unbound placeholder (Item 6a)', () => {
+    if (!existsSync(PYTHON_SDK_DIR)) {
+      throw new Error(
+        `Python SDK output directory not found at ${PYTHON_SDK_DIR}. Run 'npm run codegen:all' (or 'npm run testsuite:generate') first.`,
+      );
+    }
+    // The defect CLASS, not the cursor instance: a whole-string `${var}` body
+    // placeholder renders inline as a bare `ctx.get('var')`, which is None when
+    // the binding was never produced — and None serialises to an explicit JSON
+    // null. The broker treats an explicit null as a *present but unusable*
+    // value, not an absent one: `{"page":{"after":null}}` is 400 "At least one
+    // of [from, after, before, limit] is required", and so is `{"page":{}}`,
+    // while `{}` is 200. So the emitted literal must be wrapped in
+    // `prune_nulls(...)`, which drops the null AND any container it thereby
+    // emptied. Asserted for EVERY body/data assignment in EVERY suite, so a
+    // regression on any binding (cursor, key, tenant, …) is caught — not just
+    // on `page.after`.
+    //
+    // The concatenated placeholder form is deliberately excluded: it renders as
+    // `(str(ctx.get('x')) if ctx.get('x') is not None else '')`, which degrades
+    // to '' and can never be None. Those occurrences of `ctx.get(` are stripped
+    // first so they cannot be mistaken for a bare binding.
+    const CONCATENATED_GUARD_RE =
+      /\(str\(ctx\.get\('[^']*'\)\) if ctx\.get\('[^']*'\) is not None else ''\)/g;
+    const ASSIGNMENT_RE = /^\s+(body|data)_(\d+) = (.*)$/;
+    const files = readdirSync(PYTHON_SDK_DIR).filter(
+      (f) => f.startsWith('test_') && f.endsWith('.py'),
+    );
+    const offenders: string[] = [];
+    let wrappedBodies = 0;
+    let cursorBodies = 0;
+    for (const file of files) {
+      const src = readFileSync(join(PYTHON_SDK_DIR, file), 'utf8');
+      for (const line of src.split('\n')) {
+        const m = ASSIGNMENT_RE.exec(line);
+        if (m === null) continue;
+        const kind = String(m[1]);
+        const num = String(m[2]);
+        const rhs = String(m[3]);
+        const isWrapped = rhs.startsWith('prune_nulls(');
+        if (isWrapped) {
+          wrappedBodies += 1;
+          if (/'page': \{'(?:after|before)':/.test(rhs)) cursorBodies += 1;
+        }
+        // Strip the concatenated guard, then any surviving `ctx.get(` is a bare
+        // whole-string binding that can resolve to None.
+        const bare = rhs.replaceAll(CONCATENATED_GUARD_RE, '');
+        if (bare.includes('ctx.get(') && !isWrapped) {
+          offenders.push(
+            `${file} ${kind}_${num}: an inline ctx.get() binding can serialise an explicit JSON null but the body is not wrapped in prune_nulls() — ${rhs.trim()}`,
+          );
+        }
+        // Over-application is a defect too: wrapping a literal with no bare
+        // binding is dead code that churns the diff and obscures the real wraps.
+        if (isWrapped && !bare.includes('ctx.get(')) {
+          offenders.push(
+            `${file} ${kind}_${num}: wrapped in prune_nulls() but no inline binding can be None — ${rhs.trim()}`,
+          );
+        }
+      }
+      // Import/wrap consistency: a wrap without the import is a runtime
+      // NameError that fails every test in the file; an import without a wrap
+      // is dead code.
+      const uses = src.includes('prune_nulls(');
+      const imports = src.includes('from support.prune import prune_nulls');
+      if (uses && !imports) {
+        offenders.push(`${file}: uses prune_nulls() but does not import it`);
+      }
+      if (imports && !uses) {
+        offenders.push(`${file}: imports prune_nulls but never uses it`);
+      }
+    }
+    // Offenders first: on a real regression the list names the exact file and
+    // body, which is the useful signal. The non-vacuity guards below then catch
+    // the opposite failure — the invariant passing because there is nothing
+    // left to check (e.g. the planner stopped emitting cursor variants).
+    expect(
+      offenders,
+      'Every emitted Python body whose inline binding can resolve to None must be wrapped in prune_nulls(), and no body that cannot must be (Item 6a)',
+    ).toEqual([]);
+    // Non-vacuity: the bundled spec's cursor variants must actually exercise
+    // this. If the planner stopped emitting `${endCursorVar}`/`${startCursorVar}`
+    // bodies the invariant would pass while guarding nothing.
+    expect(
+      cursorBodies,
+      'Expected emitted cursor bodies (page.after/page.before) to check; the planner may have stopped emitting cursor variants.',
+    ).toBeGreaterThan(0);
+    expect(
+      wrappedBodies,
+      'Expected at least one prune_nulls-wrapped body; the emitter may have stopped wrapping null-capable placeholders.',
+    ).toBeGreaterThan(0);
   });
 });
 
@@ -10711,6 +11364,84 @@ describeForThisConfig('bundled-spec invariants: emitted C# SDK suite (#132)', ()
       offenders,
       'Emitted C# file(s) are missing the CamundaIntegrationTests namespace declaration.',
     ).toEqual([]);
+  });
+});
+
+describeForThisConfig('variant planning: endpoint-scoped optional leaves are self-sourced', () => {
+  it('a variant leaf the endpoint itself authoritatively returns is sourced from a prior call to that endpoint', async () => {
+    const { loadGraph } = await import('../../path-analyser/src/graphLoader.js');
+    const graph = await loadGraph(join(REPO_ROOT, 'path-analyser'));
+    // Known residual: the planner satisfies these endpoints' cursor via the searchUserTasks step
+    // it already needs for userTaskKey. Remove an entry once its variant self-sources.
+    const KNOWN_RESIDUAL = new Set(['searchUserTaskAuditLogs', 'searchUserTaskVariables']);
+    const offenders: string[] = [];
+    let checked = 0;
+    for (const f of readdirSync(VARIANT_SCENARIOS_DIR)) {
+      if (!f.endsWith('-scenarios.json')) continue;
+      // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+      const parsed = JSON.parse(readFileSync(join(VARIANT_SCENARIOS_DIR, f), 'utf8')) as {
+        endpoint: { operationId: string };
+        scenarios?: { variantKey?: string; operations: { operationId: string }[] }[];
+      };
+      const endpointOp = parsed.endpoint.operationId;
+      if (KNOWN_RESIDUAL.has(endpointOp)) continue;
+      for (const s of parsed.scenarios ?? []) {
+        const semantic = s.variantKey?.split('::').pop();
+        if (!semantic) continue;
+        if (!(graph.producersByType[semantic] ?? []).includes(endpointOp)) continue;
+        if (graph.operations[endpointOp]?.requires.required.includes(semantic)) continue;
+        checked++;
+        const selfCalls = s.operations.filter((o) => o.operationId === endpointOp).length;
+        if (selfCalls < 2) {
+          offenders.push(
+            `${endpointOp} ${s.variantKey}: ${s.operations.map((o) => o.operationId).join(' > ')}`,
+          );
+        }
+      }
+    }
+    expect(checked, 'non-vacuity: expected cursor variants to be checked').toBeGreaterThan(50);
+    expect(offenders, offenders.slice(0, 10).join('\n')).toEqual([]);
+  });
+});
+
+describeForThisConfig('request plan: cursor variants extract the cursor before sending it', () => {
+  it('an earlier step extracts page.endCursor / page.startCursor for every cursor variant', () => {
+    const offenders: string[] = [];
+    let checked = 0;
+    for (const f of readdirSync(VARIANT_SCENARIOS_DIR)) {
+      if (!f.endsWith('-scenarios.json')) continue;
+      // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+      const parsed = JSON.parse(readFileSync(join(VARIANT_SCENARIOS_DIR, f), 'utf8')) as {
+        endpoint: { operationId: string };
+        scenarios?: {
+          variantKey?: string;
+          requestPlan?: { operationId: string; extract?: { fieldPath: string }[] }[];
+        }[];
+      };
+      for (const s of parsed.scenarios ?? []) {
+        const semantic = s.variantKey?.split('::').pop();
+        const leaf =
+          semantic === 'EndCursor'
+            ? 'page.endCursor'
+            : semantic === 'StartCursor'
+              ? 'page.startCursor'
+              : undefined;
+        if (!leaf) continue;
+        checked++;
+        const plan = s.requestPlan ?? [];
+        const earlier = plan.slice(0, -1);
+        const extracted = earlier.some((step) =>
+          (step.extract ?? []).some((e) => e.fieldPath === leaf),
+        );
+        if (!extracted) {
+          offenders.push(
+            `${parsed.endpoint.operationId} ${s.variantKey}: ${plan.map((p) => p.operationId).join(' > ')}`,
+          );
+        }
+      }
+    }
+    expect(checked, 'non-vacuity: expected cursor variants to be checked').toBeGreaterThan(50);
+    expect(offenders, offenders.slice(0, 10).join('\n')).toEqual([]);
   });
 });
 
@@ -10991,5 +11722,77 @@ describeForThisConfig('bundled-spec invariants: capability-gated fields (#404)',
         'expectDetailContains',
       );
     }
+  });
+});
+
+describeForThisConfig('python-sdk variants fail when their own field is unbound', () => {
+  it('every variant whose final body carries its leaf as a ${var} placeholder asserts that binding before the final request', async () => {
+    const { pythonSuiteFileName } = await import('../../materializer/src/python-sdk/emitter.ts');
+    // A variant exists to send one optional field. When the producer step yields
+    // no value, the binding is None and prune_nulls drops the field, so without
+    // this guard the test passes without exercising what it is named for.
+    const valueAt = (root: unknown, leafPath: string): unknown => {
+      let cursor = root;
+      for (const segment of leafPath.split('.')) {
+        const isArray = segment.endsWith('[]');
+        if (cursor === null || typeof cursor !== 'object' || Array.isArray(cursor))
+          return undefined;
+        cursor = Object.entries(cursor).find(
+          ([k]) => k === (isArray ? segment.slice(0, -2) : segment),
+        )?.[1];
+        if (isArray) cursor = Array.isArray(cursor) ? cursor[0] : undefined;
+      }
+      return cursor;
+    };
+    const offenders: string[] = [];
+    let checked = 0;
+    for (const f of readdirSync(VARIANT_SCENARIOS_DIR)) {
+      if (!f.endsWith('-scenarios.json')) continue;
+      // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+      const collection = JSON.parse(readFileSync(join(VARIANT_SCENARIOS_DIR, f), 'utf8')) as {
+        endpoint: { operationId: string; method: string; path: string };
+        requiredSemanticTypes: string[];
+        optionalSemanticTypes: string[];
+        scenarios?: {
+          populatesSubShape?: { leafPaths?: string[] };
+          requestPlan?: { bodyKind?: string; bodyTemplate?: unknown }[];
+        }[];
+      };
+      const expected = new Map<string, number>();
+      for (const s of collection.scenarios ?? []) {
+        const plan = s.requestPlan ?? [];
+        const final = plan[plan.length - 1];
+        if (final?.bodyKind !== 'json') continue;
+        for (const leafPath of s.populatesSubShape?.leafPaths ?? []) {
+          const value = valueAt(final.bodyTemplate, leafPath);
+          const whole = typeof value === 'string' ? /^\$\{([^}]+)\}$/.exec(value) : null;
+          if (whole === null || whole[1] === 'RANDOM') continue;
+          expected.set(whole[1], (expected.get(whole[1]) ?? 0) + 1);
+        }
+      }
+      if (expected.size === 0) continue;
+      const pyFile = join(
+        PYTHON_SDK_DIR,
+        pythonSuiteFileName({ ...collection, scenarios: [] }, 'variant'),
+      );
+      if (!existsSync(pyFile)) {
+        offenders.push(`${f}: python variant suite ${basename(pyFile)} not found`);
+        continue;
+      }
+      const src = readFileSync(pyFile, 'utf8');
+      for (const [binding, count] of expected) {
+        checked += count;
+        const actual =
+          src.split(`assert ctx.get('${binding}') is not None, (\n        "variant field unbound`)
+            .length - 1;
+        if (actual !== count) {
+          offenders.push(`${basename(pyFile)}: ${binding} guarded ${actual}x, expected ${count}x`);
+        }
+      }
+    }
+    expect(checked, 'non-vacuity: expected variant leaf bindings to be checked').toBeGreaterThan(
+      50,
+    );
+    expect(offenders, offenders.slice(0, 10).join('\n')).toEqual([]);
   });
 });

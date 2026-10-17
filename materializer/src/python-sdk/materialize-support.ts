@@ -171,6 +171,11 @@ poetry run pytest -m asyncio -v
 The generated tests execute real HTTP calls through \`httpx.AsyncClient\`.
 
 - \`CAMUNDA_BASE_URL\` (default: \`http://localhost:8080/v2\`)
+- \`CAMUNDA_ROOT_URL\` (optional) -- the API ROOT, used only by operations whose
+  path item declares its own OpenAPI \`servers\` override and is therefore served
+  outside \`/v2\` (the cluster-admin API at \`{host}:{port}/cluster/v2/...\`).
+  Defaults to \`CAMUNDA_BASE_URL\` with a trailing \`/v2\` stripped, so it normally
+  needs no setting. Mirrors the Playwright suite's \`API_ROOT_URL\`.
 - \`CAMUNDA_TIMEOUT_SECONDS\` (default: \`30\`)
 - \`BEARER_TOKEN\` (optional) -- sent as \`Authorization: Bearer <token>\` on every
   request, for secured clusters. Matches the Playwright/JS SDK suites' own
@@ -341,6 +346,234 @@ def seed_binding(name: str, unique: bool = False) -> str:
     if name.lower().endswith('id') or name.lower().endswith('key'):
         return f'{name}-{digest}'
     return f'{name}-{digest}'
+`,
+    },
+
+    {
+      relativePath: 'support/base_url.py',
+      content: `"""
+Resolve the API ROOT base URL for operations served outside the default '/v2' base.
+
+Some path items declare their own OpenAPI 'servers' override — the Orchestration
+Cluster REST API's cluster-admin operations are served at
+'{host}:{port}/cluster/v2/...' rather than under the document root's
+'{host}:{port}/v2'. The extractor records that as 'OperationRef.serverOverride',
+the planner carries it on 'RequestStep', and the emitter prefixes such a step's
+URL with 'root_base_url()' so httpx resolves it against the root instead of
+re-prefixing '/v2'.
+
+Mirrors materializer/src/playwright/support/env.ts's 'buildBaseUrl(true)',
+including its precedence, so both suites target the same host for the same
+operation.
+"""
+
+from __future__ import annotations
+
+import os
+import re
+
+
+def root_base_url() -> str:
+    """
+    Return the API root base URL, always ending with '/'.
+
+    Precedence (same as playwright's buildBaseUrl(true)):
+      1. CAMUNDA_ROOT_URL, when set.
+      2. CAMUNDA_BASE_URL with a trailing '/v2' stripped.
+      3. 'http://localhost:8080'.
+
+    The trailing '/' matters: emitted request URLs keep no leading '/', so per
+    RFC 3986 they EXTEND this path rather than replacing it. Without the slash
+    the last path segment would be dropped.
+    """
+    explicit = os.getenv("CAMUNDA_ROOT_URL")
+    if explicit:
+        root = explicit
+    else:
+        base = os.getenv("CAMUNDA_BASE_URL", "http://localhost:8080/v2")
+        root = re.sub(r"/v2/?$", "", base)
+    return root if root.endswith("/") else root + "/"
+`,
+    },
+
+    {
+      relativePath: 'support/prune.py',
+      content: `"""
+Drop request-body fields whose '\${...}' binding resolved to null.
+
+A whole-string placeholder in a request body renders inline as
+'ctx.get("someVar")'. When the producer step never bound that variable — the
+normal case for a cursor, because a single-page response has no
+'page.endCursor' to extract — the value is None and the body serialises an
+EXPLICIT JSON null:
+
+    {"page": {"after": null}}
+
+The broker rejects that. An explicit null is a *present but unusable* cursor,
+not an absent one, so '/decision-instances/search' answers 400 "At least one of
+[from, after, before, limit] is required". Omitting the key alone is not enough
+either: '{"page": {}}' is also 400, while '{}' is 200. Hence this helper removes
+the null AND any container that became empty as a result.
+
+Containers that were ALREADY empty in the generated template are preserved
+verbatim — they are deliberate, meaningful values (e.g. 'updateJob.changeset =
+{}', 'resolveIncidentsBatchOperation.filter = {}'), not pruning artefacts. Only
+a container that was non-empty before pruning and is empty afterwards is
+dropped.
+
+Emptying a list drops it too rather than leaving '[]', because an empty list is
+not uniformly accepted: 'filter.tags = []' is 200, but
+'filter.elementInstanceKeys = []' and 'filter.tenantIds = []' are both 400, and
+'filter.$or = [{}]' is a 500.
+
+Falsy-but-bound values (0, False, '') are never pruned. A literal None in the
+template (an intentional JSON null) is preserved; only values wrapped by
+'unbound(...)' that resolved to None are dropped.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+# Sentinel meaning "this value was pruned away", so a legitimately stored None
+# can never be confused with an absent one.
+_DROPPED = object()
+# Marks a '\${...}' placeholder whose binding was never produced.
+_UNBOUND = object()
+
+
+def unbound(value: Any) -> Any:
+    return _UNBOUND if value is None else value
+
+
+def _prune(value: Any) -> Any:
+    if isinstance(value, dict):
+        kept: dict[Any, Any] = {}
+        for key, item in value.items():
+            if item is _UNBOUND:
+                continue
+            pruned = _prune(item)
+            if pruned is _DROPPED:
+                continue
+            kept[key] = pruned
+        # Non-empty before, empty after -> the container only existed to hold
+        # values that were all pruned, so it goes too.
+        if value and not kept:
+            return _DROPPED
+        return kept
+    if isinstance(value, list):
+        items: list[Any] = []
+        for item in value:
+            if item is _UNBOUND:
+                continue
+            pruned = _prune(item)
+            if pruned is _DROPPED:
+                continue
+            items.append(pruned)
+        if value and not items:
+            return _DROPPED
+        return items
+    if value is _UNBOUND:
+        return _DROPPED
+    return value
+
+
+def prune_nulls(value: Any) -> Any:
+    """
+    Return 'value' with null leaves removed, cascading into containers that
+    thereby became empty.
+
+    At the top level a fully-pruned body becomes the empty container of the
+    same kind ('{}' / '[]'), which the broker accepts, rather than leaking the
+    internal sentinel.
+    """
+    pruned = _prune(value)
+    if pruned is not _DROPPED:
+        return pruned
+    return [] if isinstance(value, list) else {}
+`,
+    },
+
+    {
+      relativePath: 'support/await_eventually.py',
+      content: `"""
+Poll an eventually-consistent read until the broker's secondary storage has caught up.
+
+Mirrors materializer/src/playwright/support/await-eventually.ts (same retry and
+abort rules) so the Python suite waits exactly where the Playwright suite does.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import time
+from typing import Awaitable, Callable
+
+import httpx
+
+_ABORT_STATUSES = {400, 401, 403, 409, 422}
+_MAX_RETRY_AFTER_MS = 2_000
+
+
+def _retry_after_ms(response: httpx.Response) -> float | None:
+    raw = response.headers.get('retry-after')
+    if raw is None:
+        return None
+    try:
+        value = int(raw.strip())
+    except ValueError:
+        return None
+    if value < 0:
+        return None
+    # Values >= 1000 are service-emitted millisecond hints (same heuristic as the Playwright helper).
+    return value * 1000 if value < 1000 else value
+
+
+def _is_non_empty_items_page(response: httpx.Response) -> bool:
+    try:
+        body = response.json()
+    except ValueError:
+        return True
+    items = body.get('items') if isinstance(body, dict) else None
+    return isinstance(items, list) and len(items) > 0
+
+
+async def await_eventually(
+    fetch: Callable[[], Awaitable[httpx.Response]],
+    *,
+    operation_id: str,
+    method: str,
+    require_items: bool = True,
+    wait_up_to_ms: int = 10_000,
+    poll_interval_ms: int = 500,
+) -> httpx.Response:
+    started = time.monotonic()
+    is_get = method.upper() == 'GET'
+    attempts = 0
+    while True:
+        attempts += 1
+        response = await fetch()
+        status = response.status_code
+        if status in _ABORT_STATUSES or status >= 500:
+            return response
+        if 200 <= status < 400 and (is_get or not require_items or _is_non_empty_items_page(response)):
+            return response
+        if not (status == 404 and is_get) and status != 429 and not (200 <= status < 400):
+            return response
+        elapsed_ms = (time.monotonic() - started) * 1000
+        remaining_ms = wait_up_to_ms - elapsed_ms
+        if remaining_ms <= 0:
+            raise AssertionError(
+                f"Eventual consistency timeout for operation '{operation_id}' after "
+                f"{attempts} attempt(s) in {elapsed_ms:.0f}ms (lastStatus={status}): "
+                f"{response.text[:1000]}"
+            )
+        delay_ms: float = poll_interval_ms
+        if status == 429:
+            retry_after = _retry_after_ms(response)
+            delay_ms = retry_after if retry_after is not None else poll_interval_ms * 2
+            delay_ms = min(delay_ms, _MAX_RETRY_AFTER_MS)
+        await asyncio.sleep(max(10, min(delay_ms, remaining_ms)) / 1000)
 `,
     },
 
