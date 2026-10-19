@@ -1,0 +1,3952 @@
+{
+  "sdkVersion": "9.2.2",
+  "methods": [
+    {
+      "name": "ActivateAdHocSubProcessActivitiesAsync",
+      "parameters": [
+        {
+          "name": "adHocSubProcessInstanceKey",
+          "type": "Camunda.Orchestration.Sdk.ElementInstanceKey",
+          "optional": false
+        },
+        {
+          "name": "body",
+          "type": "Camunda.Orchestration.Sdk.AdHocSubProcessActivateActivitiesInstruction",
+          "optional": false
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task"
+    },
+    {
+      "name": "ActivateJobsAsync",
+      "parameters": [
+        {
+          "name": "body",
+          "type": "Camunda.Orchestration.Sdk.JobActivationRequest",
+          "optional": false
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.JobActivationResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "AssignClientToGroupAsync",
+      "parameters": [
+        {
+          "name": "groupId",
+          "type": "System.String",
+          "optional": false
+        },
+        {
+          "name": "clientId",
+          "type": "System.String",
+          "optional": false
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task"
+    },
+    {
+      "name": "AssignClientToTenantAsync",
+      "parameters": [
+        {
+          "name": "tenantId",
+          "type": "Camunda.Orchestration.Sdk.TenantId",
+          "optional": false
+        },
+        {
+          "name": "clientId",
+          "type": "System.String",
+          "optional": false
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task"
+    },
+    {
+      "name": "AssignGroupToTenantAsync",
+      "parameters": [
+        {
+          "name": "tenantId",
+          "type": "Camunda.Orchestration.Sdk.TenantId",
+          "optional": false
+        },
+        {
+          "name": "groupId",
+          "type": "System.String",
+          "optional": false
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task"
+    },
+    {
+      "name": "AssignMappingRuleToGroupAsync",
+      "parameters": [
+        {
+          "name": "groupId",
+          "type": "System.String",
+          "optional": false
+        },
+        {
+          "name": "mappingRuleId",
+          "type": "System.String",
+          "optional": false
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task"
+    },
+    {
+      "name": "AssignMappingRuleToTenantAsync",
+      "parameters": [
+        {
+          "name": "tenantId",
+          "type": "Camunda.Orchestration.Sdk.TenantId",
+          "optional": false
+        },
+        {
+          "name": "mappingRuleId",
+          "type": "System.String",
+          "optional": false
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task"
+    },
+    {
+      "name": "AssignRoleToClientAsync",
+      "parameters": [
+        {
+          "name": "roleId",
+          "type": "System.String",
+          "optional": false
+        },
+        {
+          "name": "clientId",
+          "type": "System.String",
+          "optional": false
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task"
+    },
+    {
+      "name": "AssignRoleToGroupAsync",
+      "parameters": [
+        {
+          "name": "roleId",
+          "type": "System.String",
+          "optional": false
+        },
+        {
+          "name": "groupId",
+          "type": "System.String",
+          "optional": false
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task"
+    },
+    {
+      "name": "AssignRoleToMappingRuleAsync",
+      "parameters": [
+        {
+          "name": "roleId",
+          "type": "System.String",
+          "optional": false
+        },
+        {
+          "name": "mappingRuleId",
+          "type": "System.String",
+          "optional": false
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task"
+    },
+    {
+      "name": "AssignRoleToTenantAsync",
+      "parameters": [
+        {
+          "name": "tenantId",
+          "type": "Camunda.Orchestration.Sdk.TenantId",
+          "optional": false
+        },
+        {
+          "name": "roleId",
+          "type": "System.String",
+          "optional": false
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task"
+    },
+    {
+      "name": "AssignRoleToUserAsync",
+      "parameters": [
+        {
+          "name": "roleId",
+          "type": "System.String",
+          "optional": false
+        },
+        {
+          "name": "username",
+          "type": "Camunda.Orchestration.Sdk.Username",
+          "optional": false
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task"
+    },
+    {
+      "name": "AssignUserTaskAsync",
+      "parameters": [
+        {
+          "name": "userTaskKey",
+          "type": "Camunda.Orchestration.Sdk.UserTaskKey",
+          "optional": false
+        },
+        {
+          "name": "body",
+          "type": "Camunda.Orchestration.Sdk.UserTaskAssignmentRequest",
+          "optional": false
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task"
+    },
+    {
+      "name": "AssignUserToGroupAsync",
+      "parameters": [
+        {
+          "name": "groupId",
+          "type": "System.String",
+          "optional": false
+        },
+        {
+          "name": "username",
+          "type": "Camunda.Orchestration.Sdk.Username",
+          "optional": false
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task"
+    },
+    {
+      "name": "AssignUserToTenantAsync",
+      "parameters": [
+        {
+          "name": "tenantId",
+          "type": "Camunda.Orchestration.Sdk.TenantId",
+          "optional": false
+        },
+        {
+          "name": "username",
+          "type": "Camunda.Orchestration.Sdk.Username",
+          "optional": false
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task"
+    },
+    {
+      "name": "BroadcastSignalAsync",
+      "parameters": [
+        {
+          "name": "body",
+          "type": "Camunda.Orchestration.Sdk.SignalBroadcastRequest",
+          "optional": false
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.SignalBroadcastResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "CancelBatchOperationAsync",
+      "parameters": [
+        {
+          "name": "batchOperationKey",
+          "type": "Camunda.Orchestration.Sdk.BatchOperationKey",
+          "optional": false
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task"
+    },
+    {
+      "name": "CancelProcessInstanceAsync",
+      "parameters": [
+        {
+          "name": "processInstanceKey",
+          "type": "Camunda.Orchestration.Sdk.ProcessInstanceKey",
+          "optional": false
+        },
+        {
+          "name": "body",
+          "type": "Camunda.Orchestration.Sdk.CancelProcessInstanceRequest",
+          "optional": false
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task"
+    },
+    {
+      "name": "CancelProcessInstancesBatchOperationAsync",
+      "parameters": [
+        {
+          "name": "body",
+          "type": "Camunda.Orchestration.Sdk.ProcessInstanceCancellationBatchOperationRequest",
+          "optional": false
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.BatchOperationCreatedResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "CompleteJobAsync",
+      "parameters": [
+        {
+          "name": "jobKey",
+          "type": "Camunda.Orchestration.Sdk.JobKey",
+          "optional": false
+        },
+        {
+          "name": "body",
+          "type": "Camunda.Orchestration.Sdk.JobCompletionRequest",
+          "optional": false
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task"
+    },
+    {
+      "name": "CompleteUserTaskAsync",
+      "parameters": [
+        {
+          "name": "userTaskKey",
+          "type": "Camunda.Orchestration.Sdk.UserTaskKey",
+          "optional": false
+        },
+        {
+          "name": "body",
+          "type": "Camunda.Orchestration.Sdk.UserTaskCompletionRequest",
+          "optional": false
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task"
+    },
+    {
+      "name": "CorrelateMessageAsync",
+      "parameters": [
+        {
+          "name": "body",
+          "type": "Camunda.Orchestration.Sdk.MessageCorrelationRequest",
+          "optional": false
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.MessageCorrelationResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "CreateAdminUserAsync",
+      "parameters": [
+        {
+          "name": "body",
+          "type": "Camunda.Orchestration.Sdk.UserRequest",
+          "optional": false
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.UserCreateResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "CreateAuthorizationAsync",
+      "parameters": [
+        {
+          "name": "body",
+          "type": "Camunda.Orchestration.Sdk.AuthorizationRequest",
+          "optional": false
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.AuthorizationCreateResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "CreateDeploymentAsync",
+      "parameters": [
+        {
+          "name": "content",
+          "type": "System.Net.Http.MultipartFormDataContent",
+          "optional": false
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.DeploymentResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "CreateDocumentAsync",
+      "parameters": [
+        {
+          "name": "content",
+          "type": "System.Net.Http.MultipartFormDataContent",
+          "optional": false
+        },
+        {
+          "name": "storeId",
+          "type": "System.String",
+          "optional": true
+        },
+        {
+          "name": "documentId",
+          "type": "System.Nullable\u00601[[Camunda.Orchestration.Sdk.DocumentId, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]",
+          "optional": true
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.DocumentReference, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "CreateDocumentLinkAsync",
+      "parameters": [
+        {
+          "name": "documentId",
+          "type": "Camunda.Orchestration.Sdk.DocumentId",
+          "optional": false
+        },
+        {
+          "name": "body",
+          "type": "Camunda.Orchestration.Sdk.DocumentLinkRequest",
+          "optional": false
+        },
+        {
+          "name": "storeId",
+          "type": "System.String",
+          "optional": true
+        },
+        {
+          "name": "contentHash",
+          "type": "System.String",
+          "optional": true
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.DocumentLink, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "CreateDocumentsAsync",
+      "parameters": [
+        {
+          "name": "content",
+          "type": "System.Net.Http.MultipartFormDataContent",
+          "optional": false
+        },
+        {
+          "name": "storeId",
+          "type": "System.String",
+          "optional": true
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.DocumentCreationBatchResponse, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "CreateElementInstanceVariablesAsync",
+      "parameters": [
+        {
+          "name": "elementInstanceKey",
+          "type": "Camunda.Orchestration.Sdk.ElementInstanceKey",
+          "optional": false
+        },
+        {
+          "name": "body",
+          "type": "Camunda.Orchestration.Sdk.SetVariableRequest",
+          "optional": false
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task"
+    },
+    {
+      "name": "CreateGlobalClusterVariableAsync",
+      "parameters": [
+        {
+          "name": "body",
+          "type": "Camunda.Orchestration.Sdk.CreateClusterVariableRequest",
+          "optional": false
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.ClusterVariableResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "CreateGlobalTaskListenerAsync",
+      "parameters": [
+        {
+          "name": "body",
+          "type": "Camunda.Orchestration.Sdk.CreateGlobalTaskListenerRequest",
+          "optional": false
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.GlobalTaskListenerResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "CreateGroupAsync",
+      "parameters": [
+        {
+          "name": "body",
+          "type": "Camunda.Orchestration.Sdk.GroupCreateRequest",
+          "optional": false
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.GroupCreateResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "CreateJobWorker",
+      "parameters": [
+        {
+          "name": "config",
+          "type": "Camunda.Orchestration.Sdk.JobWorkerConfig",
+          "optional": false
+        },
+        {
+          "name": "handler",
+          "type": "Camunda.Orchestration.Sdk.JobHandler",
+          "optional": false
+        }
+      ],
+      "returnType": "Camunda.Orchestration.Sdk.JobWorker"
+    },
+    {
+      "name": "CreateJobWorker",
+      "parameters": [
+        {
+          "name": "config",
+          "type": "Camunda.Orchestration.Sdk.JobWorkerConfig",
+          "optional": false
+        },
+        {
+          "name": "handler",
+          "type": "System.Func\u00603[[Camunda.Orchestration.Sdk.ActivatedJob, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null],[System.Threading.CancellationToken, System.Private.CoreLib, Version=8.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e],[System.Threading.Tasks.Task, System.Private.CoreLib, Version=8.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]",
+          "optional": false
+        }
+      ],
+      "returnType": "Camunda.Orchestration.Sdk.JobWorker"
+    },
+    {
+      "name": "CreateMappingRuleAsync",
+      "parameters": [
+        {
+          "name": "body",
+          "type": "Camunda.Orchestration.Sdk.MappingRuleCreateRequest",
+          "optional": false
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.CreateMappingRuleResponse, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "CreateProcessInstanceAsync",
+      "parameters": [
+        {
+          "name": "body",
+          "type": "Camunda.Orchestration.Sdk.ProcessInstanceCreationInstruction",
+          "optional": false
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.CreateProcessInstanceResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "CreateRoleAsync",
+      "parameters": [
+        {
+          "name": "body",
+          "type": "Camunda.Orchestration.Sdk.RoleCreateRequest",
+          "optional": false
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.RoleCreateResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "CreateTenantAsync",
+      "parameters": [
+        {
+          "name": "body",
+          "type": "Camunda.Orchestration.Sdk.TenantCreateRequest",
+          "optional": false
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.TenantCreateResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "CreateTenantClusterVariableAsync",
+      "parameters": [
+        {
+          "name": "tenantId",
+          "type": "Camunda.Orchestration.Sdk.TenantId",
+          "optional": false
+        },
+        {
+          "name": "body",
+          "type": "Camunda.Orchestration.Sdk.CreateClusterVariableRequest",
+          "optional": false
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.ClusterVariableResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "CreateUserAsync",
+      "parameters": [
+        {
+          "name": "body",
+          "type": "Camunda.Orchestration.Sdk.UserRequest",
+          "optional": false
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.UserCreateResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "DeleteAuthorizationAsync",
+      "parameters": [
+        {
+          "name": "authorizationKey",
+          "type": "Camunda.Orchestration.Sdk.AuthorizationKey",
+          "optional": false
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task"
+    },
+    {
+      "name": "DeleteDecisionInstanceAsync",
+      "parameters": [
+        {
+          "name": "decisionEvaluationKey",
+          "type": "Camunda.Orchestration.Sdk.DecisionEvaluationKey",
+          "optional": false
+        },
+        {
+          "name": "body",
+          "type": "Camunda.Orchestration.Sdk.DeleteDecisionInstanceRequest",
+          "optional": false
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task"
+    },
+    {
+      "name": "DeleteDecisionInstancesBatchOperationAsync",
+      "parameters": [
+        {
+          "name": "body",
+          "type": "Camunda.Orchestration.Sdk.DecisionInstanceDeletionBatchOperationRequest",
+          "optional": false
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.BatchOperationCreatedResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "DeleteDocumentAsync",
+      "parameters": [
+        {
+          "name": "documentId",
+          "type": "Camunda.Orchestration.Sdk.DocumentId",
+          "optional": false
+        },
+        {
+          "name": "storeId",
+          "type": "System.String",
+          "optional": true
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task"
+    },
+    {
+      "name": "DeleteGlobalClusterVariableAsync",
+      "parameters": [
+        {
+          "name": "name",
+          "type": "System.String",
+          "optional": false
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task"
+    },
+    {
+      "name": "DeleteGlobalTaskListenerAsync",
+      "parameters": [
+        {
+          "name": "id",
+          "type": "Camunda.Orchestration.Sdk.GlobalListenerId",
+          "optional": false
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task"
+    },
+    {
+      "name": "DeleteGroupAsync",
+      "parameters": [
+        {
+          "name": "groupId",
+          "type": "System.String",
+          "optional": false
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task"
+    },
+    {
+      "name": "DeleteMappingRuleAsync",
+      "parameters": [
+        {
+          "name": "mappingRuleId",
+          "type": "System.String",
+          "optional": false
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task"
+    },
+    {
+      "name": "DeleteProcessInstanceAsync",
+      "parameters": [
+        {
+          "name": "processInstanceKey",
+          "type": "Camunda.Orchestration.Sdk.ProcessInstanceKey",
+          "optional": false
+        },
+        {
+          "name": "body",
+          "type": "Camunda.Orchestration.Sdk.DeleteProcessInstanceRequest",
+          "optional": false
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task"
+    },
+    {
+      "name": "DeleteProcessInstancesBatchOperationAsync",
+      "parameters": [
+        {
+          "name": "body",
+          "type": "Camunda.Orchestration.Sdk.ProcessInstanceDeletionBatchOperationRequest",
+          "optional": false
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.BatchOperationCreatedResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "DeleteResourceAsync",
+      "parameters": [
+        {
+          "name": "resourceKey",
+          "type": "Camunda.Orchestration.Sdk.ResourceKey",
+          "optional": false
+        },
+        {
+          "name": "body",
+          "type": "Camunda.Orchestration.Sdk.DeleteResourceRequest",
+          "optional": false
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.DeleteResourceResponse, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "DeleteRoleAsync",
+      "parameters": [
+        {
+          "name": "roleId",
+          "type": "System.String",
+          "optional": false
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task"
+    },
+    {
+      "name": "DeleteTenantAsync",
+      "parameters": [
+        {
+          "name": "tenantId",
+          "type": "Camunda.Orchestration.Sdk.TenantId",
+          "optional": false
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task"
+    },
+    {
+      "name": "DeleteTenantClusterVariableAsync",
+      "parameters": [
+        {
+          "name": "tenantId",
+          "type": "Camunda.Orchestration.Sdk.TenantId",
+          "optional": false
+        },
+        {
+          "name": "name",
+          "type": "System.String",
+          "optional": false
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task"
+    },
+    {
+      "name": "DeleteUserAsync",
+      "parameters": [
+        {
+          "name": "username",
+          "type": "Camunda.Orchestration.Sdk.Username",
+          "optional": false
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task"
+    },
+    {
+      "name": "DeployResourcesFromFilesAsync",
+      "parameters": [
+        {
+          "name": "resourceFilePaths",
+          "type": "System.String[]",
+          "optional": false
+        },
+        {
+          "name": "tenantId",
+          "type": "System.String",
+          "optional": true
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.ExtendedDeploymentResponse, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "Dispose",
+      "parameters": [],
+      "returnType": "System.Void"
+    },
+    {
+      "name": "DisposeAsync",
+      "parameters": [],
+      "returnType": "System.Threading.Tasks.ValueTask"
+    },
+    {
+      "name": "EvaluateConditionalsAsync",
+      "parameters": [
+        {
+          "name": "body",
+          "type": "Camunda.Orchestration.Sdk.ConditionalEvaluationInstruction",
+          "optional": false
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.EvaluateConditionalResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "EvaluateDecisionAsync",
+      "parameters": [
+        {
+          "name": "body",
+          "type": "Camunda.Orchestration.Sdk.DecisionEvaluationInstruction",
+          "optional": false
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.EvaluateDecisionResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "EvaluateExpressionAsync",
+      "parameters": [
+        {
+          "name": "body",
+          "type": "Camunda.Orchestration.Sdk.ExpressionEvaluationRequest",
+          "optional": false
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.ExpressionEvaluationResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "FailJobAsync",
+      "parameters": [
+        {
+          "name": "jobKey",
+          "type": "Camunda.Orchestration.Sdk.JobKey",
+          "optional": false
+        },
+        {
+          "name": "body",
+          "type": "Camunda.Orchestration.Sdk.JobFailRequest",
+          "optional": false
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task"
+    },
+    {
+      "name": "GetAuditLogAsync",
+      "parameters": [
+        {
+          "name": "auditLogKey",
+          "type": "Camunda.Orchestration.Sdk.AuditLogKey",
+          "optional": false
+        },
+        {
+          "name": "consistency",
+          "type": "Camunda.Orchestration.Sdk.ConsistencyOptions\u00601[[Camunda.Orchestration.Sdk.AuditLogResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]",
+          "optional": true
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.AuditLogResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "GetAuthenticationAsync",
+      "parameters": [
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.CamundaUserResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "GetAuthorizationAsync",
+      "parameters": [
+        {
+          "name": "authorizationKey",
+          "type": "Camunda.Orchestration.Sdk.AuthorizationKey",
+          "optional": false
+        },
+        {
+          "name": "consistency",
+          "type": "Camunda.Orchestration.Sdk.ConsistencyOptions\u00601[[Camunda.Orchestration.Sdk.AuthorizationResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]",
+          "optional": true
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.AuthorizationResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "GetBackpressureState",
+      "parameters": [],
+      "returnType": "Camunda.Orchestration.Sdk.BackpressureState"
+    },
+    {
+      "name": "GetBatchOperationAsync",
+      "parameters": [
+        {
+          "name": "batchOperationKey",
+          "type": "Camunda.Orchestration.Sdk.BatchOperationKey",
+          "optional": false
+        },
+        {
+          "name": "consistency",
+          "type": "Camunda.Orchestration.Sdk.ConsistencyOptions\u00601[[Camunda.Orchestration.Sdk.BatchOperationResponse, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]",
+          "optional": true
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.BatchOperationResponse, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "GetDecisionDefinitionAsync",
+      "parameters": [
+        {
+          "name": "decisionDefinitionKey",
+          "type": "Camunda.Orchestration.Sdk.DecisionDefinitionKey",
+          "optional": false
+        },
+        {
+          "name": "consistency",
+          "type": "Camunda.Orchestration.Sdk.ConsistencyOptions\u00601[[Camunda.Orchestration.Sdk.DecisionDefinitionResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]",
+          "optional": true
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.DecisionDefinitionResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "GetDecisionDefinitionXmlAsync",
+      "parameters": [
+        {
+          "name": "decisionDefinitionKey",
+          "type": "Camunda.Orchestration.Sdk.DecisionDefinitionKey",
+          "optional": false
+        },
+        {
+          "name": "consistency",
+          "type": "Camunda.Orchestration.Sdk.ConsistencyOptions\u00601[[System.Object, System.Private.CoreLib, Version=8.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]",
+          "optional": true
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[System.Object, System.Private.CoreLib, Version=8.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]"
+    },
+    {
+      "name": "GetDecisionInstanceAsync",
+      "parameters": [
+        {
+          "name": "decisionEvaluationInstanceKey",
+          "type": "Camunda.Orchestration.Sdk.DecisionEvaluationInstanceKey",
+          "optional": false
+        },
+        {
+          "name": "consistency",
+          "type": "Camunda.Orchestration.Sdk.ConsistencyOptions\u00601[[Camunda.Orchestration.Sdk.DecisionInstanceGetQueryResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]",
+          "optional": true
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.DecisionInstanceGetQueryResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "GetDecisionRequirementsAsync",
+      "parameters": [
+        {
+          "name": "decisionRequirementsKey",
+          "type": "Camunda.Orchestration.Sdk.DecisionRequirementsKey",
+          "optional": false
+        },
+        {
+          "name": "consistency",
+          "type": "Camunda.Orchestration.Sdk.ConsistencyOptions\u00601[[Camunda.Orchestration.Sdk.DecisionRequirementsResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]",
+          "optional": true
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.DecisionRequirementsResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "GetDecisionRequirementsXmlAsync",
+      "parameters": [
+        {
+          "name": "decisionRequirementsKey",
+          "type": "Camunda.Orchestration.Sdk.DecisionRequirementsKey",
+          "optional": false
+        },
+        {
+          "name": "consistency",
+          "type": "Camunda.Orchestration.Sdk.ConsistencyOptions\u00601[[System.Object, System.Private.CoreLib, Version=8.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]",
+          "optional": true
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[System.Object, System.Private.CoreLib, Version=8.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]"
+    },
+    {
+      "name": "GetDocumentAsync",
+      "parameters": [
+        {
+          "name": "documentId",
+          "type": "Camunda.Orchestration.Sdk.DocumentId",
+          "optional": false
+        },
+        {
+          "name": "storeId",
+          "type": "System.String",
+          "optional": true
+        },
+        {
+          "name": "contentHash",
+          "type": "System.String",
+          "optional": true
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[System.Byte[], System.Private.CoreLib, Version=8.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]"
+    },
+    {
+      "name": "GetElementInstanceAsync",
+      "parameters": [
+        {
+          "name": "elementInstanceKey",
+          "type": "Camunda.Orchestration.Sdk.ElementInstanceKey",
+          "optional": false
+        },
+        {
+          "name": "consistency",
+          "type": "Camunda.Orchestration.Sdk.ConsistencyOptions\u00601[[Camunda.Orchestration.Sdk.ElementInstanceResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]",
+          "optional": true
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.ElementInstanceResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "GetGlobalClusterVariableAsync",
+      "parameters": [
+        {
+          "name": "name",
+          "type": "System.String",
+          "optional": false
+        },
+        {
+          "name": "consistency",
+          "type": "Camunda.Orchestration.Sdk.ConsistencyOptions\u00601[[Camunda.Orchestration.Sdk.ClusterVariableResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]",
+          "optional": true
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.ClusterVariableResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "GetGlobalJobStatisticsAsync",
+      "parameters": [
+        {
+          "name": "from",
+          "type": "System.DateTimeOffset",
+          "optional": false
+        },
+        {
+          "name": "to",
+          "type": "System.DateTimeOffset",
+          "optional": false
+        },
+        {
+          "name": "jobType",
+          "type": "System.String",
+          "optional": true
+        },
+        {
+          "name": "consistency",
+          "type": "Camunda.Orchestration.Sdk.ConsistencyOptions\u00601[[Camunda.Orchestration.Sdk.GlobalJobStatisticsQueryResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]",
+          "optional": true
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.GlobalJobStatisticsQueryResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "GetGlobalTaskListenerAsync",
+      "parameters": [
+        {
+          "name": "id",
+          "type": "Camunda.Orchestration.Sdk.GlobalListenerId",
+          "optional": false
+        },
+        {
+          "name": "consistency",
+          "type": "Camunda.Orchestration.Sdk.ConsistencyOptions\u00601[[Camunda.Orchestration.Sdk.GlobalTaskListenerResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]",
+          "optional": true
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.GlobalTaskListenerResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "GetGroupAsync",
+      "parameters": [
+        {
+          "name": "groupId",
+          "type": "System.String",
+          "optional": false
+        },
+        {
+          "name": "consistency",
+          "type": "Camunda.Orchestration.Sdk.ConsistencyOptions\u00601[[Camunda.Orchestration.Sdk.GroupResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]",
+          "optional": true
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.GroupResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "GetIncidentAsync",
+      "parameters": [
+        {
+          "name": "incidentKey",
+          "type": "Camunda.Orchestration.Sdk.IncidentKey",
+          "optional": false
+        },
+        {
+          "name": "consistency",
+          "type": "Camunda.Orchestration.Sdk.ConsistencyOptions\u00601[[Camunda.Orchestration.Sdk.IncidentResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]",
+          "optional": true
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.IncidentResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "GetJobErrorStatisticsAsync",
+      "parameters": [
+        {
+          "name": "body",
+          "type": "Camunda.Orchestration.Sdk.JobErrorStatisticsQuery",
+          "optional": false
+        },
+        {
+          "name": "consistency",
+          "type": "Camunda.Orchestration.Sdk.ConsistencyOptions\u00601[[Camunda.Orchestration.Sdk.JobErrorStatisticsQueryResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]",
+          "optional": true
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.JobErrorStatisticsQueryResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "GetJobTimeSeriesStatisticsAsync",
+      "parameters": [
+        {
+          "name": "body",
+          "type": "Camunda.Orchestration.Sdk.JobTimeSeriesStatisticsQuery",
+          "optional": false
+        },
+        {
+          "name": "consistency",
+          "type": "Camunda.Orchestration.Sdk.ConsistencyOptions\u00601[[Camunda.Orchestration.Sdk.JobTimeSeriesStatisticsQueryResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]",
+          "optional": true
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.JobTimeSeriesStatisticsQueryResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "GetJobTypeStatisticsAsync",
+      "parameters": [
+        {
+          "name": "body",
+          "type": "Camunda.Orchestration.Sdk.JobTypeStatisticsQuery",
+          "optional": false
+        },
+        {
+          "name": "consistency",
+          "type": "Camunda.Orchestration.Sdk.ConsistencyOptions\u00601[[Camunda.Orchestration.Sdk.JobTypeStatisticsQueryResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]",
+          "optional": true
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.JobTypeStatisticsQueryResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "GetJobWorkerStatisticsAsync",
+      "parameters": [
+        {
+          "name": "body",
+          "type": "Camunda.Orchestration.Sdk.JobWorkerStatisticsQuery",
+          "optional": false
+        },
+        {
+          "name": "consistency",
+          "type": "Camunda.Orchestration.Sdk.ConsistencyOptions\u00601[[Camunda.Orchestration.Sdk.JobWorkerStatisticsQueryResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]",
+          "optional": true
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.JobWorkerStatisticsQueryResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "GetLicenseAsync",
+      "parameters": [
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.LicenseResponse, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "GetMappingRuleAsync",
+      "parameters": [
+        {
+          "name": "mappingRuleId",
+          "type": "System.String",
+          "optional": false
+        },
+        {
+          "name": "consistency",
+          "type": "Camunda.Orchestration.Sdk.ConsistencyOptions\u00601[[Camunda.Orchestration.Sdk.MappingRuleResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]",
+          "optional": true
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.MappingRuleResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "GetProcessDefinitionAsync",
+      "parameters": [
+        {
+          "name": "processDefinitionKey",
+          "type": "Camunda.Orchestration.Sdk.ProcessDefinitionKey",
+          "optional": false
+        },
+        {
+          "name": "consistency",
+          "type": "Camunda.Orchestration.Sdk.ConsistencyOptions\u00601[[Camunda.Orchestration.Sdk.ProcessDefinitionResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]",
+          "optional": true
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.ProcessDefinitionResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "GetProcessDefinitionInstanceStatisticsAsync",
+      "parameters": [
+        {
+          "name": "body",
+          "type": "Camunda.Orchestration.Sdk.ProcessDefinitionInstanceStatisticsQuery",
+          "optional": false
+        },
+        {
+          "name": "consistency",
+          "type": "Camunda.Orchestration.Sdk.ConsistencyOptions\u00601[[Camunda.Orchestration.Sdk.ProcessDefinitionInstanceStatisticsQueryResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]",
+          "optional": true
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.ProcessDefinitionInstanceStatisticsQueryResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "GetProcessDefinitionInstanceVersionStatisticsAsync",
+      "parameters": [
+        {
+          "name": "body",
+          "type": "Camunda.Orchestration.Sdk.ProcessDefinitionInstanceVersionStatisticsQuery",
+          "optional": false
+        },
+        {
+          "name": "consistency",
+          "type": "Camunda.Orchestration.Sdk.ConsistencyOptions\u00601[[Camunda.Orchestration.Sdk.ProcessDefinitionInstanceVersionStatisticsQueryResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]",
+          "optional": true
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.ProcessDefinitionInstanceVersionStatisticsQueryResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "GetProcessDefinitionMessageSubscriptionStatisticsAsync",
+      "parameters": [
+        {
+          "name": "body",
+          "type": "Camunda.Orchestration.Sdk.ProcessDefinitionMessageSubscriptionStatisticsQuery",
+          "optional": false
+        },
+        {
+          "name": "consistency",
+          "type": "Camunda.Orchestration.Sdk.ConsistencyOptions\u00601[[Camunda.Orchestration.Sdk.ProcessDefinitionMessageSubscriptionStatisticsQueryResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]",
+          "optional": true
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.ProcessDefinitionMessageSubscriptionStatisticsQueryResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "GetProcessDefinitionStatisticsAsync",
+      "parameters": [
+        {
+          "name": "processDefinitionKey",
+          "type": "Camunda.Orchestration.Sdk.ProcessDefinitionKey",
+          "optional": false
+        },
+        {
+          "name": "body",
+          "type": "Camunda.Orchestration.Sdk.ProcessDefinitionElementStatisticsQuery",
+          "optional": false
+        },
+        {
+          "name": "consistency",
+          "type": "Camunda.Orchestration.Sdk.ConsistencyOptions\u00601[[Camunda.Orchestration.Sdk.ProcessDefinitionElementStatisticsQueryResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]",
+          "optional": true
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.ProcessDefinitionElementStatisticsQueryResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "GetProcessDefinitionXmlAsync",
+      "parameters": [
+        {
+          "name": "processDefinitionKey",
+          "type": "Camunda.Orchestration.Sdk.ProcessDefinitionKey",
+          "optional": false
+        },
+        {
+          "name": "consistency",
+          "type": "Camunda.Orchestration.Sdk.ConsistencyOptions\u00601[[System.Object, System.Private.CoreLib, Version=8.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]",
+          "optional": true
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[System.Object, System.Private.CoreLib, Version=8.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]"
+    },
+    {
+      "name": "GetProcessInstanceAsync",
+      "parameters": [
+        {
+          "name": "processInstanceKey",
+          "type": "Camunda.Orchestration.Sdk.ProcessInstanceKey",
+          "optional": false
+        },
+        {
+          "name": "consistency",
+          "type": "Camunda.Orchestration.Sdk.ConsistencyOptions\u00601[[Camunda.Orchestration.Sdk.ProcessInstanceResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]",
+          "optional": true
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.ProcessInstanceResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "GetProcessInstanceCallHierarchyAsync",
+      "parameters": [
+        {
+          "name": "processInstanceKey",
+          "type": "Camunda.Orchestration.Sdk.ProcessInstanceKey",
+          "optional": false
+        },
+        {
+          "name": "consistency",
+          "type": "Camunda.Orchestration.Sdk.ConsistencyOptions\u00601[[System.Object, System.Private.CoreLib, Version=8.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]",
+          "optional": true
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[System.Object, System.Private.CoreLib, Version=8.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]"
+    },
+    {
+      "name": "GetProcessInstanceSequenceFlowsAsync",
+      "parameters": [
+        {
+          "name": "processInstanceKey",
+          "type": "Camunda.Orchestration.Sdk.ProcessInstanceKey",
+          "optional": false
+        },
+        {
+          "name": "consistency",
+          "type": "Camunda.Orchestration.Sdk.ConsistencyOptions\u00601[[Camunda.Orchestration.Sdk.ProcessInstanceSequenceFlowsQueryResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]",
+          "optional": true
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.ProcessInstanceSequenceFlowsQueryResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "GetProcessInstanceStatisticsAsync",
+      "parameters": [
+        {
+          "name": "processInstanceKey",
+          "type": "Camunda.Orchestration.Sdk.ProcessInstanceKey",
+          "optional": false
+        },
+        {
+          "name": "consistency",
+          "type": "Camunda.Orchestration.Sdk.ConsistencyOptions\u00601[[Camunda.Orchestration.Sdk.ProcessInstanceElementStatisticsQueryResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]",
+          "optional": true
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.ProcessInstanceElementStatisticsQueryResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "GetProcessInstanceStatisticsByDefinitionAsync",
+      "parameters": [
+        {
+          "name": "body",
+          "type": "Camunda.Orchestration.Sdk.IncidentProcessInstanceStatisticsByDefinitionQuery",
+          "optional": false
+        },
+        {
+          "name": "consistency",
+          "type": "Camunda.Orchestration.Sdk.ConsistencyOptions\u00601[[Camunda.Orchestration.Sdk.IncidentProcessInstanceStatisticsByDefinitionQueryResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]",
+          "optional": true
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.IncidentProcessInstanceStatisticsByDefinitionQueryResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "GetProcessInstanceStatisticsByErrorAsync",
+      "parameters": [
+        {
+          "name": "body",
+          "type": "Camunda.Orchestration.Sdk.IncidentProcessInstanceStatisticsByErrorQuery",
+          "optional": false
+        },
+        {
+          "name": "consistency",
+          "type": "Camunda.Orchestration.Sdk.ConsistencyOptions\u00601[[Camunda.Orchestration.Sdk.IncidentProcessInstanceStatisticsByErrorQueryResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]",
+          "optional": true
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.IncidentProcessInstanceStatisticsByErrorQueryResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "GetResourceAsync",
+      "parameters": [
+        {
+          "name": "resourceKey",
+          "type": "Camunda.Orchestration.Sdk.ResourceKey",
+          "optional": false
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.ResourceResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "GetResourceContentAsync",
+      "parameters": [
+        {
+          "name": "resourceKey",
+          "type": "Camunda.Orchestration.Sdk.ResourceKey",
+          "optional": false
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[System.Object, System.Private.CoreLib, Version=8.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]"
+    },
+    {
+      "name": "GetRoleAsync",
+      "parameters": [
+        {
+          "name": "roleId",
+          "type": "System.String",
+          "optional": false
+        },
+        {
+          "name": "consistency",
+          "type": "Camunda.Orchestration.Sdk.ConsistencyOptions\u00601[[Camunda.Orchestration.Sdk.RoleResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]",
+          "optional": true
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.RoleResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "GetStartProcessFormAsync",
+      "parameters": [
+        {
+          "name": "processDefinitionKey",
+          "type": "Camunda.Orchestration.Sdk.ProcessDefinitionKey",
+          "optional": false
+        },
+        {
+          "name": "consistency",
+          "type": "Camunda.Orchestration.Sdk.ConsistencyOptions\u00601[[Camunda.Orchestration.Sdk.FormResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]",
+          "optional": true
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.FormResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "GetStatusAsync",
+      "parameters": [
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task"
+    },
+    {
+      "name": "GetSystemConfigurationAsync",
+      "parameters": [
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.SystemConfigurationResponse, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "GetTenantAsync",
+      "parameters": [
+        {
+          "name": "tenantId",
+          "type": "Camunda.Orchestration.Sdk.TenantId",
+          "optional": false
+        },
+        {
+          "name": "consistency",
+          "type": "Camunda.Orchestration.Sdk.ConsistencyOptions\u00601[[Camunda.Orchestration.Sdk.TenantResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]",
+          "optional": true
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.TenantResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "GetTenantClusterVariableAsync",
+      "parameters": [
+        {
+          "name": "tenantId",
+          "type": "Camunda.Orchestration.Sdk.TenantId",
+          "optional": false
+        },
+        {
+          "name": "name",
+          "type": "System.String",
+          "optional": false
+        },
+        {
+          "name": "consistency",
+          "type": "Camunda.Orchestration.Sdk.ConsistencyOptions\u00601[[Camunda.Orchestration.Sdk.ClusterVariableResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]",
+          "optional": true
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.ClusterVariableResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "GetTopologyAsync",
+      "parameters": [
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.TopologyResponse, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "GetUsageMetricsAsync",
+      "parameters": [
+        {
+          "name": "startTime",
+          "type": "System.DateTimeOffset",
+          "optional": false
+        },
+        {
+          "name": "endTime",
+          "type": "System.DateTimeOffset",
+          "optional": false
+        },
+        {
+          "name": "tenantId",
+          "type": "System.Nullable\u00601[[Camunda.Orchestration.Sdk.TenantId, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]",
+          "optional": true
+        },
+        {
+          "name": "withTenants",
+          "type": "System.Nullable\u00601[[System.Boolean, System.Private.CoreLib, Version=8.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]",
+          "optional": true
+        },
+        {
+          "name": "consistency",
+          "type": "Camunda.Orchestration.Sdk.ConsistencyOptions\u00601[[Camunda.Orchestration.Sdk.UsageMetricsResponse, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]",
+          "optional": true
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.UsageMetricsResponse, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "GetUserAsync",
+      "parameters": [
+        {
+          "name": "username",
+          "type": "Camunda.Orchestration.Sdk.Username",
+          "optional": false
+        },
+        {
+          "name": "consistency",
+          "type": "Camunda.Orchestration.Sdk.ConsistencyOptions\u00601[[Camunda.Orchestration.Sdk.GetUserResponse, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]",
+          "optional": true
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.GetUserResponse, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "GetUserTaskAsync",
+      "parameters": [
+        {
+          "name": "userTaskKey",
+          "type": "Camunda.Orchestration.Sdk.UserTaskKey",
+          "optional": false
+        },
+        {
+          "name": "consistency",
+          "type": "Camunda.Orchestration.Sdk.ConsistencyOptions\u00601[[Camunda.Orchestration.Sdk.UserTaskResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]",
+          "optional": true
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.UserTaskResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "GetUserTaskFormAsync",
+      "parameters": [
+        {
+          "name": "userTaskKey",
+          "type": "Camunda.Orchestration.Sdk.UserTaskKey",
+          "optional": false
+        },
+        {
+          "name": "consistency",
+          "type": "Camunda.Orchestration.Sdk.ConsistencyOptions\u00601[[Camunda.Orchestration.Sdk.FormResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]",
+          "optional": true
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.FormResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "GetVariableAsync",
+      "parameters": [
+        {
+          "name": "variableKey",
+          "type": "Camunda.Orchestration.Sdk.VariableKey",
+          "optional": false
+        },
+        {
+          "name": "consistency",
+          "type": "Camunda.Orchestration.Sdk.ConsistencyOptions\u00601[[Camunda.Orchestration.Sdk.VariableResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]",
+          "optional": true
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.VariableResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "GetWorkers",
+      "parameters": [],
+      "returnType": "System.Collections.Generic.IReadOnlyList\u00601[[Camunda.Orchestration.Sdk.JobWorker, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "MigrateProcessInstanceAsync",
+      "parameters": [
+        {
+          "name": "processInstanceKey",
+          "type": "Camunda.Orchestration.Sdk.ProcessInstanceKey",
+          "optional": false
+        },
+        {
+          "name": "body",
+          "type": "Camunda.Orchestration.Sdk.ProcessInstanceMigrationInstruction",
+          "optional": false
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task"
+    },
+    {
+      "name": "MigrateProcessInstancesBatchOperationAsync",
+      "parameters": [
+        {
+          "name": "body",
+          "type": "Camunda.Orchestration.Sdk.ProcessInstanceMigrationBatchOperationRequest",
+          "optional": false
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.BatchOperationCreatedResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "ModifyProcessInstanceAsync",
+      "parameters": [
+        {
+          "name": "processInstanceKey",
+          "type": "Camunda.Orchestration.Sdk.ProcessInstanceKey",
+          "optional": false
+        },
+        {
+          "name": "body",
+          "type": "Camunda.Orchestration.Sdk.ProcessInstanceModificationInstruction",
+          "optional": false
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task"
+    },
+    {
+      "name": "ModifyProcessInstancesBatchOperationAsync",
+      "parameters": [
+        {
+          "name": "body",
+          "type": "Camunda.Orchestration.Sdk.ProcessInstanceModificationBatchOperationRequest",
+          "optional": false
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.BatchOperationCreatedResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "PinClockAsync",
+      "parameters": [
+        {
+          "name": "body",
+          "type": "Camunda.Orchestration.Sdk.ClockPinRequest",
+          "optional": false
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task"
+    },
+    {
+      "name": "PublishMessageAsync",
+      "parameters": [
+        {
+          "name": "body",
+          "type": "Camunda.Orchestration.Sdk.MessagePublicationRequest",
+          "optional": false
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.MessagePublicationResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "ResetClockAsync",
+      "parameters": [
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task"
+    },
+    {
+      "name": "ResolveIncidentAsync",
+      "parameters": [
+        {
+          "name": "incidentKey",
+          "type": "Camunda.Orchestration.Sdk.IncidentKey",
+          "optional": false
+        },
+        {
+          "name": "body",
+          "type": "Camunda.Orchestration.Sdk.IncidentResolutionRequest",
+          "optional": false
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task"
+    },
+    {
+      "name": "ResolveIncidentsBatchOperationAsync",
+      "parameters": [
+        {
+          "name": "body",
+          "type": "Camunda.Orchestration.Sdk.ProcessInstanceIncidentResolutionBatchOperationRequest",
+          "optional": false
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.BatchOperationCreatedResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "ResolveProcessInstanceIncidentsAsync",
+      "parameters": [
+        {
+          "name": "processInstanceKey",
+          "type": "Camunda.Orchestration.Sdk.ProcessInstanceKey",
+          "optional": false
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.BatchOperationCreatedResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "ResumeBatchOperationAsync",
+      "parameters": [
+        {
+          "name": "batchOperationKey",
+          "type": "Camunda.Orchestration.Sdk.BatchOperationKey",
+          "optional": false
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task"
+    },
+    {
+      "name": "RunWorkersAsync",
+      "parameters": [
+        {
+          "name": "gracePeriod",
+          "type": "System.Nullable\u00601[[System.TimeSpan, System.Private.CoreLib, Version=8.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]",
+          "optional": true
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task"
+    },
+    {
+      "name": "SearchAuditLogsAsync",
+      "parameters": [
+        {
+          "name": "body",
+          "type": "Camunda.Orchestration.Sdk.AuditLogSearchQueryRequest",
+          "optional": false
+        },
+        {
+          "name": "consistency",
+          "type": "Camunda.Orchestration.Sdk.ConsistencyOptions\u00601[[Camunda.Orchestration.Sdk.AuditLogSearchQueryResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]",
+          "optional": true
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.AuditLogSearchQueryResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "SearchAuthorizationsAsync",
+      "parameters": [
+        {
+          "name": "body",
+          "type": "Camunda.Orchestration.Sdk.AuthorizationSearchQuery",
+          "optional": false
+        },
+        {
+          "name": "consistency",
+          "type": "Camunda.Orchestration.Sdk.ConsistencyOptions\u00601[[Camunda.Orchestration.Sdk.AuthorizationSearchResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]",
+          "optional": true
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.AuthorizationSearchResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "SearchBatchOperationItemsAsync",
+      "parameters": [
+        {
+          "name": "body",
+          "type": "Camunda.Orchestration.Sdk.BatchOperationItemSearchQuery",
+          "optional": false
+        },
+        {
+          "name": "consistency",
+          "type": "Camunda.Orchestration.Sdk.ConsistencyOptions\u00601[[Camunda.Orchestration.Sdk.BatchOperationItemSearchQueryResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]",
+          "optional": true
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.BatchOperationItemSearchQueryResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "SearchBatchOperationsAsync",
+      "parameters": [
+        {
+          "name": "body",
+          "type": "Camunda.Orchestration.Sdk.BatchOperationSearchQuery",
+          "optional": false
+        },
+        {
+          "name": "consistency",
+          "type": "Camunda.Orchestration.Sdk.ConsistencyOptions\u00601[[Camunda.Orchestration.Sdk.BatchOperationSearchQueryResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]",
+          "optional": true
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.BatchOperationSearchQueryResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "SearchClientsForGroupAsync",
+      "parameters": [
+        {
+          "name": "groupId",
+          "type": "System.String",
+          "optional": false
+        },
+        {
+          "name": "body",
+          "type": "Camunda.Orchestration.Sdk.SearchClientsForGroupRequest",
+          "optional": false
+        },
+        {
+          "name": "consistency",
+          "type": "Camunda.Orchestration.Sdk.ConsistencyOptions\u00601[[Camunda.Orchestration.Sdk.SearchClientsForGroupResponse, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]",
+          "optional": true
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.SearchClientsForGroupResponse, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "SearchClientsForRoleAsync",
+      "parameters": [
+        {
+          "name": "roleId",
+          "type": "System.String",
+          "optional": false
+        },
+        {
+          "name": "body",
+          "type": "Camunda.Orchestration.Sdk.SearchClientsForRoleRequest",
+          "optional": false
+        },
+        {
+          "name": "consistency",
+          "type": "Camunda.Orchestration.Sdk.ConsistencyOptions\u00601[[Camunda.Orchestration.Sdk.SearchClientsForRoleResponse, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]",
+          "optional": true
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.SearchClientsForRoleResponse, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "SearchClientsForTenantAsync",
+      "parameters": [
+        {
+          "name": "tenantId",
+          "type": "Camunda.Orchestration.Sdk.TenantId",
+          "optional": false
+        },
+        {
+          "name": "body",
+          "type": "Camunda.Orchestration.Sdk.SearchClientsForTenantRequest",
+          "optional": false
+        },
+        {
+          "name": "consistency",
+          "type": "Camunda.Orchestration.Sdk.ConsistencyOptions\u00601[[Camunda.Orchestration.Sdk.SearchClientsForTenantResponse, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]",
+          "optional": true
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.SearchClientsForTenantResponse, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "SearchClusterVariablesAsync",
+      "parameters": [
+        {
+          "name": "body",
+          "type": "Camunda.Orchestration.Sdk.ClusterVariableSearchQueryRequest",
+          "optional": false
+        },
+        {
+          "name": "truncateValues",
+          "type": "System.Nullable\u00601[[System.Boolean, System.Private.CoreLib, Version=8.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]",
+          "optional": true
+        },
+        {
+          "name": "consistency",
+          "type": "Camunda.Orchestration.Sdk.ConsistencyOptions\u00601[[Camunda.Orchestration.Sdk.ClusterVariableSearchQueryResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]",
+          "optional": true
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.ClusterVariableSearchQueryResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "SearchCorrelatedMessageSubscriptionsAsync",
+      "parameters": [
+        {
+          "name": "body",
+          "type": "Camunda.Orchestration.Sdk.CorrelatedMessageSubscriptionSearchQuery",
+          "optional": false
+        },
+        {
+          "name": "consistency",
+          "type": "Camunda.Orchestration.Sdk.ConsistencyOptions\u00601[[Camunda.Orchestration.Sdk.CorrelatedMessageSubscriptionSearchQueryResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]",
+          "optional": true
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.CorrelatedMessageSubscriptionSearchQueryResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "SearchDecisionDefinitionsAsync",
+      "parameters": [
+        {
+          "name": "body",
+          "type": "Camunda.Orchestration.Sdk.DecisionDefinitionSearchQuery",
+          "optional": false
+        },
+        {
+          "name": "consistency",
+          "type": "Camunda.Orchestration.Sdk.ConsistencyOptions\u00601[[Camunda.Orchestration.Sdk.DecisionDefinitionSearchQueryResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]",
+          "optional": true
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.DecisionDefinitionSearchQueryResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "SearchDecisionInstancesAsync",
+      "parameters": [
+        {
+          "name": "body",
+          "type": "Camunda.Orchestration.Sdk.DecisionInstanceSearchQuery",
+          "optional": false
+        },
+        {
+          "name": "consistency",
+          "type": "Camunda.Orchestration.Sdk.ConsistencyOptions\u00601[[Camunda.Orchestration.Sdk.DecisionInstanceSearchQueryResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]",
+          "optional": true
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.DecisionInstanceSearchQueryResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "SearchDecisionRequirementsAsync",
+      "parameters": [
+        {
+          "name": "body",
+          "type": "Camunda.Orchestration.Sdk.DecisionRequirementsSearchQuery",
+          "optional": false
+        },
+        {
+          "name": "consistency",
+          "type": "Camunda.Orchestration.Sdk.ConsistencyOptions\u00601[[Camunda.Orchestration.Sdk.DecisionRequirementsSearchQueryResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]",
+          "optional": true
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.DecisionRequirementsSearchQueryResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "SearchElementInstanceIncidentsAsync",
+      "parameters": [
+        {
+          "name": "elementInstanceKey",
+          "type": "Camunda.Orchestration.Sdk.ElementInstanceKey",
+          "optional": false
+        },
+        {
+          "name": "body",
+          "type": "Camunda.Orchestration.Sdk.IncidentSearchQuery",
+          "optional": false
+        },
+        {
+          "name": "consistency",
+          "type": "Camunda.Orchestration.Sdk.ConsistencyOptions\u00601[[Camunda.Orchestration.Sdk.IncidentSearchQueryResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]",
+          "optional": true
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.IncidentSearchQueryResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "SearchElementInstancesAsync",
+      "parameters": [
+        {
+          "name": "body",
+          "type": "Camunda.Orchestration.Sdk.ElementInstanceSearchQuery",
+          "optional": false
+        },
+        {
+          "name": "consistency",
+          "type": "Camunda.Orchestration.Sdk.ConsistencyOptions\u00601[[Camunda.Orchestration.Sdk.ElementInstanceSearchQueryResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]",
+          "optional": true
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.ElementInstanceSearchQueryResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "SearchGlobalTaskListenersAsync",
+      "parameters": [
+        {
+          "name": "body",
+          "type": "Camunda.Orchestration.Sdk.GlobalTaskListenerSearchQueryRequest",
+          "optional": false
+        },
+        {
+          "name": "consistency",
+          "type": "Camunda.Orchestration.Sdk.ConsistencyOptions\u00601[[Camunda.Orchestration.Sdk.GlobalTaskListenerSearchQueryResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]",
+          "optional": true
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.GlobalTaskListenerSearchQueryResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "SearchGroupIdsForTenantAsync",
+      "parameters": [
+        {
+          "name": "tenantId",
+          "type": "Camunda.Orchestration.Sdk.TenantId",
+          "optional": false
+        },
+        {
+          "name": "body",
+          "type": "Camunda.Orchestration.Sdk.TenantGroupSearchQueryRequest",
+          "optional": false
+        },
+        {
+          "name": "consistency",
+          "type": "Camunda.Orchestration.Sdk.ConsistencyOptions\u00601[[Camunda.Orchestration.Sdk.TenantGroupSearchResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]",
+          "optional": true
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.TenantGroupSearchResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "SearchGroupsAsync",
+      "parameters": [
+        {
+          "name": "body",
+          "type": "Camunda.Orchestration.Sdk.GroupSearchQueryRequest",
+          "optional": false
+        },
+        {
+          "name": "consistency",
+          "type": "Camunda.Orchestration.Sdk.ConsistencyOptions\u00601[[Camunda.Orchestration.Sdk.GroupSearchQueryResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]",
+          "optional": true
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.GroupSearchQueryResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "SearchGroupsForRoleAsync",
+      "parameters": [
+        {
+          "name": "roleId",
+          "type": "System.String",
+          "optional": false
+        },
+        {
+          "name": "body",
+          "type": "Camunda.Orchestration.Sdk.RoleGroupSearchQueryRequest",
+          "optional": false
+        },
+        {
+          "name": "consistency",
+          "type": "Camunda.Orchestration.Sdk.ConsistencyOptions\u00601[[Camunda.Orchestration.Sdk.RoleGroupSearchResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]",
+          "optional": true
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.RoleGroupSearchResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "SearchIncidentsAsync",
+      "parameters": [
+        {
+          "name": "body",
+          "type": "Camunda.Orchestration.Sdk.IncidentSearchQuery",
+          "optional": false
+        },
+        {
+          "name": "consistency",
+          "type": "Camunda.Orchestration.Sdk.ConsistencyOptions\u00601[[Camunda.Orchestration.Sdk.IncidentSearchQueryResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]",
+          "optional": true
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.IncidentSearchQueryResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "SearchJobsAsync",
+      "parameters": [
+        {
+          "name": "body",
+          "type": "Camunda.Orchestration.Sdk.JobSearchQuery",
+          "optional": false
+        },
+        {
+          "name": "consistency",
+          "type": "Camunda.Orchestration.Sdk.ConsistencyOptions\u00601[[Camunda.Orchestration.Sdk.JobSearchQueryResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]",
+          "optional": true
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.JobSearchQueryResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "SearchMappingRuleAsync",
+      "parameters": [
+        {
+          "name": "body",
+          "type": "Camunda.Orchestration.Sdk.MappingRuleSearchQueryRequest",
+          "optional": false
+        },
+        {
+          "name": "consistency",
+          "type": "Camunda.Orchestration.Sdk.ConsistencyOptions\u00601[[Camunda.Orchestration.Sdk.SearchMappingRuleResponse, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]",
+          "optional": true
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.SearchMappingRuleResponse, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "SearchMappingRulesForGroupAsync",
+      "parameters": [
+        {
+          "name": "groupId",
+          "type": "System.String",
+          "optional": false
+        },
+        {
+          "name": "body",
+          "type": "Camunda.Orchestration.Sdk.MappingRuleSearchQueryRequest",
+          "optional": false
+        },
+        {
+          "name": "consistency",
+          "type": "Camunda.Orchestration.Sdk.ConsistencyOptions\u00601[[Camunda.Orchestration.Sdk.SearchMappingRulesForGroupResponse, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]",
+          "optional": true
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.SearchMappingRulesForGroupResponse, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "SearchMappingRulesForRoleAsync",
+      "parameters": [
+        {
+          "name": "roleId",
+          "type": "System.String",
+          "optional": false
+        },
+        {
+          "name": "body",
+          "type": "Camunda.Orchestration.Sdk.MappingRuleSearchQueryRequest",
+          "optional": false
+        },
+        {
+          "name": "consistency",
+          "type": "Camunda.Orchestration.Sdk.ConsistencyOptions\u00601[[Camunda.Orchestration.Sdk.SearchMappingRulesForRoleResponse, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]",
+          "optional": true
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.SearchMappingRulesForRoleResponse, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "SearchMappingRulesForTenantAsync",
+      "parameters": [
+        {
+          "name": "tenantId",
+          "type": "Camunda.Orchestration.Sdk.TenantId",
+          "optional": false
+        },
+        {
+          "name": "body",
+          "type": "Camunda.Orchestration.Sdk.MappingRuleSearchQueryRequest",
+          "optional": false
+        },
+        {
+          "name": "consistency",
+          "type": "Camunda.Orchestration.Sdk.ConsistencyOptions\u00601[[Camunda.Orchestration.Sdk.SearchMappingRulesForTenantResponse, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]",
+          "optional": true
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.SearchMappingRulesForTenantResponse, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "SearchMessageSubscriptionsAsync",
+      "parameters": [
+        {
+          "name": "body",
+          "type": "Camunda.Orchestration.Sdk.MessageSubscriptionSearchQuery",
+          "optional": false
+        },
+        {
+          "name": "consistency",
+          "type": "Camunda.Orchestration.Sdk.ConsistencyOptions\u00601[[Camunda.Orchestration.Sdk.MessageSubscriptionSearchQueryResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]",
+          "optional": true
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.MessageSubscriptionSearchQueryResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "SearchProcessDefinitionsAsync",
+      "parameters": [
+        {
+          "name": "body",
+          "type": "Camunda.Orchestration.Sdk.ProcessDefinitionSearchQuery",
+          "optional": false
+        },
+        {
+          "name": "consistency",
+          "type": "Camunda.Orchestration.Sdk.ConsistencyOptions\u00601[[Camunda.Orchestration.Sdk.ProcessDefinitionSearchQueryResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]",
+          "optional": true
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.ProcessDefinitionSearchQueryResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "SearchProcessInstanceIncidentsAsync",
+      "parameters": [
+        {
+          "name": "processInstanceKey",
+          "type": "Camunda.Orchestration.Sdk.ProcessInstanceKey",
+          "optional": false
+        },
+        {
+          "name": "body",
+          "type": "Camunda.Orchestration.Sdk.IncidentSearchQuery",
+          "optional": false
+        },
+        {
+          "name": "consistency",
+          "type": "Camunda.Orchestration.Sdk.ConsistencyOptions\u00601[[Camunda.Orchestration.Sdk.IncidentSearchQueryResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]",
+          "optional": true
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.IncidentSearchQueryResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "SearchProcessInstancesAsync",
+      "parameters": [
+        {
+          "name": "body",
+          "type": "Camunda.Orchestration.Sdk.ProcessInstanceSearchQuery",
+          "optional": false
+        },
+        {
+          "name": "consistency",
+          "type": "Camunda.Orchestration.Sdk.ConsistencyOptions\u00601[[Camunda.Orchestration.Sdk.ProcessInstanceSearchQueryResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]",
+          "optional": true
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.ProcessInstanceSearchQueryResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "SearchRolesAsync",
+      "parameters": [
+        {
+          "name": "body",
+          "type": "Camunda.Orchestration.Sdk.RoleSearchQueryRequest",
+          "optional": false
+        },
+        {
+          "name": "consistency",
+          "type": "Camunda.Orchestration.Sdk.ConsistencyOptions\u00601[[Camunda.Orchestration.Sdk.RoleSearchQueryResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]",
+          "optional": true
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.RoleSearchQueryResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "SearchRolesForGroupAsync",
+      "parameters": [
+        {
+          "name": "groupId",
+          "type": "System.String",
+          "optional": false
+        },
+        {
+          "name": "body",
+          "type": "Camunda.Orchestration.Sdk.RoleSearchQueryRequest",
+          "optional": false
+        },
+        {
+          "name": "consistency",
+          "type": "Camunda.Orchestration.Sdk.ConsistencyOptions\u00601[[Camunda.Orchestration.Sdk.SearchRolesForGroupResponse, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]",
+          "optional": true
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.SearchRolesForGroupResponse, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "SearchRolesForTenantAsync",
+      "parameters": [
+        {
+          "name": "tenantId",
+          "type": "Camunda.Orchestration.Sdk.TenantId",
+          "optional": false
+        },
+        {
+          "name": "body",
+          "type": "Camunda.Orchestration.Sdk.RoleSearchQueryRequest",
+          "optional": false
+        },
+        {
+          "name": "consistency",
+          "type": "Camunda.Orchestration.Sdk.ConsistencyOptions\u00601[[Camunda.Orchestration.Sdk.SearchRolesForTenantResponse, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]",
+          "optional": true
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.SearchRolesForTenantResponse, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "SearchTenantsAsync",
+      "parameters": [
+        {
+          "name": "body",
+          "type": "Camunda.Orchestration.Sdk.TenantSearchQueryRequest",
+          "optional": false
+        },
+        {
+          "name": "consistency",
+          "type": "Camunda.Orchestration.Sdk.ConsistencyOptions\u00601[[Camunda.Orchestration.Sdk.TenantSearchQueryResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]",
+          "optional": true
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.TenantSearchQueryResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "SearchUserTaskAuditLogsAsync",
+      "parameters": [
+        {
+          "name": "userTaskKey",
+          "type": "Camunda.Orchestration.Sdk.UserTaskKey",
+          "optional": false
+        },
+        {
+          "name": "body",
+          "type": "Camunda.Orchestration.Sdk.UserTaskAuditLogSearchQueryRequest",
+          "optional": false
+        },
+        {
+          "name": "consistency",
+          "type": "Camunda.Orchestration.Sdk.ConsistencyOptions\u00601[[Camunda.Orchestration.Sdk.AuditLogSearchQueryResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]",
+          "optional": true
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.AuditLogSearchQueryResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "SearchUserTaskEffectiveVariablesAsync",
+      "parameters": [
+        {
+          "name": "userTaskKey",
+          "type": "Camunda.Orchestration.Sdk.UserTaskKey",
+          "optional": false
+        },
+        {
+          "name": "body",
+          "type": "Camunda.Orchestration.Sdk.SearchUserTaskEffectiveVariablesRequest",
+          "optional": false
+        },
+        {
+          "name": "truncateValues",
+          "type": "System.Nullable\u00601[[System.Boolean, System.Private.CoreLib, Version=8.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]",
+          "optional": true
+        },
+        {
+          "name": "consistency",
+          "type": "Camunda.Orchestration.Sdk.ConsistencyOptions\u00601[[Camunda.Orchestration.Sdk.VariableSearchQueryResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]",
+          "optional": true
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.VariableSearchQueryResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "SearchUserTaskVariablesAsync",
+      "parameters": [
+        {
+          "name": "userTaskKey",
+          "type": "Camunda.Orchestration.Sdk.UserTaskKey",
+          "optional": false
+        },
+        {
+          "name": "body",
+          "type": "Camunda.Orchestration.Sdk.SearchUserTaskVariablesRequest",
+          "optional": false
+        },
+        {
+          "name": "truncateValues",
+          "type": "System.Nullable\u00601[[System.Boolean, System.Private.CoreLib, Version=8.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]",
+          "optional": true
+        },
+        {
+          "name": "consistency",
+          "type": "Camunda.Orchestration.Sdk.ConsistencyOptions\u00601[[Camunda.Orchestration.Sdk.VariableSearchQueryResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]",
+          "optional": true
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.VariableSearchQueryResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "SearchUserTasksAsync",
+      "parameters": [
+        {
+          "name": "body",
+          "type": "Camunda.Orchestration.Sdk.UserTaskSearchQuery",
+          "optional": false
+        },
+        {
+          "name": "consistency",
+          "type": "Camunda.Orchestration.Sdk.ConsistencyOptions\u00601[[Camunda.Orchestration.Sdk.UserTaskSearchQueryResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]",
+          "optional": true
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.UserTaskSearchQueryResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "SearchUsersAsync",
+      "parameters": [
+        {
+          "name": "body",
+          "type": "Camunda.Orchestration.Sdk.UserSearchQueryRequest",
+          "optional": false
+        },
+        {
+          "name": "consistency",
+          "type": "Camunda.Orchestration.Sdk.ConsistencyOptions\u00601[[Camunda.Orchestration.Sdk.SearchUsersResponse, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]",
+          "optional": true
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.SearchUsersResponse, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "SearchUsersForGroupAsync",
+      "parameters": [
+        {
+          "name": "groupId",
+          "type": "System.String",
+          "optional": false
+        },
+        {
+          "name": "body",
+          "type": "Camunda.Orchestration.Sdk.SearchUsersForGroupRequest",
+          "optional": false
+        },
+        {
+          "name": "consistency",
+          "type": "Camunda.Orchestration.Sdk.ConsistencyOptions\u00601[[Camunda.Orchestration.Sdk.SearchUsersForGroupResponse, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]",
+          "optional": true
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.SearchUsersForGroupResponse, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "SearchUsersForRoleAsync",
+      "parameters": [
+        {
+          "name": "roleId",
+          "type": "System.String",
+          "optional": false
+        },
+        {
+          "name": "body",
+          "type": "Camunda.Orchestration.Sdk.SearchUsersForRoleRequest",
+          "optional": false
+        },
+        {
+          "name": "consistency",
+          "type": "Camunda.Orchestration.Sdk.ConsistencyOptions\u00601[[Camunda.Orchestration.Sdk.SearchUsersForRoleResponse, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]",
+          "optional": true
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.SearchUsersForRoleResponse, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "SearchUsersForTenantAsync",
+      "parameters": [
+        {
+          "name": "tenantId",
+          "type": "Camunda.Orchestration.Sdk.TenantId",
+          "optional": false
+        },
+        {
+          "name": "body",
+          "type": "Camunda.Orchestration.Sdk.SearchUsersForTenantRequest",
+          "optional": false
+        },
+        {
+          "name": "consistency",
+          "type": "Camunda.Orchestration.Sdk.ConsistencyOptions\u00601[[Camunda.Orchestration.Sdk.SearchUsersForTenantResponse, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]",
+          "optional": true
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.SearchUsersForTenantResponse, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "SearchVariablesAsync",
+      "parameters": [
+        {
+          "name": "body",
+          "type": "Camunda.Orchestration.Sdk.SearchVariablesRequest",
+          "optional": false
+        },
+        {
+          "name": "truncateValues",
+          "type": "System.Nullable\u00601[[System.Boolean, System.Private.CoreLib, Version=8.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]",
+          "optional": true
+        },
+        {
+          "name": "consistency",
+          "type": "Camunda.Orchestration.Sdk.ConsistencyOptions\u00601[[Camunda.Orchestration.Sdk.VariableSearchQueryResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]",
+          "optional": true
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.VariableSearchQueryResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "StopAllWorkersAsync",
+      "parameters": [
+        {
+          "name": "gracePeriod",
+          "type": "System.Nullable\u00601[[System.TimeSpan, System.Private.CoreLib, Version=8.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task"
+    },
+    {
+      "name": "SuspendBatchOperationAsync",
+      "parameters": [
+        {
+          "name": "batchOperationKey",
+          "type": "Camunda.Orchestration.Sdk.BatchOperationKey",
+          "optional": false
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task"
+    },
+    {
+      "name": "ThrowJobErrorAsync",
+      "parameters": [
+        {
+          "name": "jobKey",
+          "type": "Camunda.Orchestration.Sdk.JobKey",
+          "optional": false
+        },
+        {
+          "name": "body",
+          "type": "Camunda.Orchestration.Sdk.JobErrorRequest",
+          "optional": false
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task"
+    },
+    {
+      "name": "UnassignClientFromGroupAsync",
+      "parameters": [
+        {
+          "name": "groupId",
+          "type": "System.String",
+          "optional": false
+        },
+        {
+          "name": "clientId",
+          "type": "System.String",
+          "optional": false
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task"
+    },
+    {
+      "name": "UnassignClientFromTenantAsync",
+      "parameters": [
+        {
+          "name": "tenantId",
+          "type": "Camunda.Orchestration.Sdk.TenantId",
+          "optional": false
+        },
+        {
+          "name": "clientId",
+          "type": "System.String",
+          "optional": false
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task"
+    },
+    {
+      "name": "UnassignGroupFromTenantAsync",
+      "parameters": [
+        {
+          "name": "tenantId",
+          "type": "Camunda.Orchestration.Sdk.TenantId",
+          "optional": false
+        },
+        {
+          "name": "groupId",
+          "type": "System.String",
+          "optional": false
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task"
+    },
+    {
+      "name": "UnassignMappingRuleFromGroupAsync",
+      "parameters": [
+        {
+          "name": "groupId",
+          "type": "System.String",
+          "optional": false
+        },
+        {
+          "name": "mappingRuleId",
+          "type": "System.String",
+          "optional": false
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task"
+    },
+    {
+      "name": "UnassignMappingRuleFromTenantAsync",
+      "parameters": [
+        {
+          "name": "tenantId",
+          "type": "Camunda.Orchestration.Sdk.TenantId",
+          "optional": false
+        },
+        {
+          "name": "mappingRuleId",
+          "type": "System.String",
+          "optional": false
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task"
+    },
+    {
+      "name": "UnassignRoleFromClientAsync",
+      "parameters": [
+        {
+          "name": "roleId",
+          "type": "System.String",
+          "optional": false
+        },
+        {
+          "name": "clientId",
+          "type": "System.String",
+          "optional": false
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task"
+    },
+    {
+      "name": "UnassignRoleFromGroupAsync",
+      "parameters": [
+        {
+          "name": "roleId",
+          "type": "System.String",
+          "optional": false
+        },
+        {
+          "name": "groupId",
+          "type": "System.String",
+          "optional": false
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task"
+    },
+    {
+      "name": "UnassignRoleFromMappingRuleAsync",
+      "parameters": [
+        {
+          "name": "roleId",
+          "type": "System.String",
+          "optional": false
+        },
+        {
+          "name": "mappingRuleId",
+          "type": "System.String",
+          "optional": false
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task"
+    },
+    {
+      "name": "UnassignRoleFromTenantAsync",
+      "parameters": [
+        {
+          "name": "tenantId",
+          "type": "Camunda.Orchestration.Sdk.TenantId",
+          "optional": false
+        },
+        {
+          "name": "roleId",
+          "type": "System.String",
+          "optional": false
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task"
+    },
+    {
+      "name": "UnassignRoleFromUserAsync",
+      "parameters": [
+        {
+          "name": "roleId",
+          "type": "System.String",
+          "optional": false
+        },
+        {
+          "name": "username",
+          "type": "Camunda.Orchestration.Sdk.Username",
+          "optional": false
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task"
+    },
+    {
+      "name": "UnassignUserFromGroupAsync",
+      "parameters": [
+        {
+          "name": "groupId",
+          "type": "System.String",
+          "optional": false
+        },
+        {
+          "name": "username",
+          "type": "Camunda.Orchestration.Sdk.Username",
+          "optional": false
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task"
+    },
+    {
+      "name": "UnassignUserFromTenantAsync",
+      "parameters": [
+        {
+          "name": "tenantId",
+          "type": "Camunda.Orchestration.Sdk.TenantId",
+          "optional": false
+        },
+        {
+          "name": "username",
+          "type": "Camunda.Orchestration.Sdk.Username",
+          "optional": false
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task"
+    },
+    {
+      "name": "UnassignUserTaskAsync",
+      "parameters": [
+        {
+          "name": "userTaskKey",
+          "type": "Camunda.Orchestration.Sdk.UserTaskKey",
+          "optional": false
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task"
+    },
+    {
+      "name": "UpdateAuthorizationAsync",
+      "parameters": [
+        {
+          "name": "authorizationKey",
+          "type": "Camunda.Orchestration.Sdk.AuthorizationKey",
+          "optional": false
+        },
+        {
+          "name": "body",
+          "type": "Camunda.Orchestration.Sdk.AuthorizationRequest",
+          "optional": false
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task"
+    },
+    {
+      "name": "UpdateGlobalClusterVariableAsync",
+      "parameters": [
+        {
+          "name": "name",
+          "type": "System.String",
+          "optional": false
+        },
+        {
+          "name": "body",
+          "type": "Camunda.Orchestration.Sdk.UpdateClusterVariableRequest",
+          "optional": false
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.ClusterVariableResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "UpdateGlobalTaskListenerAsync",
+      "parameters": [
+        {
+          "name": "id",
+          "type": "Camunda.Orchestration.Sdk.GlobalListenerId",
+          "optional": false
+        },
+        {
+          "name": "body",
+          "type": "Camunda.Orchestration.Sdk.UpdateGlobalTaskListenerRequest",
+          "optional": false
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.GlobalTaskListenerResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "UpdateGroupAsync",
+      "parameters": [
+        {
+          "name": "groupId",
+          "type": "System.String",
+          "optional": false
+        },
+        {
+          "name": "body",
+          "type": "Camunda.Orchestration.Sdk.GroupUpdateRequest",
+          "optional": false
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.GroupUpdateResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "UpdateJobAsync",
+      "parameters": [
+        {
+          "name": "jobKey",
+          "type": "Camunda.Orchestration.Sdk.JobKey",
+          "optional": false
+        },
+        {
+          "name": "body",
+          "type": "Camunda.Orchestration.Sdk.JobUpdateRequest",
+          "optional": false
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task"
+    },
+    {
+      "name": "UpdateMappingRuleAsync",
+      "parameters": [
+        {
+          "name": "mappingRuleId",
+          "type": "System.String",
+          "optional": false
+        },
+        {
+          "name": "body",
+          "type": "Camunda.Orchestration.Sdk.MappingRuleUpdateRequest",
+          "optional": false
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.UpdateMappingRuleResponse, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "UpdateRoleAsync",
+      "parameters": [
+        {
+          "name": "roleId",
+          "type": "System.String",
+          "optional": false
+        },
+        {
+          "name": "body",
+          "type": "Camunda.Orchestration.Sdk.RoleUpdateRequest",
+          "optional": false
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.RoleUpdateResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "UpdateTenantAsync",
+      "parameters": [
+        {
+          "name": "tenantId",
+          "type": "Camunda.Orchestration.Sdk.TenantId",
+          "optional": false
+        },
+        {
+          "name": "body",
+          "type": "Camunda.Orchestration.Sdk.TenantUpdateRequest",
+          "optional": false
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.TenantUpdateResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "UpdateTenantClusterVariableAsync",
+      "parameters": [
+        {
+          "name": "tenantId",
+          "type": "Camunda.Orchestration.Sdk.TenantId",
+          "optional": false
+        },
+        {
+          "name": "name",
+          "type": "System.String",
+          "optional": false
+        },
+        {
+          "name": "body",
+          "type": "Camunda.Orchestration.Sdk.UpdateClusterVariableRequest",
+          "optional": false
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.ClusterVariableResult, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "UpdateUserAsync",
+      "parameters": [
+        {
+          "name": "username",
+          "type": "Camunda.Orchestration.Sdk.Username",
+          "optional": false
+        },
+        {
+          "name": "body",
+          "type": "Camunda.Orchestration.Sdk.UserUpdateRequest",
+          "optional": false
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task\u00601[[Camunda.Orchestration.Sdk.UpdateUserResponse, Camunda.Orchestration.Sdk, Version=9.2.2.0, Culture=neutral, PublicKeyToken=null]]"
+    },
+    {
+      "name": "UpdateUserTaskAsync",
+      "parameters": [
+        {
+          "name": "userTaskKey",
+          "type": "Camunda.Orchestration.Sdk.UserTaskKey",
+          "optional": false
+        },
+        {
+          "name": "body",
+          "type": "Camunda.Orchestration.Sdk.UserTaskUpdateRequest",
+          "optional": false
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "optional": true
+        }
+      ],
+      "returnType": "System.Threading.Tasks.Task"
+    }
+  ],
+  "derivedTypes": [
+    {
+      "name": "Camunda.Orchestration.Sdk.AuthorizationIdBasedRequest",
+      "baseType": "Camunda.Orchestration.Sdk.AuthorizationRequest"
+    },
+    {
+      "name": "Camunda.Orchestration.Sdk.AuthorizationPropertyBasedRequest",
+      "baseType": "Camunda.Orchestration.Sdk.AuthorizationRequest"
+    },
+    {
+      "name": "Camunda.Orchestration.Sdk.CancelSdkException",
+      "baseType": "Camunda.Orchestration.Sdk.CamundaSdkException"
+    },
+    {
+      "name": "Camunda.Orchestration.Sdk.CursorBackwardPagination",
+      "baseType": "Camunda.Orchestration.Sdk.SearchQueryPageRequest"
+    },
+    {
+      "name": "Camunda.Orchestration.Sdk.CursorForwardPagination",
+      "baseType": "Camunda.Orchestration.Sdk.SearchQueryPageRequest"
+    },
+    {
+      "name": "Camunda.Orchestration.Sdk.DecisionEvaluationById",
+      "baseType": "Camunda.Orchestration.Sdk.DecisionEvaluationInstruction"
+    },
+    {
+      "name": "Camunda.Orchestration.Sdk.DecisionEvaluationByKey",
+      "baseType": "Camunda.Orchestration.Sdk.DecisionEvaluationInstruction"
+    },
+    {
+      "name": "Camunda.Orchestration.Sdk.DirectAncestorKeyInstruction",
+      "baseType": "Camunda.Orchestration.Sdk.AncestorScopeInstruction"
+    },
+    {
+      "name": "Camunda.Orchestration.Sdk.EventualConsistencyTimeoutException",
+      "baseType": "Camunda.Orchestration.Sdk.CamundaSdkException"
+    },
+    {
+      "name": "Camunda.Orchestration.Sdk.HttpSdkException",
+      "baseType": "Camunda.Orchestration.Sdk.CamundaSdkException"
+    },
+    {
+      "name": "Camunda.Orchestration.Sdk.InferredAncestorKeyInstruction",
+      "baseType": "Camunda.Orchestration.Sdk.AncestorScopeInstruction"
+    },
+    {
+      "name": "Camunda.Orchestration.Sdk.JobResultAdHocSubProcess",
+      "baseType": "Camunda.Orchestration.Sdk.JobResult"
+    },
+    {
+      "name": "Camunda.Orchestration.Sdk.JobResultUserTask",
+      "baseType": "Camunda.Orchestration.Sdk.JobResult"
+    },
+    {
+      "name": "Camunda.Orchestration.Sdk.LimitPagination",
+      "baseType": "Camunda.Orchestration.Sdk.SearchQueryPageRequest"
+    },
+    {
+      "name": "Camunda.Orchestration.Sdk.OffsetPagination",
+      "baseType": "Camunda.Orchestration.Sdk.SearchQueryPageRequest"
+    },
+    {
+      "name": "Camunda.Orchestration.Sdk.ProcessInstanceCreationInstructionById",
+      "baseType": "Camunda.Orchestration.Sdk.ProcessInstanceCreationInstruction"
+    },
+    {
+      "name": "Camunda.Orchestration.Sdk.ProcessInstanceCreationInstructionByKey",
+      "baseType": "Camunda.Orchestration.Sdk.ProcessInstanceCreationInstruction"
+    },
+    {
+      "name": "Camunda.Orchestration.Sdk.ProcessInstanceCreationTerminateInstruction",
+      "baseType": "Camunda.Orchestration.Sdk.ProcessInstanceCreationRuntimeInstruction"
+    },
+    {
+      "name": "Camunda.Orchestration.Sdk.ProcessInstanceModificationTerminateByIdInstruction",
+      "baseType": "Camunda.Orchestration.Sdk.ProcessInstanceModificationTerminateInstruction"
+    },
+    {
+      "name": "Camunda.Orchestration.Sdk.ProcessInstanceModificationTerminateByKeyInstruction",
+      "baseType": "Camunda.Orchestration.Sdk.ProcessInstanceModificationTerminateInstruction"
+    },
+    {
+      "name": "Camunda.Orchestration.Sdk.SourceElementIdInstruction",
+      "baseType": "Camunda.Orchestration.Sdk.SourceElementInstruction"
+    },
+    {
+      "name": "Camunda.Orchestration.Sdk.SourceElementInstanceKeyInstruction",
+      "baseType": "Camunda.Orchestration.Sdk.SourceElementInstruction"
+    },
+    {
+      "name": "Camunda.Orchestration.Sdk.UseSourceParentKeyInstruction",
+      "baseType": "Camunda.Orchestration.Sdk.AncestorScopeInstruction"
+    }
+  ]
+}

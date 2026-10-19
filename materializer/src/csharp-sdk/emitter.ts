@@ -1,3 +1,6 @@
+import { existsSync, readFileSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { EmitContext, EmittedFile, EmitterStrategy } from '@camunda8/emitter-sdk';
 import { assertSafeGlobalContextSeeds } from 'path-analyser/ontology/loader';
 import type {
@@ -14,6 +17,11 @@ import type {
 // omitWhenUnbound half of the same contract.
 import { computeUniqueBindings } from '../playwright/ctxSeeding.js';
 import {
+  type CsharpDiscriminator,
+  type CsharpDiscriminatorTable,
+  resolveCsharpDiscriminatorChain,
+} from './discriminators.js';
+import {
   type CsharpOperationMap,
   type CsharpOperationMapEntry,
   CsharpOperationMapSource,
@@ -22,7 +30,7 @@ import {
 
 export type { CsharpOperationMap, CsharpOperationMapEntry };
 
-const CSHARP_REQUEST_TYPE_BY_OPERATION: Record<string, string> = {
+export const CSHARP_REQUEST_TYPE_BY_OPERATION: Readonly<Record<string, string>> = {
   createDeployment: 'DeploymentRequest',
   createUser: 'UserRequest',
   createTenant: 'TenantCreateRequest',
@@ -45,18 +53,18 @@ const CSHARP_REQUEST_TYPE_BY_OPERATION: Record<string, string> = {
   searchAuthorizations: 'AuthorizationSearchQuery',
   searchUsers: 'UserSearchQueryRequest',
   searchGroups: 'GroupSearchQueryRequest',
-  searchUsersForGroup: 'GroupUserSearchQueryRequest',
-  searchClientsForGroup: 'GroupClientSearchQueryRequest',
+  searchUsersForGroup: 'SearchUsersForGroupRequest',
+  searchClientsForGroup: 'SearchClientsForGroupRequest',
   searchRolesForGroup: 'RoleSearchQueryRequest',
   searchMappingRulesForGroup: 'MappingRuleSearchQueryRequest',
   searchRoles: 'RoleSearchQueryRequest',
-  searchUsersForRole: 'RoleUserSearchQueryRequest',
+  searchUsersForRole: 'SearchUsersForRoleRequest',
   searchGroupsForRole: 'RoleGroupSearchQueryRequest',
-  searchClientsForRole: 'RoleClientSearchQueryRequest',
+  searchClientsForRole: 'SearchClientsForRoleRequest',
   searchMappingRulesForRole: 'MappingRuleSearchQueryRequest',
   searchTenants: 'TenantSearchQueryRequest',
-  searchUsersForTenant: 'TenantUserSearchQueryRequest',
-  searchClientsForTenant: 'TenantClientSearchQueryRequest',
+  searchUsersForTenant: 'SearchUsersForTenantRequest',
+  searchClientsForTenant: 'SearchClientsForTenantRequest',
   searchGroupIdsForTenant: 'TenantGroupSearchQueryRequest',
   searchRolesForTenant: 'RoleSearchQueryRequest',
   searchMappingRulesForTenant: 'MappingRuleSearchQueryRequest',
@@ -91,6 +99,38 @@ const CSHARP_REQUEST_TYPE_BY_OPERATION: Record<string, string> = {
   getJobErrorStatistics: 'JobErrorStatisticsQuery',
   getJobTimeSeriesStatistics: 'JobTimeSeriesStatisticsQuery',
   getJobWorkerStatistics: 'JobWorkerStatisticsQuery',
+  activateAdHocSubProcessActivities: 'AdHocSubProcessActivateActivitiesInstruction',
+  broadcastSignal: 'SignalBroadcastRequest',
+  cancelProcessInstancesBatchOperation: 'ProcessInstanceCancellationBatchOperationRequest',
+  correlateMessage: 'MessageCorrelationRequest',
+  createAdminUser: 'UserRequest',
+  createElementInstanceVariables: 'SetVariableRequest',
+  createGlobalClusterVariable: 'CreateClusterVariableRequest',
+  createGlobalTaskListener: 'CreateGlobalTaskListenerRequest',
+  createRole: 'RoleCreateRequest',
+  createTenantClusterVariable: 'CreateClusterVariableRequest',
+  deleteDecisionInstance: 'DeleteDecisionInstanceRequest',
+  deleteDecisionInstancesBatchOperation: 'DecisionInstanceDeletionBatchOperationRequest',
+  deleteProcessInstancesBatchOperation: 'ProcessInstanceDeletionBatchOperationRequest',
+  evaluateConditionals: 'ConditionalEvaluationInstruction',
+  evaluateExpression: 'ExpressionEvaluationRequest',
+  migrateProcessInstance: 'ProcessInstanceMigrationInstruction',
+  migrateProcessInstancesBatchOperation: 'ProcessInstanceMigrationBatchOperationRequest',
+  modifyProcessInstancesBatchOperation: 'ProcessInstanceModificationBatchOperationRequest',
+  pinClock: 'ClockPinRequest',
+  publishMessage: 'MessagePublicationRequest',
+  resolveIncidentsBatchOperation: 'ProcessInstanceIncidentResolutionBatchOperationRequest',
+  throwJobError: 'JobErrorRequest',
+  updateGlobalClusterVariable: 'UpdateClusterVariableRequest',
+  updateGlobalTaskListener: 'UpdateGlobalTaskListenerRequest',
+  updateGroup: 'GroupUpdateRequest',
+  updateJob: 'JobUpdateRequest',
+  updateMappingRule: 'MappingRuleUpdateRequest',
+  updateRole: 'RoleUpdateRequest',
+  updateTenant: 'TenantUpdateRequest',
+  updateTenantClusterVariable: 'UpdateClusterVariableRequest',
+  updateUser: 'UserUpdateRequest',
+  updateUserTask: 'UserTaskUpdateRequest',
 };
 
 // operationId-independent map: a path parameter's name (camelCased) to the
@@ -100,7 +140,7 @@ const CSHARP_REQUEST_TYPE_BY_OPERATION: Record<string, string> = {
 // parameters previously passed the raw `object` returned by `RequireBinding`
 // straight into the SDK call, which fails to compile with CS1503
 // ("cannot convert from 'object' to '<KeyType>'") against the real SDK.
-const CSHARP_PATH_PARAM_KEY_TYPE: Record<string, string> = {
+export const CSHARP_PATH_PARAM_KEY_TYPE: Readonly<Record<string, string>> = {
   auditLogKey: 'AuditLogKey',
   decisionDefinitionKey: 'DecisionDefinitionKey',
   decisionRequirementsKey: 'DecisionRequirementsKey',
@@ -118,77 +158,140 @@ const CSHARP_PATH_PARAM_KEY_TYPE: Record<string, string> = {
   decisionEvaluationInstanceKey: 'DecisionEvaluationInstanceKey',
   decisionEvaluationKey: 'DecisionEvaluationKey',
   adHocSubProcessInstanceKey: 'ElementInstanceKey',
+  tenantId: 'TenantId',
+  username: 'Username',
 };
 
 const PATH_PARAM_RE = /\{([^}]+)\}/g;
 
-// SDK methods that return a bare (non-generic) `Task` rather than
-// `Task<T>`. Verified by reflecting every public `CamundaClient` method
-// against the real Camunda.Orchestration.Sdk 9.2.2 assembly. Assigning the
-// awaited result of one of these calls to a `var` fails to compile with
-// CS0815 ("Cannot assign void to an implicitly-typed variable") -- these
-// methods have no response body to assert against or extract from.
-const CSHARP_VOID_METHODS = new Set<string>([
-  'ActivateAdHocSubProcessActivitiesAsync',
-  'AssignClientToGroupAsync',
-  'AssignClientToTenantAsync',
-  'AssignGroupToTenantAsync',
-  'AssignMappingRuleToGroupAsync',
-  'AssignMappingRuleToTenantAsync',
-  'AssignRoleToClientAsync',
-  'AssignRoleToGroupAsync',
-  'AssignRoleToMappingRuleAsync',
-  'AssignRoleToTenantAsync',
-  'AssignRoleToUserAsync',
-  'AssignUserTaskAsync',
-  'AssignUserToGroupAsync',
-  'AssignUserToTenantAsync',
-  'CancelBatchOperationAsync',
-  'CancelProcessInstanceAsync',
-  'CompleteJobAsync',
-  'CompleteUserTaskAsync',
-  'CreateElementInstanceVariablesAsync',
-  'DeleteAuthorizationAsync',
-  'DeleteDecisionInstanceAsync',
-  'DeleteDocumentAsync',
-  'DeleteGlobalClusterVariableAsync',
-  'DeleteGlobalTaskListenerAsync',
-  'DeleteGroupAsync',
-  'DeleteMappingRuleAsync',
-  'DeleteProcessInstanceAsync',
-  'DeleteRoleAsync',
-  'DeleteTenantAsync',
-  'DeleteTenantClusterVariableAsync',
-  'DeleteUserAsync',
-  'FailJobAsync',
-  'GetStatusAsync',
-  'MigrateProcessInstanceAsync',
-  'ModifyProcessInstanceAsync',
-  'PinClockAsync',
-  'ResetClockAsync',
-  'ResolveIncidentAsync',
-  'ResumeBatchOperationAsync',
-  'RunWorkersAsync',
-  'StopAllWorkersAsync',
-  'SuspendBatchOperationAsync',
-  'ThrowJobErrorAsync',
-  'UnassignClientFromGroupAsync',
-  'UnassignClientFromTenantAsync',
-  'UnassignGroupFromTenantAsync',
-  'UnassignMappingRuleFromGroupAsync',
-  'UnassignMappingRuleFromTenantAsync',
-  'UnassignRoleFromClientAsync',
-  'UnassignRoleFromGroupAsync',
-  'UnassignRoleFromMappingRuleAsync',
-  'UnassignRoleFromTenantAsync',
-  'UnassignRoleFromUserAsync',
-  'UnassignUserFromGroupAsync',
-  'UnassignUserFromTenantAsync',
-  'UnassignUserTaskAsync',
-  'UpdateAuthorizationAsync',
-  'UpdateJobAsync',
-  'UpdateUserTaskAsync',
-]);
+export const CSHARP_ONEOF_REQUEST_TYPES: Readonly<Record<string, readonly string[]>> = {
+  createAuthorization: ['AuthorizationIdBasedRequest', 'AuthorizationPropertyBasedRequest'],
+  updateAuthorization: ['AuthorizationIdBasedRequest', 'AuthorizationPropertyBasedRequest'],
+  evaluateDecision: ['DecisionEvaluationById', 'DecisionEvaluationByKey'],
+  createProcessInstance: [
+    'ProcessInstanceCreationInstructionById',
+    'ProcessInstanceCreationInstructionByKey',
+  ],
+};
+
+export interface SdkMethodParameter {
+  name: string;
+  type: string;
+  optional: boolean;
+}
+
+export interface SdkMethodDescription {
+  name: string;
+  parameters: SdkMethodParameter[];
+  returnType: string;
+}
+
+export interface SdkMethodManifest {
+  sdkVersion: string;
+  methods: SdkMethodDescription[];
+  derivedTypes: SdkDerivedType[];
+}
+
+export interface SdkDerivedType {
+  name: string;
+  baseType: string;
+}
+
+function isSdkMethodManifest(value: unknown): value is SdkMethodManifest {
+  if (
+    !isRecord(value) ||
+    typeof value.sdkVersion !== 'string' ||
+    !Array.isArray(value.methods) ||
+    !Array.isArray(value.derivedTypes)
+  ) {
+    return false;
+  }
+  const validMethods = value.methods.every((method) => {
+    if (
+      !isRecord(method) ||
+      typeof method.name !== 'string' ||
+      typeof method.returnType !== 'string'
+    ) {
+      return false;
+    }
+    return (
+      Array.isArray(method.parameters) &&
+      method.parameters.every(
+        (parameter) =>
+          isRecord(parameter) &&
+          typeof parameter.name === 'string' &&
+          typeof parameter.type === 'string' &&
+          typeof parameter.optional === 'boolean',
+      )
+    );
+  });
+  const validDerivedTypes = value.derivedTypes.every(
+    (derivedType) =>
+      isRecord(derivedType) &&
+      typeof derivedType.name === 'string' &&
+      typeof derivedType.baseType === 'string',
+  );
+  return validMethods && validDerivedTypes;
+}
+
+function loadSdkMethodManifest(): SdkMethodManifest {
+  let directory = path.dirname(fileURLToPath(import.meta.url));
+  while (true) {
+    const manifestPath = path.join(directory, 'csharp-sdk', 'examples', 'sdk-client-methods.json');
+    if (existsSync(manifestPath)) {
+      const parsed: unknown = JSON.parse(readFileSync(manifestPath, 'utf8'));
+      if (!isSdkMethodManifest(parsed)) {
+        throw new Error(`Invalid C# SDK method manifest at ${manifestPath}`);
+      }
+      return parsed;
+    }
+    const parent = path.dirname(directory);
+    if (parent === directory) {
+      throw new Error(`Could not find C# SDK method manifest from ${directory}`);
+    }
+    directory = parent;
+  }
+}
+
+export const CSHARP_SDK_METHOD_MANIFEST = loadSdkMethodManifest();
+
+export const CSHARP_VOID_METHODS = new Set(
+  CSHARP_SDK_METHOD_MANIFEST.methods
+    .filter((method) => method.returnType === 'System.Threading.Tasks.Task')
+    .map((method) => method.name),
+);
+
+export const CSHARP_CONSISTENCY_METHODS = new Set(
+  CSHARP_SDK_METHOD_MANIFEST.methods
+    .filter((method) => method.parameters.some((parameter) => parameter.name === 'consistency'))
+    .map((method) => method.name),
+);
+
+export const CSHARP_TIME_WINDOW_ARGS: Record<string, string> = Object.fromEntries(
+  CSHARP_SDK_METHOD_MANIFEST.methods
+    .map((method) => [
+      method.name,
+      method.parameters
+        .filter((parameter) => parameter.type === 'System.DateTimeOffset' && !parameter.optional)
+        .map(
+          (parameter, index) =>
+            `${parameter.name}: ${index === 0 ? 'DateTimeOffset.UtcNow.AddDays(-1)' : 'DateTimeOffset.UtcNow'}`,
+        )
+        .join(', '),
+    ])
+    .filter((entry): entry is [string, string] => entry[1].length > 0),
+);
+
+function simpleSdkType(type: string): string | undefined {
+  const match = type.match(/^Camunda\.Orchestration\.Sdk\.([A-Za-z0-9_]+)$/);
+  return match?.[1];
+}
+
+function findSdkMethod(methodName: string): SdkMethodDescription | undefined {
+  return CSHARP_SDK_METHOD_MANIFEST.methods.find((method) => method.name === methodName);
+}
+
+const CSHARP_CONSISTENCY_ARG = 'consistency: new() { WaitUpToMs = 10_000, PollIntervalMs = 500 }';
 
 export function csharpSdkSuiteFileName(
   collection: EndpointScenarioCollection,
@@ -205,13 +308,31 @@ export function renderCsharpSdkSuite(
     suiteName?: string;
     mode?: 'feature' | 'integration' | 'variant';
     globalContextSeeds?: readonly GlobalContextSeed[];
+    discriminators?: CsharpDiscriminatorTable;
   },
 ): string {
   return buildSuiteSource(collection, mapping, opts);
 }
 
-export function createCsharpEmitter(mapping?: CsharpOperationMap): EmitterStrategy {
+export function createCsharpEmitter(
+  mapping?: CsharpOperationMap,
+  options: {
+    discriminators?: CsharpDiscriminatorTable | (() => CsharpDiscriminatorTable);
+  } = {},
+): EmitterStrategy {
   const mappingSource: SdkMappingSource = new CsharpOperationMapSource(mapping);
+  let resolvedDiscriminators: CsharpDiscriminatorTable | undefined;
+  let discriminatorsResolved = false;
+  const getDiscriminators = (): CsharpDiscriminatorTable | undefined => {
+    if (!discriminatorsResolved) {
+      resolvedDiscriminators =
+        typeof options.discriminators === 'function'
+          ? options.discriminators()
+          : options.discriminators;
+      discriminatorsResolved = true;
+    }
+    return resolvedDiscriminators;
+  };
   return {
     id: 'csharp-sdk',
     name: 'C# SDK (Camunda Orchestration)',
@@ -221,6 +342,7 @@ export function createCsharpEmitter(mapping?: CsharpOperationMap): EmitterStrate
         suiteName: ctx.suiteName,
         mode: ctx.mode,
         globalContextSeeds: ctx.globalContextSeeds,
+        discriminators: getDiscriminators(),
       });
       return [
         {
@@ -239,6 +361,7 @@ function buildSuiteSource(
     suiteName?: string;
     mode?: 'feature' | 'integration' | 'variant';
     globalContextSeeds?: readonly GlobalContextSeed[];
+    discriminators?: CsharpDiscriminatorTable;
   },
 ): string {
   if (opts.globalContextSeeds !== undefined) {
@@ -273,7 +396,7 @@ function buildSuiteSource(
 
   const seeds = opts.globalContextSeeds ?? [];
   for (const scenario of collection.scenarios) {
-    lines.push(renderScenarioTest(scenario, mapping, seeds));
+    lines.push(renderScenarioTest(scenario, mapping, seeds, opts.discriminators));
   }
 
   lines.push('}');
@@ -285,6 +408,7 @@ function renderScenarioTest(
   s: EndpointScenario,
   mapping: SdkMappingSource,
   globalContextSeeds: readonly GlobalContextSeed[],
+  discriminators?: CsharpDiscriminatorTable,
 ): string {
   const title = `${s.id} - ${escapeQuotes(s.name || 'scenario')}`;
   const methodName = toSafeIdentifier(`Scenario_${s.id}_${s.name || 'scenario'}`);
@@ -465,7 +589,7 @@ function renderScenarioTest(
         const tenantExpr = renderTenantExpr(multipart.fields.tenantId);
         body.push(`        var resourceFiles = ${filesExpr};`);
         body.push(
-          `        var result${idx + 1} = await ${renderClientCall(method, step, `resourceFiles, ${tenantExpr}`)};`,
+          `        var result${idx + 1} = await ${renderClientCall(method, step, `resourceFiles, ${tenantExpr}`, true)};`,
         );
       } else if (emptyDocumentFiles) {
         body.push(`        using var content${idx + 1} = new MultipartFormDataContent();`);
@@ -479,14 +603,14 @@ function renderScenarioTest(
         );
         body.push(`        }`);
         body.push(
-          `        var result${idx + 1} = await ${renderClientCall(method, step, `content${idx + 1}`)};`,
+          `        var result${idx + 1} = await ${renderClientCall(method, step, `content${idx + 1}`, true)};`,
         );
       } else {
         body.push(
           `        using var content${idx + 1} = BuildMultipart(${fieldsVar}, ${filesVar});`,
         );
         body.push(
-          `        var result${idx + 1} = await ${renderClientCall(method, step, `content${idx + 1}`)};`,
+          `        var result${idx + 1} = await ${renderClientCall(method, step, `content${idx + 1}`, true)};`,
         );
       }
 
@@ -540,6 +664,8 @@ function renderScenarioTest(
             requireRequestType(step, requestType),
             jsonFields,
             '          ',
+            step.operationId,
+            discriminators,
           ),
         );
         body.push(`          await ${renderClientCall(method, step, requestVar)};`);
@@ -574,19 +700,21 @@ function renderScenarioTest(
           requireRequestType(step, requestType),
           jsonFields,
           '        ',
+          step.operationId,
+          discriminators,
         ),
       );
       body.push(
-        `        ${isVoidMethod ? '' : `var ${varName} = `}await ${renderClientCall(method, step, requestVar)};`,
+        `        ${isVoidMethod ? '' : `var ${varName} = `}await ${renderClientCall(method, step, requestVar, true)};`,
       );
     } else if (shouldPassEmptyRequest) {
       body.push(`        var ${requestVar} = new ${requestType}();`);
       body.push(
-        `        ${isVoidMethod ? '' : `var ${varName} = `}await ${renderClientCall(method, step, requestVar)};`,
+        `        ${isVoidMethod ? '' : `var ${varName} = `}await ${renderClientCall(method, step, requestVar, true)};`,
       );
     } else {
       body.push(
-        `        ${isVoidMethod ? '' : `var ${varName} = `}await ${renderClientCall(method, step)};`,
+        `        ${isVoidMethod ? '' : `var ${varName} = `}await ${renderClientCall(method, step, undefined, true)};`,
       );
     }
 
@@ -695,15 +823,49 @@ function emitJsonRequestDataLines(
   requestType: string,
   fields: JsonRequestFields,
   indent: string,
+  operationId: string,
+  discriminatorTable: CsharpDiscriminatorTable | undefined,
 ): string[] {
   const dataVar = `${requestVar}Data`;
   const lines = [`${indent}var ${dataVar} = new Dictionary<string, object?>();`];
+  const discriminators = discriminatorTable?.[operationId] ?? [];
   if (fields.kind === 'scalar') {
-    lines.push(`${indent}${dataVar}["body"] = ${renderCsharpValue(fields.value, indent)};`);
+    lines.push(
+      `${indent}${dataVar}["body"] = ${renderCsharpValue(fields.value, indent, 'body', discriminators)};`,
+    );
   } else if (fields.kind === 'record') {
+    // The JSON body itself can be a discriminated union at the request
+    // root (path `''`): every field above is rendered separately, so
+    // without resolving the root branch FIRST, neither an implicit
+    // injection at the root nor an explicit root-level tag is ever seen,
+    // and each field starts with an empty owner chain -- silently
+    // dropping any nested discriminator scoped to the branch the root
+    // actually selected (PR #668 review, round 6). Resolve the root
+    // branch from every known field name (inline values plus deferred
+    // field names, which are present at runtime even though their value
+    // isn't known at codegen time) before rendering any field.
+    const rootValue: Record<string, unknown> = {};
+    for (const [fieldName, value] of fields.inline) rootValue[fieldName] = value;
+    for (const { fieldName } of fields.deferred) {
+      if (!Object.hasOwn(rootValue, fieldName)) rootValue[fieldName] = null;
+    }
+    // Resolve every discriminator eligible at the root, not just the first:
+    // the root's own selected branch can itself declare a SECOND
+    // discriminator on the same (root) object, which only becomes eligible
+    // once the first's ref is in the owner chain (PR #668 review, round 7).
+    const { fields: rootFields, ownerChain: rootOwnerChain } = resolveCsharpDiscriminatorChain(
+      rootValue,
+      discriminators,
+      '',
+    );
+    for (const [name, tagValue] of rootFields) {
+      lines.push(
+        `${indent}${dataVar}[${stringLiteral(name)}] = ${renderCsharpValue(tagValue, indent)};`,
+      );
+    }
     for (const [fieldName, value] of fields.inline) {
       lines.push(
-        `${indent}${dataVar}[${stringLiteral(fieldName)}] = ${renderCsharpValue(value, indent)};`,
+        `${indent}${dataVar}[${stringLiteral(fieldName)}] = ${renderCsharpValue(value, indent, fieldName, discriminators, rootOwnerChain)};`,
       );
     }
     for (const { fieldName, binding } of fields.deferred) {
@@ -727,8 +889,22 @@ function requireRequestType(step: RequestStep, requestType: string | undefined):
   return requestType;
 }
 
-function renderClientCall(method: string, step: RequestStep, requestExpression?: string): string {
-  return renderClientCallForPath(method, step.pathTemplate, requestExpression, step.pathParams);
+function renderClientCall(
+  method: string,
+  step: RequestStep,
+  requestExpression?: string,
+  withConsistency = false,
+): string {
+  const call = renderClientCallForPath(
+    method,
+    step.pathTemplate,
+    requestExpression,
+    step.pathParams,
+  );
+  if (!withConsistency || !CSHARP_CONSISTENCY_METHODS.has(method)) return call;
+  return call.endsWith('()')
+    ? `${call.slice(0, -1)}${CSHARP_CONSISTENCY_ARG})`
+    : `${call.slice(0, -1)}, ${CSHARP_CONSISTENCY_ARG})`;
 }
 
 function renderClientCallForPath(
@@ -743,7 +919,10 @@ function renderClientCallForPath(
   }
   const argumentsList = derivePathParamNames(pathTemplate).map((rawName) => {
     const name = toCamelCase(rawName);
-    const keyType = CSHARP_PATH_PARAM_KEY_TYPE[name];
+    const sdkParameter = findSdkMethod(method)?.parameters.find(
+      (parameter) => parameter.name === name,
+    );
+    const keyType = simpleSdkType(sdkParameter?.type ?? '') ?? CSHARP_PATH_PARAM_KEY_TYPE[name];
     // The planner/emitter contract (mirrored by the JS SDK emitter's
     // `buildJavaScriptUrlExpression`) lets `RequestStep.pathParams[].var`
     // alias a URL param name to a different ctx binding name; fall back to
@@ -759,6 +938,8 @@ function renderClientCallForPath(
     return `${keyType}.AssumeExists(RequireStringBinding(ctx, ${binding}))`;
   });
   if (requestExpression !== undefined) argumentsList.push(requestExpression);
+  const timeWindow = CSHARP_TIME_WINDOW_ARGS[method];
+  if (timeWindow !== undefined) argumentsList.push(timeWindow);
   return `Client.${method}(${argumentsList.join(', ')})`;
 }
 
@@ -817,9 +998,21 @@ function resolveRequestTypeName(step: RequestStep): string | undefined {
   if (step.operationId === 'createProcessInstance') {
     const body = step.bodyTemplate;
     if (isRecord(body) && 'processDefinitionKey' in body) {
-      return 'ProcessInstanceCreationInstructionByKey';
+      return CSHARP_ONEOF_REQUEST_TYPES.createProcessInstance[1];
     }
-    return 'ProcessInstanceCreationInstructionById';
+    return CSHARP_ONEOF_REQUEST_TYPES.createProcessInstance[0];
+  }
+  if (step.operationId === 'createAuthorization' || step.operationId === 'updateAuthorization') {
+    const body = step.bodyTemplate;
+    return isRecord(body) && 'resourcePropertyName' in body
+      ? CSHARP_ONEOF_REQUEST_TYPES[step.operationId][1]
+      : CSHARP_ONEOF_REQUEST_TYPES[step.operationId][0];
+  }
+  if (step.operationId === 'evaluateDecision') {
+    const body = step.bodyTemplate;
+    return isRecord(body) && 'decisionDefinitionKey' in body
+      ? CSHARP_ONEOF_REQUEST_TYPES.evaluateDecision[1]
+      : CSHARP_ONEOF_REQUEST_TYPES.evaluateDecision[0];
   }
   return CSHARP_REQUEST_TYPE_BY_OPERATION[step.operationId];
 }
@@ -828,7 +1021,22 @@ function derivePathParamNames(pathTemplate: string): string[] {
   return [...pathTemplate.matchAll(PATH_PARAM_RE)].map((match) => match[1]);
 }
 
-function renderCsharpValue(value: unknown, indent = ''): string {
+function renderCsharpValue(
+  value: unknown,
+  indent = '',
+  path = '',
+  discriminators: readonly CsharpDiscriminator[] = [],
+  // `(path, ref)` pairs (see `ownerChainKey`) for every ancestor subtype
+  // already selected during this render (see `CsharpDiscriminator.ownerRef`
+  // / `ownerPath` / `chooseCsharpDiscriminator`). Keying on the pair, not
+  // the bare ref, scopes a nested discriminator to the EXACT union
+  // occurrence that selected it, so a structurally independent sibling
+  // union that happens to reuse the same `$ref` — but selected a different
+  // branch — never wrongly inherits eligibility for it (PR #668 review,
+  // round 11). This function only ever threads `ownerChain` through
+  // opaquely; it never constructs or inspects an individual entry itself.
+  ownerChain: ReadonlySet<string> = new Set(),
+): string {
   if (value === null) return 'null';
   if (typeof value === 'string') {
     return renderTemplateString(value);
@@ -837,13 +1045,36 @@ function renderCsharpValue(value: unknown, indent = ''): string {
     return String(value);
   }
   if (Array.isArray(value)) {
-    const inner = value.map((v) => renderCsharpValue(v, `${indent}  `)).join(', ');
+    const inner = value
+      .map((v) => renderCsharpValue(v, `${indent}  `, `${path}[]`, discriminators, ownerChain))
+      .join(', ');
     return `new object?[] { ${inner} }`;
   }
   if (isRecord(value)) {
     const entries: string[] = [];
-    for (const [k, v] of Object.entries(value)) {
-      const rendered = renderCsharpValue(v, `${indent}  `);
+    const fields = Object.entries(value);
+    // Resolves every discriminator eligible at this object, not just the
+    // first: the branch this object selects can itself declare a SECOND
+    // discriminator on the SAME object, which only becomes eligible once
+    // the first's ref is in the owner chain (PR #668 review, round 7).
+    //
+    // The explicit empty 5th argument seeds dedup FRESH for this object:
+    // `ownerChain` also carries every ref selected on unrelated ANCESTOR
+    // objects (different `path`s entirely), and this object's OWN
+    // discriminator candidates must not be rejected merely because an
+    // ancestor happened to select the SAME `$ref` schema for an unrelated
+    // decision (PR #668 review, round 9).
+    const { fields: discriminatorFields, ownerChain: nextOwnerChain } =
+      resolveCsharpDiscriminatorChain(value, discriminators, path, ownerChain, new Set());
+    fields.unshift(...discriminatorFields);
+    for (const [k, v] of fields) {
+      const rendered = renderCsharpValue(
+        v,
+        `${indent}  `,
+        path ? `${path}.${k}` : k,
+        discriminators,
+        nextOwnerChain,
+      );
       entries.push(`${indent}  [${stringLiteral(k)}] = ${rendered},`);
     }
     if (entries.length === 0) return 'new Dictionary<string, object?>()';
