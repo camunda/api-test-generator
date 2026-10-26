@@ -889,6 +889,7 @@ jobs:
           PR_AUTHOR: ${{ needs.validate.outputs.pr_author }}
           SHA: ${{ needs.validate.outputs.source_sha }}
           RUN_RESULT: ${{ needs.run.result }}
+          CATEGORY: ${{ needs.classify.outputs.category }}
           CAUSED: ${{ needs.classify.outputs.caused_by_pr }}
           OPS: ${{ needs.classify.outputs.affected_operation_ids }}
           SUMMARY: ${{ needs.classify.outputs.summary }}
@@ -908,11 +909,11 @@ jobs:
           existing="${found%% *}"
           existing_state="${found##* }"
 
-          # Open only on a confident, PR-caused gap. Close only on a GREEN run: caused_by_pr is false
-          # for every low-confidence or unknown classification too, so a later failed run that is
-          # merely uncertain does not show the tracked operations are fine. Anything else leaves
-          # the issue as it is.
-          if [ "$CAUSED" = "true" ]; then
+          # Open only on a confident, PR-caused generator gap. Close only on a GREEN run:
+          # caused_by_pr is false for every low-confidence or unknown classification too,
+          # so a later failed run that is merely uncertain does not show the tracked
+          # operations are fine. Anything else leaves the issue as it is.
+          if [ "$CAUSED" = "true" ] && [ "$CATEGORY" = "generator-gap" ]; then
             mode=open
           elif [ "$RUN_RESULT" = "success" ]; then
             mode=close
