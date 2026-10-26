@@ -627,11 +627,15 @@ jobs:
 
           "caused_by_pr" decides whether the camunda-hub PR author is told on their PR
           (otherwise only the internal Slack channel hears about it), so be strict. Set it
-          true ONLY when category is "generator-gap" AND every affected operationId is
-          NEW or CHANGED by this PR in the spec diff (steps 0 and 3): the author's own spec
-          change is what the generator cannot yet handle. Set it false for everything else,
-          including a generator gap on an operation this PR did not touch, an unmapped
-          operation that already existed on the base, and any doubt.
+          true when EITHER:
+            - category is "generator-gap" AND every affected operationId is NEW or CHANGED
+              by this PR in the spec diff (steps 0 and 3): the author's own spec change is
+              what the generator cannot yet handle; OR
+            - category is "product" AND the regression is in an endpoint that this PR
+              changed (the PR's own code change broke the existing behaviour).
+          Set it false for everything else, including a generator gap on an operation this
+          PR did not touch, an unmapped operation that already existed on the base, a
+          product regression on an endpoint this PR did not touch, and any doubt.
 
           Write your answer to /tmp/hub-pr-classification.json as EXACTLY this shape,
           nothing else:
@@ -701,8 +705,11 @@ jobs:
             echo "category=${category}"
             echo "confidence=${confidence}"
             echo "summary=${summary}"
-            # Only a confident generator-gap can be pinned on the PR's own change.
+            # A generator-gap (high confidence) or a product regression (medium+
+            # confidence) can be pinned on the PR's own change.
             if [ "$category" = "generator-gap" ] && [ "$confidence" = "high" ]; then
+              echo "caused_by_pr=${caused_by_pr}"
+            elif [ "$category" = "product" ] && [ "$confidence" != "low" ]; then
               echo "caused_by_pr=${caused_by_pr}"
             else
               echo "caused_by_pr=false"
@@ -882,6 +889,7 @@ jobs:
           PR_AUTHOR: ${{ needs.validate.outputs.pr_author }}
           SHA: ${{ needs.validate.outputs.source_sha }}
           RUN_RESULT: ${{ needs.run.result }}
+          CATEGORY: ${{ needs.classify.outputs.category }}
           CAUSED: ${{ needs.classify.outputs.caused_by_pr }}
           OPS: ${{ needs.classify.outputs.affected_operation_ids }}
           SUMMARY: ${{ needs.classify.outputs.summary }}
@@ -901,11 +909,11 @@ jobs:
           existing="${found%% *}"
           existing_state="${found##* }"
 
-          # Open only on a confident, PR-caused gap. Close only on a GREEN run: caused_by_pr is false
-          # for every low-confidence or unknown classification too, so a later failed run that is
-          # merely uncertain does not show the tracked operations are fine. Anything else leaves
-          # the issue as it is.
-          if [ "$CAUSED" = "true" ]; then
+          # Open only on a confident, PR-caused generator gap. Close only on a GREEN run:
+          # caused_by_pr is false for every low-confidence or unknown classification too,
+          # so a later failed run that is merely uncertain does not show the tracked
+          # operations are fine. Anything else leaves the issue as it is.
+          if [ "$CAUSED" = "true" ] && [ "$CATEGORY" = "generator-gap" ]; then
             mode=open
           elif [ "$RUN_RESULT" = "success" ]; then
             mode=close

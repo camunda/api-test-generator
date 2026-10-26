@@ -30,9 +30,7 @@ does not yet understand a new endpoint, or that the test run itself had a proble
 - PRs that target a `self-managed/*` branch;
 - PRs that change **only** frontend, e2e, docs, `.claude` or `.agents` files. Such a PR cannot affect the API. If it changes even one file elsewhere (backend, the API spec), the check runs.
 
-**When it comments on your PR.** Rarely. Only when your own spec change broke the generator (a new or changed endpoint it
-does not handle yet): it leaves one comment and keeps updating that same comment, so you never get more than one. Every other result is a status plus
-a Slack alert, and a pass says nothing.
+**When it comments on your PR.** Rarely. It leaves a sticky comment (edited in place on later pushes) only when your spec change broke the generator (a new or changed endpoint it does not handle yet). When a later push goes green, the comment is marked as resolved. Every other result is a status plus a Slack alert, and a pass says nothing.
 
 **Does it open a fix PR?** No. The check only reads and reports, and opens issues: `Generator gap on camunda-hub#N` (assigned
 to you when your spec change caused it) and `[hub-pr-check] Coverage gap on camunda-hub#N` when an endpoint has no generated
