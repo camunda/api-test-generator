@@ -1156,64 +1156,6 @@ jobs:
             echo "Commented on camunda-hub#${PR_NUMBER}."
           fi
 
-      # When this PR's own change introduced a likely regression (product category, caused_by_pr,
-      # medium or high confidence), tell the PR author directly — the red commit status says "failed"
-      # but not what or why, and the Slack alert goes to medics, not the author. One sticky comment
-      # per PR (marker-based edit-in-place), resolved on a later green run just like the generator-gap
-      # comment above. Low confidence is excluded: the signal is too weak to put on the author's PR.
-      - name: Tell the camunda-hub PR author a regression was detected
-        if: >-
-          always() && needs.run.result == 'failure' &&
-          needs.validate.outputs.pr_number != '' &&
-          needs.validate.outputs.is_draft != 'true' &&
-          steps.status-token.outputs.token != '' &&
-          needs.classify.outputs.category == 'product' &&
-          needs.classify.outputs.caused_by_pr == 'true' &&
-          needs.classify.outputs.confidence != 'low'
-        continue-on-error: true
-        env:
-          GH_TOKEN: ${{ steps.status-token.outputs.token }}
-          PR_NUMBER: ${{ needs.validate.outputs.pr_number }}
-          SHA: ${{ needs.validate.outputs.source_sha }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          SUMMARY: ${{ needs.classify.outputs.summary }}
-          CONFIDENCE: ${{ needs.classify.outputs.confidence }}
-          AFFECTED_OPS: ${{ needs.classify.outputs.affected_operation_ids }}
-          COOKBOOK_URL: ${{ github.server_url }}/${{ github.repository }}/blob/main/docs/hub-pr-check-cookbook.md
-        run: |
-          set -euo pipefail
-          marker='<!-- api-test-generator:hub-pr-check:product-regression -->'
-          clean() { printf '%s' "$1" | tr '\n' ' ' | tr -d '`@<>' | cut -c"1-$2"; }
-          body_file="$(mktemp)"
-          {
-            echo "$marker"
-            echo "### Generated hub suite: likely regression from this PR"
-            echo
-            echo "The \`api-test-generator/hub-suite\` check on \`${SHA:0:12}\` detected a **likely regression introduced by this PR** (confidence: ${CONFIDENCE}). [View run](${RUN_URL})."
-            if [ -n "$SUMMARY" ]; then
-              echo
-              echo "> $(clean "$SUMMARY" 300)"
-            fi
-            if [ -n "$AFFECTED_OPS" ]; then
-              echo
-              echo "Affected endpoint(s): \`$(clean "$AFFECTED_OPS" 300)\`"
-            fi
-            echo
-            echo "What this means and what to do: [PR-check cookbook](${COOKBOOK_URL})."
-            echo
-            echo "_Posted automatically by api-test-generator's Hub PR check; edited in place on later pushes._"
-          } > "$body_file"
-
-          existing=$(gh api "repos/camunda/camunda-hub/issues/${PR_NUMBER}/comments" --paginate \
-            --jq "[.[] | select(.body | contains(\"${marker}\")) | .id] | first // empty")
-          if [ -n "$existing" ]; then
-            gh api -X PATCH "repos/camunda/camunda-hub/issues/comments/${existing}" -F body=@"$body_file" >/dev/null
-            echo "Updated regression comment ${existing} on camunda-hub#${PR_NUMBER}."
-          else
-            gh api -X POST "repos/camunda/camunda-hub/issues/${PR_NUMBER}/comments" -F body=@"$body_file" >/dev/null
-            echo "Commented on camunda-hub#${PR_NUMBER} about regression."
-          fi
-
       # The sticky comment above is only ever rewritten by a run that still qualifies. When a later
       # push goes green, the old "update api-test-generator first" note would otherwise stay on the PR
       # saying something the latest status no longer supports. Only a green run counts as proof (a
@@ -1244,35 +1186,6 @@ jobs:
           } > "$body_file"
           gh api -X PATCH "repos/camunda/camunda-hub/issues/comments/${id}" -F body=@"$body_file" >/dev/null
           echo "Marked comment ${id} on camunda-hub#${PR_NUMBER} as resolved."
-
-      # Same logic for the product-regression sticky comment: a green run proves the regression
-      # is gone (or was a false positive that a later push no longer triggers).
-      - name: Mark a stale regression comment as resolved
-        if: >-
-          always() && needs.run.result == 'success' &&
-          needs.validate.outputs.pr_number != '' &&
-          steps.status-token.outputs.token != ''
-        continue-on-error: true
-        env:
-          GH_TOKEN: ${{ steps.status-token.outputs.token }}
-          PR_NUMBER: ${{ needs.validate.outputs.pr_number }}
-          SHA: ${{ needs.validate.outputs.source_sha }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: |
-          set -euo pipefail
-          marker='<!-- api-test-generator:hub-pr-check:product-regression -->'
-          id=$(gh api "repos/camunda/camunda-hub/issues/${PR_NUMBER}/comments" --paginate \
-            --jq "[.[] | select(.body | contains(\"${marker}\")) | .id] | first // empty")
-          [ -n "$id" ] || { echo "No sticky regression comment to resolve."; exit 0; }
-          body_file="$(mktemp)"
-          {
-            echo "$marker"
-            echo "### Generated hub suite: regression resolved"
-            echo
-            echo "The latest \`api-test-generator/hub-suite\` run on \`${SHA:0:12}\` passed. The earlier regression warning no longer applies. [Run](${RUN_URL})."
-          } > "$body_file"
-          gh api -X PATCH "repos/camunda/camunda-hub/issues/comments/${id}" -F body=@"$body_file" >/dev/null
-          echo "Marked regression comment ${id} on camunda-hub#${PR_NUMBER} as resolved."
 
       # Slack heads-up, styled after the AlwaysGreen SaaS-E2E failure alert
       # (camunda/c8-cross-component-e2e-tests) but NOT copying its "a

@@ -30,10 +30,7 @@ does not yet understand a new endpoint, or that the test run itself had a proble
 - PRs that target a `self-managed/*` branch;
 - PRs that change **only** frontend, e2e, docs, `.claude` or `.agents` files. Such a PR cannot affect the API. If it changes even one file elsewhere (backend, the API spec), the check runs.
 
-**When it comments on your PR.** Rarely. It leaves a sticky comment (one per kind, edited in place on later pushes) in two cases:
-1. Your spec change broke the generator (a new or changed endpoint it does not handle yet).
-2. The check detected a **likely regression introduced by your PR** (confidence medium or high).
-When a later push goes green, both comments are marked as resolved. Every other result is a status plus a Slack alert, and a pass says nothing.
+**When it comments on your PR.** Rarely. It leaves a sticky comment (edited in place on later pushes) only when your spec change broke the generator (a new or changed endpoint it does not handle yet). When a later push goes green, the comment is marked as resolved. Every other result is a status plus a Slack alert, and a pass says nothing.
 
 **Does it open a fix PR?** No. The check only reads and reports, and opens issues: `Generator gap on camunda-hub#N` (assigned
 to you when your spec change caused it) and `[hub-pr-check] Coverage gap on camunda-hub#N` when an endpoint has no generated
@@ -50,7 +47,7 @@ nightly triage agent when the fix is small and safe.
 | "looks flaky" | A real defect that comes and goes, not something to retry until green: a race or bad wait in a test, or a race or missed signal in Hub | Do not just re-run. Open the failing test in the run's report and look at the passed and failed attempts. If it is a Hub race, it is yours; if the test is at fault, ask in `#ask-qa` (tag `@test-automation-medic`) |
 | "Hub PR image did not start" | Possibly yours: Hub did not become ready | Open the run, find the step "Wait for Hub to be ready", read the startup error |
 | "api-test-generator not yet handling a new/changed endpoint" | The generator's, not a Hub bug | **You act first.** When your spec change caused it, an issue `Generator gap on camunda-hub#N` is opened, and assigned to you if GitHub allows it. `hub-medic` is the backup. Ask in `#ask-qa` (tag `@test-automation-medic`) for help |
-| "Likely a real regression from this PR" | Probably yours | A comment is posted on your PR with the summary and affected endpoints. Read the change the alert points to. The tests are right and Hub now answers differently |
+| "Likely a real regression from this PR" | Probably yours | Read the change the alert points to. The tests are right and Hub now answers differently |
 | "Could not confirm" | Unknown | Open the failing test in the run's report (see [Finding the cause of a red check](#finding-the-cause-of-a-red-check)) |
 | Every test of **one new endpoint** fails with 404, and you added it behind a feature flag | Nobody's bug: the test Hub is not started with your flag on | Add the flag to `docker/docker-compose.hub.yml` **in the api-test-generator repo** (a PR there, then re-run the check), or suppress the endpoint with a reason and an issue. Details under "Common failure patterns" |
 
