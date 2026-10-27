@@ -84,10 +84,10 @@ The Hub team:
 - keeps the Hub settings in `configs/camunda-hub/`. Most coverage gaps are fixed there, and the coverage-fix agent handles many of them;
 - changes the generator when a gap needs new behaviour. The agent only reports those, and a person opens the change. The code is in `request-validation/`, `path-analyser/` and `materializer/`, and [AGENTS.md](../AGENTS.md) lists the rules a change must follow.
 
-**Who gets pinged.** `hub-medic` is pinged for every alert: a failed PR check, a newly filed Hub issue, a fix or suppress PR
+**Who gets pinged.** `hub-medic` is pinged for every alert except presuite: a failed PR check, a newly filed Hub issue, a fix or suppress PR
 that needs review, the spec-bump alert, the re-enable check, the missing-post alert, and the weekly report when it lists gaps.
-`test-automation-medic` is also pinged when a PR check fails before the tests start (a setup problem such as a clone
-token or registry login). A PR check that fails with no test evidence is posted without a ping. When Slack threading
+`test-automation-medic` alone is pinged when a PR check fails before the tests start (a setup problem such as a clone
+token or registry login — shared pipeline, not Hub-owned). A PR check that fails with no test evidence is posted without a ping. When Slack threading
 works, each distinct failure is one reply under the day's message, keyed on the PR and a fingerprint of what failed: a re-run
 with the same fingerprint edits that reply in place rather than posting again, and only a changed failure adds a new reply.
 While the Slack bot lacks that permission, it falls back to a separate message per run. Every PR to this repo requests a review from

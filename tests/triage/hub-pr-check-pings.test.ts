@@ -39,10 +39,14 @@ describe('hub-pr-check Slack pings', () => {
     );
   });
 
-  it('pings hub-medic for every verdict', () => {
+  it('pings hub-medic for every verdict except presuite', () => {
     for (const [category, values] of Object.entries(pings)) {
       expect(values.length, category).toBeGreaterThan(0);
-      for (const value of values) expect(value, category).toContain(HUB);
+      if (category === 'presuite') {
+        for (const value of values) expect(value, category).not.toContain(HUB);
+      } else {
+        for (const value of values) expect(value, category).toContain(HUB);
+      }
     }
   });
 
