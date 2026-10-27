@@ -73,4 +73,17 @@ describe('hub-pr-check Slack pings', () => {
     const escalation = workflow.slice(workflow.indexOf('keeps failing without any test evidence'));
     expect(escalation).toContain('"$hub_medic" "$ta_medic"');
   });
+
+  it('escalation uses distinct markers for presuite vs non-presuite', () => {
+    const escalation = workflow.slice(workflow.indexOf('Escalate a repeated'));
+    const markers = [...escalation.matchAll(/--marker\s+"([^"]+)"/g)].map((m) => m[1]);
+    const CATEGORY = ['$', '{CATEGORY}'].join('');
+    expect(markers.length).toBeGreaterThan(0);
+    for (const marker of markers) {
+      expect(
+        marker,
+        'marker must include CATEGORY so each route gets its own Slack reply',
+      ).toContain(CATEGORY);
+    }
+  });
 });

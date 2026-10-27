@@ -1515,5 +1515,5 @@ jobs:
           node scripts/triage/slack-thread.ts \
             --channel "#camunda-hub-pr-e2e-results" \
             --date "$(date -u +%Y-%m-%d)" \
-            --marker "hub-pr:${PR_NUMBER:-${SHA:0:12}}:escalated" \
+            --marker "hub-pr:${PR_NUMBER:-${SHA:0:12}}:escalated:${CATEGORY}" \
             --text-file "${RUNNER_TEMP}/escalation.txt"
