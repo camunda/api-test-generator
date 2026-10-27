@@ -732,6 +732,8 @@ jobs:
   coverage-gap-tracker:
     name: Track coverage gap as an api-test-generator issue
     needs: [validate, run]
+    timeout-minutes: 5
+    continue-on-error: true
     # unmapped_checked is only ever true once coverage.json was read, so a run
     # that died before the suites (Hub startup) has nothing to track or close.
     if: always() && needs.validate.result == 'success' && needs.validate.outputs.pr_number != '' && needs.run.outputs.unmapped_checked == 'true'
@@ -859,6 +861,8 @@ jobs:
   generator-gap-tracker:
     name: Track a PR-caused generator gap as an issue
     needs: [validate, run, classify]
+    timeout-minutes: 5
+    continue-on-error: true
     if: always() && needs.validate.result == 'success' && needs.validate.outputs.pr_number != '' && needs.validate.outputs.is_draft != 'true'
     runs-on: ubuntu-latest
     outputs:
