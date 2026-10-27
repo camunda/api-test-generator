@@ -1389,7 +1389,9 @@ jobs:
           #  - A failure that left evidence (a failing spec or unmapped operations) is identified by
           #    its fingerprint: the same failing set on a later push edits that reply, a different
           #    one gets a new reply. The medic is pinged on the first.
-          #  - Startup and pre-suite failures are identified by their category, and pinged once.
+          #  - Startup failures are identified by their category, and pinged once.
+          #  - Pre-suite failures use streak mode: not pinged on the first occurrence,
+          #    only after 3 on the same PR in one day (transient infra failures self-heal).
           #  - A failure with NO evidence (no readable report, nothing says what failed) cannot be
           #    told apart from the last push's, and pinging for each push is what flooded the
           #    channel. It shares one reply per PR per day, is not pinged, and only escalates once
@@ -1397,7 +1399,8 @@ jobs:
           #    camunda-hub's AlwaysGreen detector uses before it pages a medic.
           mode=immediate
           case "$CATEGORY" in
-            startup | presuite) fp="none-${CATEGORY}" ;;
+            startup) fp="none-${CATEGORY}" ;;
+            presuite) fp="none-${CATEGORY}"; mode=streak ;;
             *)
               # UNMAPPED comes straight from the suite run, so a coverage gap still counts as
               # evidence when the evidence step itself failed and left OBSERVED empty.
@@ -1413,7 +1416,11 @@ jobs:
           echo "mode=${mode}" >> "$GITHUB_OUTPUT"
 
           if [ "$mode" = "streak" ]; then
-            closing="_No test evidence was produced, so nobody is pinged yet. If it fails like this 3 times today on this PR, test-automation-medic is pinged._"
+            if [ "$CATEGORY" = "presuite" ]; then
+              closing="_A setup step failed (transient infra failures usually self-heal) — nobody is pinged yet. If it fails like this 3 times today on this PR, test-automation-medic is pinged._"
+            else
+              closing="_No test evidence was produced, so nobody is pinged yet. If it fails like this 3 times today on this PR, test-automation-medic is pinged._"
+            fi
           else
             closing="${ping} please take a look."
           fi
