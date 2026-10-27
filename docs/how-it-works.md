@@ -39,7 +39,7 @@ Four more posts show up only when needed:
 |---|---|
 | Red PR check, alert says "likely a real regression" | It is probably your change. Read what the alert points to |
 | Red PR check, alert says "api-test-generator not yet handling a new/changed endpoint" | Not a Hub bug, but you act first: open the generator PR (see the PR check guide). Stuck? Ask in `#ask-qa` (tag `@test-automation-medic`) |
-| Red PR check, alert says "infrastructure failure" | Open the failed step and find the outside cause. Stuck? Ask in `#ask-qa` (tag `@test-automation-medic`) with the run link |
+| Red PR check, alert says "infrastructure failure" | Not yours. Open the failed step and find the outside cause. Stuck? Ask in `#ask-qa` (tag `@test-automation-medic`) with the run link |
 | Nightly post shows failures | Open the triage thread: one line per failure says whose it is |
 | No nightly post in the morning (a 04:30 UTC alert usually says so) | The run or the posting broke, not Hub. See ["When a post is missing"](hub-nightly-cookbook.md#when-a-post-is-missing) in the nightly guide |
 | Spec-bump alert | Hub's API changed. Usually the bot has already opened a PR that updates the pinned spec: review it and merge it. If the alert says it is blocked or the check failed, it links a tracking issue or the run instead (see [the nightly guide](hub-nightly-cookbook.md#the-spec-bump-alert-0300)) |
@@ -82,14 +82,19 @@ The Hub team:
 - reads and acts on every alert on this page, and is the on-call group (`hub-medic`), including for generator and pipeline problems;
 - reviews and merges coverage-fix PRs, and fixes the Hub bugs the tests find;
 - keeps the Hub settings in `configs/camunda-hub/`. Most coverage gaps are fixed there, and the coverage-fix agent handles many of them;
-- puts the `hub` label on every PR for Hub work (the automation does it for its own PRs and issues);
 - changes the generator when a gap needs new behaviour. The agent only reports those, and a person opens the change. The code is in `request-validation/`, `path-analyser/` and `materializer/`, and [AGENTS.md](../AGENTS.md) lists the rules a change must follow.
 
-**Pings are not switched yet.** Some generator alerts still go to `test-automation-medic` instead of `hub-medic`, and three
-posts ping nobody (the spec-bump alert, the re-enable check, the weekly report). The change is tracked in
-[#712](https://github.com/camunda/api-test-generator/issues/712). Until then, whoever is on call as `hub-medic` reads both Slack
-channels each morning: PR-check alerts and the gap digest are in `#camunda-hub-pr-e2e-results`, everything else is in
-`#camunda-hub-nightly-test-results`.
+**Who gets pinged.** `hub-medic` is pinged for every alert except presuite: a failed PR check, a newly filed Hub issue, a fix or suppress PR
+that needs review, the spec-bump alert, the re-enable check, the missing-post alert, and the weekly report when it lists gaps.
+`test-automation-medic` alone is pinged when a PR check fails before the tests start (a setup problem such as a clone
+token or registry login — shared pipeline, not Hub-owned). A PR check that fails with no test evidence is posted without a ping; if the same PR fails 3 times in a day,
+the escalation pings `test-automation-medic` alone for presuite, or both groups for other no-evidence failures. When Slack threading
+works, each distinct failure is one reply under the day's message, keyed on the PR and a fingerprint of what failed: a re-run
+with the same fingerprint edits that reply in place rather than posting again, and only a changed failure adds a new reply.
+While the Slack bot lacks that permission, it falls back to a separate message per run. Every PR to this repo requests a review from
+`@camunda/hub-backend` (see `.github/CODEOWNERS`). The daily gap digest and the coverage-fix agent's thread reply ping nobody
+by name, so whoever is on call as `hub-medic` reads both Slack channels each morning: PR-check alerts and the gap digest
+are in `#camunda-hub-pr-e2e-results`, everything else is in `#camunda-hub-nightly-test-results`.
 
 **Questions or help:** ask in `#ask-qa` and tag `@test-automation-medic`. The enablement team always replies there.
 
@@ -111,5 +116,6 @@ channels each morning: PR-check alerts and the gap digest are in `#camunda-hub-p
 - **Classifier:** the automated step that reads a failed PR check and picks a verdict. It is an AI agent and can be wrong; it is told to answer "unknown" rather than guess.
 - **Ontology:** the config files in `configs/camunda-hub/ontology/` that tell the generator how each resource is created, read, deleted and linked.
 - **Live check:** running the generated suite against a real Hub. `hub-pr-live-check` does it on PRs to this repo and `hub-ondemand-test` does it by hand.
+- **Fingerprint:** the failing tests plus the endpoints with no test. The same fingerprint edits one Slack message instead of posting a new one.
 
 Want to change how the generator works? See the [README](../README.md) and [AGENTS.md](../AGENTS.md).
