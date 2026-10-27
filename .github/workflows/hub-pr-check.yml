@@ -627,11 +627,15 @@ jobs:
 
           "caused_by_pr" decides whether the camunda-hub PR author is told on their PR
           (otherwise only the internal Slack channel hears about it), so be strict. Set it
-          true ONLY when category is "generator-gap" AND every affected operationId is
-          NEW or CHANGED by this PR in the spec diff (steps 0 and 3): the author's own spec
-          change is what the generator cannot yet handle. Set it false for everything else,
-          including a generator gap on an operation this PR did not touch, an unmapped
-          operation that already existed on the base, and any doubt.
+          true when EITHER:
+            - category is "generator-gap" AND every affected operationId is NEW or CHANGED
+              by this PR in the spec diff (steps 0 and 3): the author's own spec change is
+              what the generator cannot yet handle; OR
+            - category is "product" AND the regression is in an endpoint that this PR
+              changed (the PR's own code change broke the existing behaviour).
+          Set it false for everything else, including a generator gap on an operation this
+          PR did not touch, an unmapped operation that already existed on the base, a
+          product regression on an endpoint this PR did not touch, and any doubt.
 
           Write your answer to /tmp/hub-pr-classification.json as EXACTLY this shape,
           nothing else:
@@ -701,8 +705,11 @@ jobs:
             echo "category=${category}"
             echo "confidence=${confidence}"
             echo "summary=${summary}"
-            # Only a confident generator-gap can be pinned on the PR's own change.
+            # A generator-gap (high confidence) or a product regression (medium+
+            # confidence) can be pinned on the PR's own change.
             if [ "$category" = "generator-gap" ] && [ "$confidence" = "high" ]; then
+              echo "caused_by_pr=${caused_by_pr}"
+            elif [ "$category" = "product" ] && [ "$confidence" != "low" ]; then
               echo "caused_by_pr=${caused_by_pr}"
             else
               echo "caused_by_pr=false"
@@ -725,6 +732,8 @@ jobs:
   coverage-gap-tracker:
     name: Track coverage gap as an api-test-generator issue
     needs: [validate, run]
+    timeout-minutes: 5
+    continue-on-error: true
     # unmapped_checked is only ever true once coverage.json was read, so a run
     # that died before the suites (Hub startup) has nothing to track or close.
     if: always() && needs.validate.result == 'success' && needs.validate.outputs.pr_number != '' && needs.run.outputs.unmapped_checked == 'true'
@@ -852,6 +861,8 @@ jobs:
   generator-gap-tracker:
     name: Track a PR-caused generator gap as an issue
     needs: [validate, run, classify]
+    timeout-minutes: 5
+    continue-on-error: true
     if: always() && needs.validate.result == 'success' && needs.validate.outputs.pr_number != '' && needs.validate.outputs.is_draft != 'true'
     runs-on: ubuntu-latest
     outputs:
@@ -882,6 +893,7 @@ jobs:
           PR_AUTHOR: ${{ needs.validate.outputs.pr_author }}
           SHA: ${{ needs.validate.outputs.source_sha }}
           RUN_RESULT: ${{ needs.run.result }}
+          CATEGORY: ${{ needs.classify.outputs.category }}
           CAUSED: ${{ needs.classify.outputs.caused_by_pr }}
           OPS: ${{ needs.classify.outputs.affected_operation_ids }}
           SUMMARY: ${{ needs.classify.outputs.summary }}
@@ -901,11 +913,11 @@ jobs:
           existing="${found%% *}"
           existing_state="${found##* }"
 
-          # Open only on a confident, PR-caused gap. Close only on a GREEN run: caused_by_pr is false
-          # for every low-confidence or unknown classification too, so a later failed run that is
-          # merely uncertain does not show the tracked operations are fine. Anything else leaves
-          # the issue as it is.
-          if [ "$CAUSED" = "true" ]; then
+          # Open only on a confident, PR-caused generator gap. Close only on a GREEN run:
+          # caused_by_pr is false for every low-confidence or unknown classification too,
+          # so a later failed run that is merely uncertain does not show the tracked
+          # operations are fine. Anything else leaves the issue as it is.
+          if [ "$CAUSED" = "true" ] && [ "$CATEGORY" = "generator-gap" ]; then
             mode=open
           elif [ "$RUN_RESULT" = "success" ]; then
             mode=close
@@ -1273,7 +1285,7 @@ jobs:
               ;;
             presuite)
               verdict="The run failed before the suites started, in a setup step (checkout, clone, install, registry login or image pull) rather than in Hub itself. Check the run to see which step."
-              ping="${hub_medic} ${ta_medic}"
+              ping="${ta_medic}"
               ;;
             product)
               verdict="Likely a real regression from this PR (confidence: ${CONFIDENCE}). ${SUMMARY}"
@@ -1370,7 +1382,9 @@ jobs:
           #  - A failure that left evidence (a failing spec or unmapped operations) is identified by
           #    its fingerprint: the same failing set on a later push edits that reply, a different
           #    one gets a new reply. The medic is pinged on the first.
-          #  - Startup and pre-suite failures are identified by their category, and pinged once.
+          #  - Startup failures are identified by their category, and pinged once.
+          #  - Pre-suite failures use streak mode: not pinged on the first occurrence,
+          #    only after 3 on the same PR in one day (transient infra failures self-heal).
           #  - A failure with NO evidence (no readable report, nothing says what failed) cannot be
           #    told apart from the last push's, and pinging for each push is what flooded the
           #    channel. It shares one reply per PR per day, is not pinged, and only escalates once
@@ -1378,7 +1392,8 @@ jobs:
           #    camunda-hub's AlwaysGreen detector uses before it pages a medic.
           mode=immediate
           case "$CATEGORY" in
-            startup | presuite) fp="none-${CATEGORY}" ;;
+            startup) fp="none-${CATEGORY}" ;;
+            presuite) fp="none-${CATEGORY}"; mode=streak ;;
             *)
               # UNMAPPED comes straight from the suite run, so a coverage gap still counts as
               # evidence when the evidence step itself failed and left OBSERVED empty.
@@ -1394,7 +1409,11 @@ jobs:
           echo "mode=${mode}" >> "$GITHUB_OUTPUT"
 
           if [ "$mode" = "streak" ]; then
-            closing="_No test evidence was produced, so nobody is pinged yet. If it fails like this 3 times today on this PR, hub-medic and test-automation-medic are pinged._"
+            if [ "$CATEGORY" = "presuite" ]; then
+              closing="_A setup step failed (transient infra failures usually self-heal) — nobody is pinged yet. If it fails like this 3 times today on this PR, test-automation-medic is pinged._"
+            else
+              closing="_No test evidence was produced, so nobody is pinged yet. If it fails like this 3 times today on this PR, hub-medic and test-automation-medic are pinged._"
+            fi
           else
             closing="${ping} please take a look."
           fi
