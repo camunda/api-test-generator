@@ -87,7 +87,8 @@ The Hub team:
 **Who gets pinged.** `hub-medic` is pinged for every alert except presuite: a failed PR check, a newly filed Hub issue, a fix or suppress PR
 that needs review, the spec-bump alert, the re-enable check, the missing-post alert, and the weekly report when it lists gaps.
 `test-automation-medic` alone is pinged when a PR check fails before the tests start (a setup problem such as a clone
-token or registry login — shared pipeline, not Hub-owned). A PR check that fails with no test evidence is posted without a ping. When Slack threading
+token or registry login — shared pipeline, not Hub-owned). A PR check that fails with no test evidence is posted without a ping; if the same PR fails 3 times in a day,
+the escalation pings `test-automation-medic` alone for presuite, or both groups for other no-evidence failures. When Slack threading
 works, each distinct failure is one reply under the day's message, keyed on the PR and a fingerprint of what failed: a re-run
 with the same fingerprint edits that reply in place rather than posting again, and only a changed failure adds a new reply.
 While the Slack bot lacks that permission, it falls back to a separate message per run. Every PR to this repo requests a review from

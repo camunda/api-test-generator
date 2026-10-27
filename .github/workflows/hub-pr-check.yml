@@ -1407,6 +1407,7 @@ jobs:
           esac
           echo "marker=hub-pr:${PR_NUMBER:-${SHA:0:12}}:fp:${fp}" >> "$GITHUB_OUTPUT"
           echo "mode=${mode}" >> "$GITHUB_OUTPUT"
+          echo "category=${CATEGORY}" >> "$GITHUB_OUTPUT"
 
           if [ "$mode" = "streak" ]; then
             if [ "$CATEGORY" = "presuite" ]; then
@@ -1498,13 +1499,19 @@ jobs:
           PR_NUMBER: ${{ needs.validate.outputs.pr_number }}
           SHA: ${{ needs.validate.outputs.source_sha }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          CATEGORY: ${{ steps.msg.outputs.category }}
         run: |
           set -euo pipefail
           hub_medic='<!subteam^S014VK4482H|hub-medic>'
           ta_medic='<!subteam^S09UF0EV0HG|test-automation-medic>'
           pr_ref="${PR_NUMBER:+<https://github.com/camunda/camunda-hub/pull/${PR_NUMBER}|#${PR_NUMBER}>}"
-          printf ':rotating_light: *Generated hub suite keeps failing without any test evidence* — camunda-hub PR %s has failed 3 times today and none of those runs left evidence of a failing test. That points at the pipeline (Hub start, report upload, run summary or the runner) rather than at the PR. <%s|Latest run>\n\n%s %s please take a look.\n' \
-            "${pr_ref:-(PR number unavailable)}" "$RUN_URL" "$hub_medic" "$ta_medic" > "${RUNNER_TEMP}/escalation.txt"
+          if [ "$CATEGORY" = "presuite" ]; then
+            printf ':rotating_light: *A setup step keeps failing* — camunda-hub PR %s has failed before the suites started 3 times today. That points at shared pipeline infrastructure (checkout, clone token, registry login) rather than at the PR. <%s|Latest run>\n\n%s please take a look.\n' \
+              "${pr_ref:-(PR number unavailable)}" "$RUN_URL" "$ta_medic" > "${RUNNER_TEMP}/escalation.txt"
+          else
+            printf ':rotating_light: *Generated hub suite keeps failing without any test evidence* — camunda-hub PR %s has failed 3 times today and none of those runs left evidence of a failing test. That points at the pipeline (Hub start, report upload, run summary or the runner) rather than at the PR. <%s|Latest run>\n\n%s %s please take a look.\n' \
+              "${pr_ref:-(PR number unavailable)}" "$RUN_URL" "$hub_medic" "$ta_medic" > "${RUNNER_TEMP}/escalation.txt"
+          fi
           node scripts/triage/slack-thread.ts \
             --channel "#camunda-hub-pr-e2e-results" \
             --date "$(date -u +%Y-%m-%d)" \

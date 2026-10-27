@@ -59,7 +59,17 @@ describe('hub-pr-check Slack pings', () => {
     }
   });
 
-  it('pings both groups when the run keeps failing with no evidence', () => {
+  it('escalation pings only test-automation-medic for presuite', () => {
+    const escalation = workflow.slice(workflow.indexOf('Escalate a repeated'));
+    const presuiteBlock = escalation.slice(
+      escalation.indexOf('CATEGORY" = "presuite"'),
+      escalation.indexOf('else'),
+    );
+    expect(presuiteBlock).toContain('$ta_medic');
+    expect(presuiteBlock).not.toContain('$hub_medic');
+  });
+
+  it('escalation pings both groups for non-presuite no-evidence failures', () => {
     const escalation = workflow.slice(workflow.indexOf('keeps failing without any test evidence'));
     expect(escalation).toContain('"$hub_medic" "$ta_medic"');
   });
