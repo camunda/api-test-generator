@@ -907,9 +907,13 @@
     {
       "operationId": "cancelProcessInstancesBatchOperation",
       "scenarioKinds": [
-        "constraint-violation"
+        {
+          "kind": "constraint-violation",
+          "targets": ["operationReference"],
+          "constraintKinds": ["belowMinimum", "wayBelowMinimum"]
+        }
       ],
-      "reason": "operationReference declares minimum: 1 in the spec, but cancelProcessInstancesBatchOperation's request validator never calls RequestValidator.validateOperationReference for it (camunda/camunda#58942), so operationReference: 0 or a negative value is forwarded instead of rejected — the request reaches the lookup/dispatch step and 404s instead of 400ing up front. Narrowed to this scenario kind only; operationReference is the only constrained field on this body, so no other negative coverage is affected.",
+      "reason": "operationReference declares minimum: 1 in the spec, but cancelProcessInstancesBatchOperation's request validator never calls RequestValidator.validateOperationReference for it (camunda/camunda#58942), so an integer value of 0 or -99 is forwarded instead of rejected — the request is dispatched instead of 400ing up front. Scoped to just those two constraint kinds on operationReference; filter.tags' maxItems/uniqueItems/pattern constraint-violation coverage on the same body is unaffected.",
       "knownIssue": {
         "summary": "operationReference's minimum:1 constraint isn't enforced on several job/incident/process-instance/decision-instance operations — 0 or negative values are forwarded instead of being rejected; a single-resource lookup operation (e.g. deleteProcessInstance, resolveIncident, updateJob, deleteDecisionInstance) 404s (resource lookup runs first) instead of 400ing up front, while a filter-based batch operation (no synchronous resource lookup) returns 200 and creates the batch instead of 400ing up front",
         "url": "https://github.com/camunda/camunda/issues/58942"
@@ -929,9 +933,13 @@
     {
       "operationId": "deleteProcessInstancesBatchOperation",
       "scenarioKinds": [
-        "constraint-violation"
+        {
+          "kind": "constraint-violation",
+          "targets": ["operationReference"],
+          "constraintKinds": ["belowMinimum", "wayBelowMinimum"]
+        }
       ],
-      "reason": "operationReference declares minimum: 1 in the spec, but deleteProcessInstancesBatchOperation's request validator never calls RequestValidator.validateOperationReference for it (camunda/camunda#58942), so operationReference: 0 or a negative value is forwarded instead of rejected — the request reaches the lookup/dispatch step and 404s instead of 400ing up front. Narrowed to this scenario kind only; operationReference is the only constrained field on this body, so no other negative coverage is affected.",
+      "reason": "operationReference declares minimum: 1 in the spec, but deleteProcessInstancesBatchOperation's request validator never calls RequestValidator.validateOperationReference for it (camunda/camunda#58942), so an integer value of 0 or -99 is forwarded instead of rejected — the request is dispatched instead of 400ing up front. Scoped to just those two constraint kinds on operationReference; filter.tags' maxItems/uniqueItems/pattern constraint-violation coverage on the same body is unaffected.",
       "knownIssue": {
         "summary": "operationReference's minimum:1 constraint isn't enforced on several job/incident/process-instance/decision-instance operations — 0 or negative values are forwarded instead of being rejected; a single-resource lookup operation (e.g. deleteProcessInstance, resolveIncident, updateJob, deleteDecisionInstance) 404s (resource lookup runs first) instead of 400ing up front, while a filter-based batch operation (no synchronous resource lookup) returns 200 and creates the batch instead of 400ing up front",
         "url": "https://github.com/camunda/camunda/issues/58942"
@@ -955,9 +963,13 @@
     {
       "operationId": "resumeProcessInstancesBatchOperation",
       "scenarioKinds": [
-        "constraint-violation"
+        {
+          "kind": "constraint-violation",
+          "targets": ["operationReference"],
+          "constraintKinds": ["belowMinimum", "wayBelowMinimum"]
+        }
       ],
-      "reason": "operationReference declares minimum: 1 in the spec, but resumeProcessInstancesBatchOperation's request validator never calls RequestValidator.validateOperationReference for it (camunda/camunda#58942), so operationReference: 0 or a negative value is forwarded instead of rejected — the request reaches the lookup/dispatch step and 404s instead of 400ing up front. Narrowed to this scenario kind only; operationReference is the only constrained field on this body, so no other negative coverage is affected.",
+      "reason": "operationReference declares minimum: 1 in the spec, but resumeProcessInstancesBatchOperation's request validator never calls RequestValidator.validateOperationReference for it (camunda/camunda#58942), so an integer value of 0 or -99 is forwarded instead of rejected — the request is dispatched instead of 400ing up front. Scoped to just those two constraint kinds on operationReference; filter.tags' maxItems/uniqueItems/pattern constraint-violation coverage on the same body is unaffected.",
       "knownIssue": {
         "summary": "operationReference's minimum:1 constraint isn't enforced on several job/incident/process-instance/decision-instance operations — 0 or negative values are forwarded instead of being rejected; a single-resource lookup operation (e.g. deleteProcessInstance, resolveIncident, updateJob, deleteDecisionInstance) 404s (resource lookup runs first) instead of 400ing up front, while a filter-based batch operation (no synchronous resource lookup) returns 200 and creates the batch instead of 400ing up front",
         "url": "https://github.com/camunda/camunda/issues/58942"
@@ -966,9 +978,13 @@
     {
       "operationId": "suspendProcessInstancesBatchOperation",
       "scenarioKinds": [
-        "constraint-violation"
+        {
+          "kind": "constraint-violation",
+          "targets": ["operationReference"],
+          "constraintKinds": ["belowMinimum", "wayBelowMinimum"]
+        }
       ],
-      "reason": "operationReference declares minimum: 1 in the spec, but suspendProcessInstancesBatchOperation's request validator never calls RequestValidator.validateOperationReference for it (camunda/camunda#58942), so operationReference: 0 or a negative value is forwarded instead of rejected — the request reaches the lookup/dispatch step and 404s instead of 400ing up front. Narrowed to this scenario kind only; operationReference is the only constrained field on this body, so no other negative coverage is affected.",
+      "reason": "operationReference declares minimum: 1 in the spec, but suspendProcessInstancesBatchOperation's request validator never calls RequestValidator.validateOperationReference for it (camunda/camunda#58942), so an integer value of 0 or -99 is forwarded instead of rejected — the request is dispatched instead of 400ing up front. Scoped to just those two constraint kinds on operationReference; filter.tags' maxItems/uniqueItems/pattern constraint-violation coverage on the same body is unaffected.",
       "knownIssue": {
         "summary": "operationReference's minimum:1 constraint isn't enforced on several job/incident/process-instance/decision-instance operations — 0 or negative values are forwarded instead of being rejected; a single-resource lookup operation (e.g. deleteProcessInstance, resolveIncident, updateJob, deleteDecisionInstance) 404s (resource lookup runs first) instead of 400ing up front, while a filter-based batch operation (no synchronous resource lookup) returns 200 and creates the batch instead of 400ing up front",
         "url": "https://github.com/camunda/camunda/issues/58942"
