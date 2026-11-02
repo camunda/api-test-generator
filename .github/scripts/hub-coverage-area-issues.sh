@@ -37,13 +37,14 @@ while read -r entry; do
       continue
     fi
     url=$(gh issue create --title "$title" --body-file "$file" \
-      --label missing-coverage --label auto-generated --label hub)
+      --label missing-coverage --label auto-generated --label hub --label team/hub)
     new=$((new + 1))
   else
     num=${found% *}
     state=${found#* }
     [ "$state" = "OPEN" ] || gh issue reopen "$num"
-    gh issue edit "$num" --body-file "$file"
+    # Add team/hub on the edit path too, so a pre-existing open area issue also lands on the Hub board.
+    gh issue edit "$num" --body-file "$file" --add-label team/hub
     gh issue comment "$num" --body "Re-checked on $today: still missing. $RUN_URL"
     url="$REPO_URL/issues/$num"
   fi

@@ -20,7 +20,7 @@ Workflow: [`hub-response-coverage.yml`](../.github/workflows/hub-response-covera
 
 The report job starts at 05:00 UTC on Monday, and the Slack message and issues appear when it finishes. The coverage-fix agent starts after that.
 
-**Who acts.** The Hub team. Nobody is pinged: the Slack message is a plain post, and the area issues have no assignee. Someone on the Hub team (the person on call as `hub-medic`) reads the channel on Monday and picks up the gaps and the agent's draft PRs.
+**Who acts.** The Hub team. The tracking issue and the per-area issues carry the `team/hub` label, so — once the Hub project has an auto-add rule on `label:team/hub` — they land on the Hub team board automatically and stay there until closed, rather than depending on someone noticing the Monday message. They still have no individual assignee; the team picks them up from the board. `hub-medic` is **@-mentioned only when coverage regressed since last week** (fewer endpoints fully tested, fewer with all bad-request kinds, more endpoints with no test, or a new endpoint shipped untested); on a flat or improving week the message posts with no mention. The agent's draft PRs are listed in the thread under the weekly message as before.
 
 ### Reading the Slack message
 
