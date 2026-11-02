@@ -745,9 +745,12 @@ place and marked resolved on a green run:
 
 - marker `api-test-generator:hub-pr-check:generator-gap` — for a `generator-gap`
   (which also covers a **coverage gap the PR introduced**, labelled `generator-gap`
-  for an unmapped new/changed operation): says api-test-generator must be updated
-  first and links the coverage-gap tracking issue (the reverse of AlwaysGreen's
-  "hub PR must not merge first" note);
+  for an unmapped new/changed operation): says this is a test-generator gap, not a
+  Hub bug, and the check does not block merging; api-test-generator needs a
+  follow-up (linked to the coverage-gap tracking issue) that lands **after** the
+  Hub PR merges and the spec pin is bumped — the generator PR is last, because its
+  checks read the pinned spec and cannot name an operation that is not in it yet
+  (merge order: Hub PR → pin bump → generator PR);
 - marker `api-test-generator:hub-pr-check:regression` — for a `product` regression:
   says the fix is in the PR's own Hub code, not api-test-generator.
 

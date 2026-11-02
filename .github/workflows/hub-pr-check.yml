@@ -1093,14 +1093,16 @@ jobs:
             -f description="$description" >/dev/null
           echo "Reported '${state}' (${description}) on camunda-hub@${SHA:0:12}"
 
-      # Ported from camunda-hub's AlwaysGreen fix agent, whose shared-repo fix PRs must say the
-      # hub PR "must not merge first": here the roles are reversed. Only when the PR's OWN spec
-      # change is what the generator cannot yet handle (classify's caused_by_pr, high-confidence
-      # generator-gap) is the author told on their own PR; every other failure, including a gap
-      # on an operation the PR did not touch, goes to Slack only. The author is told with a link to the api-test-generator issue that has to be resolved
-      # first, instead of finding out from a red status. One comment per PR, edited in place so
-      # a dozen pushes leave one comment. Never fails the check: the qa-processes App may lack
-      # Issues/Pull requests: write on camunda-hub (unconfirmed), in which case it just warns.
+      # When the PR's OWN spec change is what the generator cannot yet handle (classify's
+      # caused_by_pr, high-confidence generator-gap — this also covers a coverage gap the PR
+      # introduced), the author is told on their own PR instead of finding out from a red status, and
+      # the Slack alert for this case is suppressed (see the Slack steps below). The note links the
+      # api-test-generator tracking issue and makes clear the generator follow-up lands AFTER this PR
+      # merges and the pin is bumped (merge order: Hub PR -> pin bump -> generator PR; the check does
+      # not block merging). Every other failure, including a gap on an operation the PR did not
+      # touch, goes to Slack. One comment per PR, edited in place so a dozen pushes leave one comment.
+      # Never fails the check: the qa-processes App may lack Issues/Pull requests: write on
+      # camunda-hub (unconfirmed), in which case it just warns.
       - name: Tell the camunda-hub PR author this is a test-generator gap, not a Hub bug
         if: >-
           always() && needs.run.result == 'failure' &&
