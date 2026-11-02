@@ -22,6 +22,7 @@ interface Step {
   name?: string;
   uses?: string;
   if?: string;
+  run?: string;
   continueOnError: boolean;
   outcomes?: string;
 }
@@ -37,6 +38,7 @@ function toStep(raw: unknown): Step[] {
       name: str(raw.name),
       uses: str(raw.uses),
       if: str(raw.if),
+      run: str(raw.run),
       continueOnError: raw['continue-on-error'] === true,
       outcomes: isRecord(raw.with) ? str(raw.with.outcomes) : undefined,
     },
@@ -193,6 +195,19 @@ describe('the verdict comment on a failing camunda-hub PR', () => {
     // category or on caused_by_pr — every failing PR gets one, tagging the author.
     expect(gate).not.toContain('caused_by_pr');
     expect(gate).not.toContain('category ==');
+  });
+
+  it('posts a fresh comment when the failure changes, keyed on the classify fingerprint', () => {
+    const text = readFileSync(join(root, '.github/workflows/hub-pr-check.yml'), 'utf8');
+    // The fingerprint (failing specs + unmapped ops) is plumbed in, and the comment's identity marker
+    // keys on it, so a different failure posts a NEW comment (a fresh notification) rather than
+    // silently editing the existing one — and the same failure re-running edits in place.
+    expect(text).toMatch(/FINGERPRINT:\s*\$\{\{\s*needs\.classify\.outputs\.fingerprint\s*\}\}/);
+    expect(text).toContain('a different failure posts a new comment');
+    // The step both edits (same fp) and posts fresh (changed fp) — not edit-only.
+    const run = typeof comment?.run === 'string' ? comment.run : '';
+    expect(run).toContain('-X PATCH');
+    expect(run).toContain('-X POST');
   });
 
   it('excludes a presuite (setup-step) failure — that stays Slack-only, pinging automation', () => {
