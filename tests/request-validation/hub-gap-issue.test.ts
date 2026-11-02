@@ -404,18 +404,25 @@ describe('the tracking issue is an index of the area issues', () => {
   });
 });
 
-/** Runs slack() on a made-up summary; `prev` is the previous report's summary or null. */
-function slackText(summary: Record<string, unknown>, prev: Record<string, unknown> | null): string {
+/**
+ * Runs slack() on a made-up summary; `prev` is the previous report's summary or null. `mention` is the
+ * subteam handle the workflow passes via --regression-mention (empty string = none, the default).
+ */
+function slackText(
+  summary: Record<string, unknown>,
+  prev: Record<string, unknown> | null,
+  mention = '',
+): string {
   const code = [
     'import sys, json, types, importlib.util',
     `spec = importlib.util.spec_from_file_location('h', ${JSON.stringify(script)})`,
     'h = importlib.util.module_from_spec(spec); spec.loader.exec_module(h)',
     'd = json.load(sys.stdin)',
-    "args = types.SimpleNamespace(spec_ref='abcdef1234', run_url='http://run', tracking_url='http://track')",
+    "args = types.SimpleNamespace(spec_ref='abcdef1234', run_url='http://run', tracking_url='http://track', regression_mention=d['m'])",
     "sys.stdout.write(h.slack(d['s'], d['p'], args))",
   ].join('\n');
   return execFileSync('python3', ['-B', '-c', code], {
-    input: JSON.stringify({ s: summary, p: prev }),
+    input: JSON.stringify({ s: summary, p: prev, m: mention }),
     encoding: 'utf8',
   });
 }
@@ -548,6 +555,57 @@ describe('weekly Slack message', () => {
     expect(text).toContain('<http://run|Full table>');
     expect(text).toContain('<http://track|Tracking issue>');
     expect(text).toContain('|📖 Guide>');
+  });
+});
+
+describe('weekly Slack message pings only on a regression', () => {
+  const HANDLE = '<!subteam^S014VK4482H|hub-medic>';
+  // A regression ping is the :rotating_light: line; it must carry the handle, and a quiet week must not,
+  // so assert both halves together on every case.
+  const pinged = (
+    summary: Record<string, unknown>,
+    prev: Record<string, unknown> | null,
+    mention = HANDLE,
+  ): boolean => {
+    const text = slackText(summary, prev, mention);
+    const alerted = text.includes(':rotating_light:');
+    expect(text.includes(mention) && mention !== '').toBe(alerted);
+    return alerted;
+  };
+
+  it('pings when fewer endpoints are fully tested than last week', () => {
+    expect(pinged(baseSummary({ fullyAsserted: 7 }), baseSummary())).toBe(true);
+  });
+
+  it('pings when fewer endpoints have every bad-request kind than last week', () => {
+    expect(pinged(baseSummary({ requestChecks: [4, 10] }), baseSummary())).toBe(true);
+  });
+
+  it('pings when more endpoints have no test at all than last week', () => {
+    expect(pinged(baseSummary({ zeroTestOperations: ['a'] }), baseSummary())).toBe(true);
+  });
+
+  it('pings on a brand-new endpoint shipped untested, even at an unchanged no-test count', () => {
+    // Equal-count swap: an old untested op gained a test while a new op shipped with none.
+    const cur = baseSummary({ operationIds: ['b', 'c'], zeroTestOperations: ['c'] });
+    const prev = baseSummary({ operationIds: ['a', 'b'], zeroTestOperations: ['a'] });
+    expect(pinged(cur, prev)).toBe(true);
+  });
+
+  it('stays quiet on a flat week', () => {
+    expect(pinged(baseSummary(), baseSummary())).toBe(false);
+  });
+
+  it('stays quiet on an improving week', () => {
+    expect(pinged(baseSummary({ fullyAsserted: 9 }), baseSummary())).toBe(false);
+  });
+
+  it('stays quiet when there is no previous report to compare against', () => {
+    expect(pinged(baseSummary({ fullyAsserted: 7 }), null)).toBe(false);
+  });
+
+  it('never pings when the workflow passes no handle, even on a clear regression', () => {
+    expect(pinged(baseSummary({ fullyAsserted: 7 }), baseSummary(), '')).toBe(false);
   });
 });
 
