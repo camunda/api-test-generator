@@ -1101,7 +1101,7 @@ jobs:
       # first, instead of finding out from a red status. One comment per PR, edited in place so
       # a dozen pushes leave one comment. Never fails the check: the qa-processes App may lack
       # Issues/Pull requests: write on camunda-hub (unconfirmed), in which case it just warns.
-      - name: Tell the camunda-hub PR author the generator must be updated first
+      - name: Tell the camunda-hub PR author this is a test-generator gap, not a Hub bug
         if: >-
           always() && needs.run.result == 'failure' &&
           needs.validate.outputs.pr_number != '' &&
@@ -1131,7 +1131,7 @@ jobs:
           body_file="$(mktemp)"
           {
             echo "$marker"
-            echo "### Generated hub suite: update api-test-generator first"
+            echo "### Generated hub suite: test-generator gap (not a Hub bug)"
             echo
             echo "The \`api-test-generator/hub-suite\` check on \`${SHA:0:12}\` looks like the **test generator not yet handling this PR's API change**, not a Hub bug. [Run](${RUN_URL})."
             # Tag the author directly (not via clean(), which strips '@'); pr_author is charset-validated.
@@ -1149,9 +1149,9 @@ jobs:
             fi
             echo
             if [ -n "$ISSUE_URL" ]; then
-              echo "api-test-generator must be updated first (tracked at ${ISSUE_URL}); until then this check cannot validate the affected operations."
+              echo "This check does not block merging. api-test-generator needs a follow-up to cover the affected operations (tracked at ${ISSUE_URL}); it lands after this PR merges and the spec pin is bumped — see the merge order in the cookbook below."
             else
-              echo "api-test-generator must be updated first; until then this check cannot validate the affected operations."
+              echo "This check does not block merging. api-test-generator needs a follow-up to cover the affected operations; it lands after this PR merges and the spec pin is bumped — see the merge order in the cookbook below."
             fi
             echo
             echo "What this means and what to do: [PR-check cookbook](https://github.com/camunda/api-test-generator/blob/main/docs/hub-pr-check-cookbook.md)."
@@ -1170,7 +1170,7 @@ jobs:
           fi
 
       # The sticky comment above is only ever rewritten by a run that still qualifies. When a later
-      # push goes green, the old "update api-test-generator first" note would otherwise stay on the PR
+      # push goes green, the old test-generator-gap note would otherwise stay on the PR
       # saying something the latest status no longer supports. Only a green run counts as proof (a
       # failed run that is merely classified differently proves nothing about the earlier gap).
       - name: Mark a stale generator-gap comment as resolved
@@ -1195,7 +1195,7 @@ jobs:
             echo "$marker"
             echo "### Generated hub suite: resolved"
             echo
-            echo "The latest \`api-test-generator/hub-suite\` run on \`${SHA:0:12}\` passed, so the earlier note that api-test-generator had to be updated first no longer applies. [Run](${RUN_URL})."
+            echo "The latest \`api-test-generator/hub-suite\` run on \`${SHA:0:12}\` passed, so the earlier test-generator-gap note no longer applies. [Run](${RUN_URL})."
           } > "$body_file"
           gh api -X PATCH "repos/camunda/camunda-hub/issues/comments/${id}" -F body=@"$body_file" >/dev/null
           echo "Marked comment ${id} on camunda-hub#${PR_NUMBER} as resolved."
