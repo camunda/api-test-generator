@@ -1126,6 +1126,9 @@ jobs:
           # startup / presuite categories itself, exactly as the Slack step does.
           HUB_START_FAILED: ${{ needs.run.outputs.hub_start_failed }}
           SUITES_RAN: ${{ needs.run.outputs.suites_ran }}
+          # #480: a pure coverage gap fails the job internally but is REPORTED success (green) on the
+          # PR, so the comment must not say "failed" in that case.
+          COVERAGE_GAP_ONLY: ${{ needs.run.outputs.coverage_gap_only }}
           ISSUE_URL: ${{ needs.generator-gap-tracker.outputs.issue_url || needs.coverage-gap-tracker.outputs.issue_url }}
           # Charset-validated to ^[A-Za-z0-9]([A-Za-z0-9-]{0,38})$ in the validate job, so it is safe
           # to interpolate directly as @mention (empty for bots / non-plain logins / lookup failure).
@@ -1190,12 +1193,21 @@ jobs:
               tag=soft ;;
           esac
 
+          # A pure coverage gap (#480) fails the job internally but is reported success (green) on the
+          # PR, so the comment must not say "failed" and contradict the green check. The category is
+          # generator-gap in that case, whose verdict wording already fits a missing test.
+          lead="The \`api-test-generator/hub-suite\` check on \`${SHA:0:12}\` failed."
+          if [ "$COVERAGE_GAP_ONLY" = "true" ]; then
+            heading="Generated hub suite: coverage gap (passed, but an endpoint has no test yet)"
+            lead="The \`api-test-generator/hub-suite\` check on \`${SHA:0:12}\` passed, but an endpoint has no generated test yet."
+          fi
+
           body_file="$(mktemp)"
           {
             echo "$marker"
             echo "### ${heading}"
             echo
-            echo "The \`api-test-generator/hub-suite\` check on \`${SHA:0:12}\` failed. ${verdict} [Run](${RUN_URL})."
+            echo "${lead} ${verdict} [Run](${RUN_URL})."
             # Tag the author directly (not via clean(), which strips '@'); pr_author is charset-validated.
             if [ -n "$PR_AUTHOR" ]; then
               echo
