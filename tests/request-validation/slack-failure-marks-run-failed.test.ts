@@ -197,17 +197,17 @@ describe('the verdict comment on a failing camunda-hub PR', () => {
     expect(gate).not.toContain('category ==');
   });
 
-  it('posts a fresh comment when the failure changes, keyed on the classify fingerprint', () => {
-    const text = readFileSync(join(root, '.github/workflows/hub-pr-check.yml'), 'utf8');
-    // The fingerprint (failing specs + unmapped ops) is plumbed in, and the comment's identity marker
-    // keys on it, so a different failure posts a NEW comment (a fresh notification) rather than
-    // silently editing the existing one — and the same failure re-running edits in place.
-    expect(text).toMatch(/FINGERPRINT:\s*\$\{\{\s*needs\.classify\.outputs\.fingerprint\s*\}\}/);
-    expect(text).toContain('a different failure posts a new comment');
-    // The step both edits (same fp) and posts fresh (changed fp) — not edit-only.
+  it('posts a fresh comment on every failing push (never a silent edit that can be missed)', () => {
+    // A silent edit sends no GitHub notification, so a repeat or changed verdict could be missed. The
+    // step removes the prior verdict comment and POSTs a fresh one each failing push, so every push
+    // notifies the author — it must DELETE then POST, and must not PATCH (edit) the failure comment.
     const run = typeof comment?.run === 'string' ? comment.run : '';
-    expect(run).toContain('-X PATCH');
+    expect(run, 'a verdict comment step must exist').not.toBe('');
+    expect(run).toContain('-X DELETE');
     expect(run).toContain('-X POST');
+    expect(run).not.toContain('-X PATCH');
+    const text = readFileSync(join(root, '.github/workflows/hub-pr-check.yml'), 'utf8');
+    expect(text).toContain('re-posted on each failing push');
   });
 
   it('excludes a presuite (setup-step) failure — that stays Slack-only, pinging automation', () => {

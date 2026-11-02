@@ -739,15 +739,15 @@ failing (non-draft) run `report` leaves ONE sticky comment on the camunda-hub PR
 that **@-tags the PR author** (`pr_author`, charset-validated in `validate`) and
 **suppresses the Slack alert** — a PR-check failure is the author's to look at on
 their own PR, not something to page `hub-medic` over (the nightly, not this PR
-check, is what pages the medic for failures on `main`). The comment is keyed on a
-**fingerprint** (the classify fingerprint — failing specs + unmapped ops — plus the
-category): the **same** failure re-running on a later push edits the existing comment
-in place (no re-ping, no one-comment-per-push spam), but a **different** failure (a
-different failing set, or a different verdict on the same set) **posts a new comment**
-so a changed verdict notifies the author instead of being silently edited past them;
-the prior comment is marked superseded. All are marked resolved on a green run. The
-comment's wording follows the `classify` verdict and how actionable it is for the
-author:
+check, is what pages the medic for failures on `main`). A **fresh comment is posted on
+every failing push** — the step removes the prior verdict comment and POSTs a new one
+each time — because editing a comment in place sends no GitHub notification, so a
+repeat or a changed verdict could be silently edited past the author and missed; a new
+POST (and its @mention) always notifies, and deleting the prior keeps exactly one
+verdict comment on the PR (the delete is best-effort: if refused, the fresh comment
+still posts). A green run edits that comment to "resolved" (good news needs no new
+ping). The comment's wording follows the `classify` verdict and how actionable it is
+for the author:
 
 - a **`product`** regression at high confidence — "this one is yours: the fix is in
   this PR's own Hub code";

@@ -1136,15 +1136,12 @@ jobs:
           # PR, so the comment must not say "failed" in that case.
           COVERAGE_GAP_ONLY: ${{ needs.run.outputs.coverage_gap_only }}
           ISSUE_URL: ${{ needs.generator-gap-tracker.outputs.issue_url || needs.coverage-gap-tracker.outputs.issue_url }}
-          # Identity of "this same failure" (failing specs + unmapped ops), from classify. Empty for a
-          # startup failure (classify skipped) or a no-evidence run; the fp falls back accordingly.
-          FINGERPRINT: ${{ needs.classify.outputs.fingerprint }}
           # Charset-validated to ^[A-Za-z0-9]([A-Za-z0-9-]{0,38})$ in the validate job, so it is safe
           # to interpolate directly as @mention (empty for bots / non-plain logins / lookup failure).
           PR_AUTHOR: ${{ needs.validate.outputs.pr_author }}
         run: |
           set -euo pipefail
-          marker_base='<!-- api-test-generator:hub-pr-check:verdict'
+          marker='<!-- api-test-generator:hub-pr-check:verdict -->'
           # SUMMARY and UNMAPPED derive from the PR's own spec and the agent's reading of it:
           # no mentions, no markup, no backticks that could close a code span.
           clean() { printf '%s' "$1" | tr '\n' ' ' | tr -d '`@<>' | cut -c"1-$2"; }
@@ -1211,19 +1208,6 @@ jobs:
             lead="The \`api-test-generator/hub-suite\` check on \`${SHA:0:12}\` passed, but an endpoint has no generated test yet."
           fi
 
-          # Identity of THIS verdict: the classify fingerprint (the failing specs + unmapped ops) plus
-          # the category. A genuinely different failure — a different failing set, OR a different
-          # verdict on the same set — gets a NEW comment, which notifies the author so a changed
-          # verdict is never silently edited past them. The same failure re-running on a later push
-          # edits the existing comment in place (no re-ping, no one-comment-per-push spam).
-          if [ "$CATEGORY" = "startup" ]; then
-            fp="startup"
-          else
-            fp="${FINGERPRINT:-none}-${CATEGORY}"
-          fi
-          fp=$(printf '%s' "$fp" | tr -c 'A-Za-z0-9_-' '-' | cut -c1-80)
-          marker="${marker_base} fp=${fp} -->"
-
           body_file="$(mktemp)"
           {
             echo "$marker"
@@ -1255,42 +1239,29 @@ jobs:
             echo
             echo "What this means and what to do: [PR-check cookbook](${COOKBOOK_URL})."
             echo
-            echo "_Posted automatically by api-test-generator's Hub PR check. This comment is edited in place while this same failure repeats; a different failure posts a new comment._"
+            echo "_Posted automatically by api-test-generator's Hub PR check, re-posted on each failing push so you are notified; a push that fixes it marks this resolved._"
           } > "$body_file"
 
           api="repos/camunda/camunda-hub/issues"
-          # Is this exact verdict already live on the PR (same fp, not yet superseded)? Its marker ends
-          # "fp=<fp> -->"; a superseded/resolved one ends "... done -->", so it won't match here.
-          same=$(gh api "${api}/${PR_NUMBER}/comments" --paginate \
-            --jq "[.[] | select(.body | contains(\"fp=${fp} -->\")) | .id] | first // empty")
-          if [ -n "$same" ]; then
-            gh api -X PATCH "${api}/comments/${same}" -F body=@"$body_file" >/dev/null
-            echo "Updated verdict comment ${same} (same failure) on camunda-hub#${PR_NUMBER}."
-          else
-            # New or changed failure. Supersede any still-live verdict comment (so only the newest is
-            # current), then POST a fresh comment — the POST, and its @mention, is what re-notifies the
-            # author. A live verdict comment carries "...:verdict fp=" and lacks " done -->".
-            for id in $(gh api "${api}/${PR_NUMBER}/comments" --paginate \
-              --jq "[.[] | select(.body | contains(\"${marker_base} fp=\")) | select((.body | contains(\" done -->\")) | not) | .id] | .[]"); do
-              sup="$(mktemp)"
-              {
-                echo "${marker_base} fp=superseded done -->"
-                echo "### Generated hub suite: superseded"
-                echo
-                echo "A newer api-test-generator/hub-suite result replaced this one — see the latest comment below."
-              } > "$sup"
-              gh api -X PATCH "${api}/comments/${id}" -F body=@"$sup" >/dev/null
-              echo "Superseded prior verdict comment ${id} on camunda-hub#${PR_NUMBER}."
-            done
-            gh api -X POST "${api}/${PR_NUMBER}/comments" -F body=@"$body_file" >/dev/null
-            echo "Posted a new verdict comment on camunda-hub#${PR_NUMBER} (failure changed)."
-          fi
+          # Post a FRESH comment on every failing push, after removing the previous verdict comment(s).
+          # Editing a comment in place sends no notification, so a repeat (or a changed verdict) could
+          # be missed; a new POST — and its @mention — always notifies the author, and deleting the
+          # prior one keeps exactly one verdict comment on the PR (no per-push pile-up). The delete is
+          # best-effort: if it is refused, the fresh comment still posts (an extra stale comment is a
+          # far smaller problem than a missed notification).
+          for id in $(gh api "${api}/${PR_NUMBER}/comments" --paginate \
+            --jq "[.[] | select(.body | contains(\"${marker}\")) | .id] | .[]"); do
+            gh api -X DELETE "${api}/comments/${id}" >/dev/null 2>&1 \
+              && echo "Removed prior verdict comment ${id} on camunda-hub#${PR_NUMBER}." \
+              || echo "Could not remove prior verdict comment ${id} (continuing)."
+          done
+          gh api -X POST "${api}/${PR_NUMBER}/comments" -F body=@"$body_file" >/dev/null
+          echo "Posted a fresh verdict comment on camunda-hub#${PR_NUMBER}."
 
-      # When a later push goes green, any verdict comment left on the PR would otherwise keep saying
-      # something the latest status no longer supports. Resolve every still-live one (there is usually
-      # one, but a failure that changed shape leaves the newest live and the rest already superseded).
-      # Only a green run counts as proof (a failed run that is merely classified differently proves
-      # nothing about the earlier failure).
+      # When a later push goes green, the verdict comment left by the last failing push would otherwise
+      # keep saying something the latest status no longer supports. Edit it to "resolved" (there is
+      # normally one, since each failing push removes the prior and posts a fresh one). Only a green run
+      # counts as proof (a failed run that is merely classified differently proves nothing).
       - name: Mark a stale verdict comment as resolved
         if: >-
           always() && needs.run.result == 'success' &&
@@ -1304,25 +1275,25 @@ jobs:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
-          marker_base='<!-- api-test-generator:hub-pr-check:verdict'
+          marker='<!-- api-test-generator:hub-pr-check:verdict -->'
           api="repos/camunda/camunda-hub/issues"
           body_file="$(mktemp)"
           {
-            echo "${marker_base} fp=resolved done -->"
+            echo "$marker"
             echo "### Generated hub suite: resolved"
             echo
             echo "The latest \`api-test-generator/hub-suite\` run on \`${SHA:0:12}\` passed, so the earlier failure note no longer applies. [Run](${RUN_URL})."
           } > "$body_file"
-          # Resolve every still-live verdict comment (any fp): a live one carries "...:verdict fp="
-          # and lacks " done -->". Superseded/resolved ones are already done and skipped.
+          # Edit the verdict comment to "resolved" on a green run (good news needs no new ping). There
+          # is normally one, but resolve every match defensively.
           found=0
           for id in $(gh api "${api}/${PR_NUMBER}/comments" --paginate \
-            --jq "[.[] | select(.body | contains(\"${marker_base} fp=\")) | select((.body | contains(\" done -->\")) | not) | .id] | .[]"); do
+            --jq "[.[] | select(.body | contains(\"${marker}\")) | .id] | .[]"); do
             gh api -X PATCH "${api}/comments/${id}" -F body=@"$body_file" >/dev/null
             echo "Marked verdict comment ${id} on camunda-hub#${PR_NUMBER} as resolved."
             found=1
           done
-          [ "$found" = "1" ] || echo "No live verdict comment to resolve."
+          [ "$found" = "1" ] || echo "No verdict comment to resolve."
 
       # Slack heads-up, styled after the AlwaysGreen SaaS-E2E failure alert
       # (camunda/c8-cross-component-e2e-tests) but NOT copying its "a
