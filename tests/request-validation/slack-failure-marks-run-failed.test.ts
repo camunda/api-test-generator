@@ -210,13 +210,21 @@ describe('the verdict comment on a failing camunda-hub PR', () => {
     expect(text).toContain('re-posted on each failing push');
   });
 
-  it('removes/resolves legacy-marker comments too (prefix match, not only :verdict)', () => {
+  it('removes/resolves legacy-marker comments too, scoped to this check own comments', () => {
     // main posts the legacy :generator-gap / :regression markers, so open PRs can carry one. Both the
-    // delete-on-failure and resolve-on-green lookups must match the shared prefix so those migrate.
+    // delete-on-failure and resolve-on-green lookups must match the shared prefix so those migrate —
+    // but scoped to a Bot author whose body STARTS WITH the marker, so a reviewer comment that quotes
+    // the marker is never matched (and so never deleted).
     const text = readFileSync(join(root, '.github/workflows/hub-pr-check.yml'), 'utf8');
-    expect(text).toContain("marker_prefix='api-test-generator:hub-pr-check:'");
-    const prefixLookups = text.match(/contains\(\\"\$\{marker_prefix\}\\"\)/g) ?? [];
-    expect(prefixLookups.length).toBeGreaterThanOrEqual(2);
+    expect(text).toContain("marker_prefix='<!-- api-test-generator:hub-pr-check:'");
+    const scopedLookups =
+      text.match(
+        /select\(\(\.user\.type == \\"Bot\\"\) and \(\.body \| startswith\(\\"\$\{marker_prefix\}\\"\)\)\)/g,
+      ) ?? [];
+    expect(scopedLookups.length).toBeGreaterThanOrEqual(2);
+    // Guard against a regression to the unscoped substring match that could delete review discussion.
+    // (Regex, not a string literal, so the ${...} does not trip noTemplateCurlyInString.)
+    expect(text).not.toMatch(/select\(\.body \| contains\(\\"\$\{marker_prefix\}\\"\)\)/);
   });
 
   it('excludes a presuite (setup-step) failure — that stays Slack-only, pinging automation', () => {
