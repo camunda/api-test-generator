@@ -179,13 +179,12 @@ describe('the comment on a camunda-hub PR whose generator gap the PR caused', ()
   });
 });
 
-describe('hub-pr-check: a PR-caused generator/coverage gap is comment-only (no Slack)', () => {
-  // classify labels an unmapped new/changed operation (a coverage gap the PR introduced) as
-  // generator-gap, so this one condition covers both "broke the generator" and "created a
-  // coverage gap". It matches the comment step's gate exactly, so a suppressed alert always
-  // leaves the author a comment instead.
-  const SUPPRESS =
-    "!(needs.classify.outputs.category == 'generator-gap' && needs.classify.outputs.caused_by_pr == 'true')";
+describe('hub-pr-check: a failure the PR caused is comment-only (no Slack)', () => {
+  // caused_by_pr is set only for a high-confidence generator-gap (which also covers a coverage gap
+  // the PR introduced, labelled generator-gap) or a medium+ product regression the PR touched. Both
+  // get a sticky PR comment that @-tags the author, so the Slack steps skip the whole caused_by_pr
+  // set — a suppressed alert always leaves a comment behind.
+  const SUPPRESS = "!(needs.classify.outputs.caused_by_pr == 'true')";
   const wf: unknown = parse(readFileSync(join(root, '.github/workflows/hub-pr-check.yml'), 'utf8'));
   const report =
     isRecord(wf) && isRecord(wf.jobs) && isRecord(wf.jobs.report) ? wf.jobs.report : {};
@@ -201,8 +200,19 @@ describe('hub-pr-check: a PR-caused generator/coverage gap is comment-only (no S
     for (const s of slackSteps) {
       expect(
         (s.if ?? '').replace(/\s+/g, ' '),
-        `Slack step "${s.name}" must skip a PR-caused generator gap`,
+        `Slack step "${s.name}" must skip a PR-caused failure`,
       ).toContain(SUPPRESS);
     }
+  });
+
+  it('posts a regression comment (product + caused_by_pr) that @-tags the author', () => {
+    const text = readFileSync(join(root, '.github/workflows/hub-pr-check.yml'), 'utf8');
+    // A distinct marker from the generator-gap comment, so the two sticky comments coexist.
+    expect(text).toContain('<!-- api-test-generator:hub-pr-check:regression -->');
+    const regression = steps.find((s) => /regression they introduced/i.test(s.name ?? ''));
+    expect(regression, 'a regression comment step must exist').toBeTruthy();
+    const gate = (regression?.if ?? '').replace(/\s+/g, ' ');
+    expect(gate).toContain("needs.classify.outputs.category == 'product'");
+    expect(gate).toContain("needs.classify.outputs.caused_by_pr == 'true'");
   });
 });

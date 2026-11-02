@@ -734,25 +734,31 @@ caps/dedupe (this classifier is read-only and opens nothing) and its
 platform-noise prefilter (the Hub PR check already routes startup and pre-suite
 failures deterministically).
 
-Only when the PR's own spec change is what breaks the generator — a
-high-confidence `generator-gap` with `caused_by_pr: true` (every affected
-operationId new or changed by the PR, per the spec diff) — `report` leaves
-one sticky comment on the camunda-hub PR (marker
-`api-test-generator:hub-pr-check:generator-gap`, edited in place) that **@-tags
-the PR author** (`pr_author`, charset-validated in `validate`), says
-api-test-generator must be updated first and links the coverage-gap tracking
-issue; the reverse of AlwaysGreen's "hub PR must not merge first" note on a
-shared-repo fix PR. This case — including a **coverage gap the PR introduced**,
-which classify labels `generator-gap` for an unmapped new/changed operation — is
-**comment-only: the Slack alert is suppressed** (the author is reached on the PR
-instead). Every other failure — a gap on an **untouched** operation, product,
-infra, flaky, unknown — is still Slack-only, no PR comment. The Slack-chain
-steps' `if:` gates carry the exclusion
-`!(category == 'generator-gap' && caused_by_pr == 'true')`, which matches the
-comment step's gate exactly, so a suppressed alert always leaves a comment
-behind (guarded by `tests/request-validation/slack-failure-marks-run-failed.test.ts`).
-The comment needs Issues or Pull requests: write for the qa-processes App on
-camunda-hub; without it the step only warns.
+A failure the PR itself caused is **comment-only**: `report` leaves a sticky
+comment on the camunda-hub PR that **@-tags the PR author** (`pr_author`,
+charset-validated in `validate`) and **suppresses the Slack alert** — the author
+is reached on their PR instead. `caused_by_pr: true` is set only for a
+high-confidence `generator-gap` (every affected operationId new or changed by the
+PR) or a medium+ `product` regression on an operation the PR touched, so it is
+exactly the "author's own fault" set. Two sticky comments cover it, each edited in
+place and marked resolved on a green run:
+
+- marker `api-test-generator:hub-pr-check:generator-gap` — for a `generator-gap`
+  (which also covers a **coverage gap the PR introduced**, labelled `generator-gap`
+  for an unmapped new/changed operation): says api-test-generator must be updated
+  first and links the coverage-gap tracking issue (the reverse of AlwaysGreen's
+  "hub PR must not merge first" note);
+- marker `api-test-generator:hub-pr-check:regression` — for a `product` regression:
+  says the fix is in the PR's own Hub code, not api-test-generator.
+
+Every other failure — a gap or regression on an **untouched** operation, a
+"could not confirm", infra, flaky, unknown — is still Slack-only, no PR comment.
+The Slack-chain steps' `if:` gates carry the exclusion
+`!(caused_by_pr == 'true')`, which matches the two comment steps' gates exactly,
+so a suppressed alert always leaves a comment behind (guarded by
+`tests/request-validation/slack-failure-marks-run-failed.test.ts`). The comments
+need Issues or Pull requests: write for the qa-processes App on camunda-hub;
+without it the step only warns.
 `_hub-suite-run.yml`'s own coverage-check step (#505) fails ITS job whenever
 an operation has zero generated test at all (a silent ontology gap) — but
 per #480, missing coverage alone must never be REPORTED as a failing check
