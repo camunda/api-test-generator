@@ -168,4 +168,41 @@ describe('the comment on a camunda-hub PR whose generator gap the PR caused', ()
       '[PR-check cookbook](https://github.com/camunda/api-test-generator/blob/main/docs/hub-pr-check-cookbook.md)',
     );
   });
+
+  it('@-tags the PR author so the comment, not Slack, notifies them', () => {
+    const text = readFileSync(join(root, '.github/workflows/hub-pr-check.yml'), 'utf8');
+    // The author login is plumbed into the comment step and emitted directly (not via clean(),
+    // which strips '@'); it is charset-validated in the validate job, so the mention is safe.
+    // (Regex, not a string literal, so the GitHub-Actions `${{ }}` does not trip noTemplateCurlyInString.)
+    expect(text).toMatch(/PR_AUTHOR:\s*\$\{\{\s*needs\.validate\.outputs\.pr_author\s*\}\}/);
+    expect(text).toMatch(/@\$\{PR_AUTHOR\}/);
+  });
+});
+
+describe('hub-pr-check: a PR-caused generator/coverage gap is comment-only (no Slack)', () => {
+  // classify labels an unmapped new/changed operation (a coverage gap the PR introduced) as
+  // generator-gap, so this one condition covers both "broke the generator" and "created a
+  // coverage gap". It matches the comment step's gate exactly, so a suppressed alert always
+  // leaves the author a comment instead.
+  const SUPPRESS =
+    "!(needs.classify.outputs.category == 'generator-gap' && needs.classify.outputs.caused_by_pr == 'true')";
+  const wf: unknown = parse(readFileSync(join(root, '.github/workflows/hub-pr-check.yml'), 'utf8'));
+  const report =
+    isRecord(wf) && isRecord(wf.jobs) && isRecord(wf.jobs.report) ? wf.jobs.report : {};
+  const steps: Step[] =
+    isRecord(report) && Array.isArray(report.steps) ? report.steps.flatMap(toStep) : [];
+  const slackSteps = steps.filter((s) => /slack/i.test(s.name ?? ''));
+
+  it('has the report job with its Slack steps', () => {
+    expect(slackSteps.length).toBeGreaterThanOrEqual(4);
+  });
+
+  it('skips every Slack step for that outcome', () => {
+    for (const s of slackSteps) {
+      expect(
+        (s.if ?? '').replace(/\s+/g, ' '),
+        `Slack step "${s.name}" must skip a PR-caused generator gap`,
+      ).toContain(SUPPRESS);
+    }
+  });
 });

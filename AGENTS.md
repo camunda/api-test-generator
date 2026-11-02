@@ -736,15 +736,23 @@ failures deterministically).
 
 Only when the PR's own spec change is what breaks the generator — a
 high-confidence `generator-gap` with `caused_by_pr: true` (every affected
-operationId new or changed by the PR, per the spec diff) — `report` also leaves
+operationId new or changed by the PR, per the spec diff) — `report` leaves
 one sticky comment on the camunda-hub PR (marker
-`api-test-generator:hub-pr-check:generator-gap`, edited in place) saying
-api-test-generator must be updated first and linking the coverage-gap tracking
+`api-test-generator:hub-pr-check:generator-gap`, edited in place) that **@-tags
+the PR author** (`pr_author`, charset-validated in `validate`), says
+api-test-generator must be updated first and links the coverage-gap tracking
 issue; the reverse of AlwaysGreen's "hub PR must not merge first" note on a
-shared-repo fix PR. Every other failure — a gap on an untouched operation,
-product, infra, flaky, unknown — is Slack-only. The comment needs Issues or
-Pull requests: write for the qa-processes App on camunda-hub; without it the
-step only warns.
+shared-repo fix PR. This case — including a **coverage gap the PR introduced**,
+which classify labels `generator-gap` for an unmapped new/changed operation — is
+**comment-only: the Slack alert is suppressed** (the author is reached on the PR
+instead). Every other failure — a gap on an **untouched** operation, product,
+infra, flaky, unknown — is still Slack-only, no PR comment. The Slack-chain
+steps' `if:` gates carry the exclusion
+`!(category == 'generator-gap' && caused_by_pr == 'true')`, which matches the
+comment step's gate exactly, so a suppressed alert always leaves a comment
+behind (guarded by `tests/request-validation/slack-failure-marks-run-failed.test.ts`).
+The comment needs Issues or Pull requests: write for the qa-processes App on
+camunda-hub; without it the step only warns.
 `_hub-suite-run.yml`'s own coverage-check step (#505) fails ITS job whenever
 an operation has zero generated test at all (a silent ontology gap) — but
 per #480, missing coverage alone must never be REPORTED as a failing check

@@ -1119,6 +1119,9 @@ jobs:
           SUMMARY: ${{ needs.classify.outputs.summary }}
           UNMAPPED: ${{ needs.run.outputs.unmapped_operations }}
           ISSUE_URL: ${{ needs.generator-gap-tracker.outputs.issue_url || needs.coverage-gap-tracker.outputs.issue_url }}
+          # Charset-validated to ^[A-Za-z0-9]([A-Za-z0-9-]{0,38})$ in the validate job, so it is safe
+          # to interpolate directly as @mention (empty for bots / non-plain logins / lookup failure).
+          PR_AUTHOR: ${{ needs.validate.outputs.pr_author }}
         run: |
           set -euo pipefail
           marker='<!-- api-test-generator:hub-pr-check:generator-gap -->'
@@ -1131,6 +1134,11 @@ jobs:
             echo "### Generated hub suite: update api-test-generator first"
             echo
             echo "The \`api-test-generator/hub-suite\` check on \`${SHA:0:12}\` looks like the **test generator not yet handling this PR's API change**, not a Hub bug. [Run](${RUN_URL})."
+            # Tag the author directly (not via clean(), which strips '@'); pr_author is charset-validated.
+            if [ -n "$PR_AUTHOR" ]; then
+              echo
+              echo "@${PR_AUTHOR} — heads-up for your PR; resolving this is on the api-test-generator side (see below), not a change you make here."
+            fi
             if [ -n "$SUMMARY" ] && [ "$CATEGORY" = "generator-gap" ]; then
               echo
               echo "> $(clean "$SUMMARY" 200)"
@@ -1214,9 +1222,17 @@ jobs:
       # excludes drafts (#519) — a WIP push isn't something to page a human
       # over; the commit status (unconditional, see "Report status..."
       # above) still gives the author passive pass/fail feedback.
+      # A PR-caused generator gap (category generator-gap + caused_by_pr — this also covers a
+      # coverage gap the PR introduced, which classify labels generator-gap) is comment-only: the
+      # sticky comment above @-tags the author, so no Slack is posted. Every other failure (product,
+      # infra, flaky, unknown, a gap on an untouched operation) still pings. The exclusion matches
+      # the comment step's gate exactly, so a suppressed alert always leaves the author a comment.
       - name: Build Slack alert text
         id: msg
-        if: always() && needs.run.result == 'failure' && needs.validate.outputs.is_draft != 'true'
+        if: >-
+          always() && needs.run.result == 'failure' &&
+          needs.validate.outputs.is_draft != 'true' &&
+          !(needs.classify.outputs.category == 'generator-gap' && needs.classify.outputs.caused_by_pr == 'true')
         env:
           # Validated (digits-only) by the `validate` job — empty if the
           # dispatch payload's pr_number was missing/malformed.
@@ -1443,7 +1459,10 @@ jobs:
 
       - name: Fetch Slack bot token from Vault
         id: slack-secrets
-        if: always() && needs.run.result == 'failure' && needs.validate.outputs.is_draft != 'true'
+        if: >-
+          always() && needs.run.result == 'failure' &&
+          needs.validate.outputs.is_draft != 'true' &&
+          !(needs.classify.outputs.category == 'generator-gap' && needs.classify.outputs.caused_by_pr == 'true')
         continue-on-error: true
         uses: ./.github/actions/slack-token
         with:
@@ -1456,7 +1475,8 @@ jobs:
         if: >-
           always() && needs.run.result == 'failure' &&
           needs.validate.outputs.is_draft != 'true' &&
-          steps.slack-secrets.outputs.SLACK_BOT_TOKEN != ''
+          steps.slack-secrets.outputs.SLACK_BOT_TOKEN != '' &&
+          !(needs.classify.outputs.category == 'generator-gap' && needs.classify.outputs.caused_by_pr == 'true')
         continue-on-error: true
         uses: actions/setup-node@v6
         with:
@@ -1472,7 +1492,8 @@ jobs:
         if: >-
           always() && needs.run.result == 'failure' &&
           needs.validate.outputs.is_draft != 'true' &&
-          steps.slack-secrets.outputs.SLACK_BOT_TOKEN != ''
+          steps.slack-secrets.outputs.SLACK_BOT_TOKEN != '' &&
+          !(needs.classify.outputs.category == 'generator-gap' && needs.classify.outputs.caused_by_pr == 'true')
         continue-on-error: true
         env:
           SLACK_TOKEN: ${{ steps.slack-secrets.outputs.SLACK_BOT_TOKEN }}
