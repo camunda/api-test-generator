@@ -1111,6 +1111,7 @@ jobs:
       # "suites did not run AND Hub did not fail to start"; a startup failure (hub_start_failed) still
       # gets a comment because a bad PR image is the author's to look at.
       - name: Comment the suite verdict on the camunda-hub PR
+        id: verdict-comment
         if: >-
           always() && needs.run.result == 'failure' &&
           needs.validate.outputs.pr_number != '' &&
@@ -1160,9 +1161,11 @@ jobs:
           #   soft  = open the run to tell; fyi = likely not your change.
           case "$CATEGORY" in
             startup)
+              # Not fyi: a change that stops Hub booting reaches here too, so this may be the PR's own
+              # regression. Point the author at the run rather than telling them to ignore it.
               heading="Generated hub suite: Hub did not start"
-              verdict="The Hub PR image did not start or become ready, so no tests ran. Check the run's \"Wait for Hub to be ready\" step for the container's startup error."
-              tag=fyi ;;
+              verdict="The Hub PR image did not start or become ready, so no tests ran. Check the run's \"Wait for Hub to be ready\" step for the container's startup error — if your change could affect startup, it may be the cause."
+              tag=soft ;;
             presuite)
               heading="Generated hub suite: failed before the tests ran"
               verdict="The run failed before the suites started, in a setup step (checkout, clone, install, registry login or image pull) rather than in Hub itself. Check the run to see which step."
@@ -1200,12 +1203,16 @@ jobs:
           esac
 
           # A pure coverage gap (#480) fails the job internally but is reported success (green) on the
-          # PR, so the comment must not say "failed" and contradict the green check. The category is
-          # generator-gap in that case, whose verdict wording already fits a missing test.
+          # PR, so the comment must not say "failed" and contradict the green check. Drive the whole
+          # verdict from the authoritative COVERAGE_GAP_ONLY flag, not from the classify category:
+          # classify can return `unknown` (its agent failed) for such a run, which would otherwise
+          # leave a "could be a regression, open the run" verdict on an all-green suite.
           lead="The \`api-test-generator/hub-suite\` check on \`${SHA:0:12}\` failed."
           if [ "$COVERAGE_GAP_ONLY" = "true" ]; then
             heading="Generated hub suite: coverage gap (passed, but an endpoint has no test yet)"
             lead="The \`api-test-generator/hub-suite\` check on \`${SHA:0:12}\` passed, but an endpoint has no generated test yet."
+            verdict="api-test-generator needs a follow-up to cover the affected operation(s); it lands after this PR merges and the spec pin is bumped (merge order: Hub PR -> pin bump -> generator PR). It does not block merging."
+            tag=gap
           fi
 
           body_file="$(mktemp)"
@@ -1231,10 +1238,14 @@ jobs:
             if [ -n "$UNMAPPED" ]; then
               echo
               echo "Operation(s) with no generated test at all: \`$(clean "$UNMAPPED" 300)\`"
-              if [ -n "$ISSUE_URL" ]; then
-                echo
-                echo "Tracked at ${ISSUE_URL}."
-              fi
+            fi
+            # Render the tracking-issue link whenever one exists — independently of UNMAPPED. A
+            # generator gap can break an existing generated test (e.g. a changed response shape) with
+            # no unmapped operations, in which case generator-gap-tracker still supplies ISSUE_URL;
+            # nesting it under UNMAPPED would hide the link now that the Slack message no longer carries it.
+            if [ -n "$ISSUE_URL" ]; then
+              echo
+              echo "Tracked at ${ISSUE_URL}."
             fi
             echo
             echo "What this means and what to do: [PR-check cookbook](${COOKBOOK_URL})."
@@ -1319,19 +1330,22 @@ jobs:
       # above) still gives the author passive pass/fail feedback.
       # Most failing PRs are comment-only now (the 2026-10-28 handover decision): the sticky comment
       # above @-tags the author on their own PR for any category it covers, so Slack is suppressed
-      # when there is an author to reach. This alert fires in exactly two cases:
+      # when there is an author to reach. This alert fires in exactly three cases:
       #   - pr_author is empty — a bot (e.g. renovate[bot], whose "[bot]" login fails the charset
       #     check in validate) or any lookup failure — where there is nobody to @-tag; the comment
       #     body still posts without a mention, and the alert pings hub-medic (routed below);
       #   - a presuite failure (setup step before the suites ran) — shared-pipeline, test-automation's
-      #     responsibility, which gets NO comment and pings test-automation-medic here instead.
+      #     responsibility, which gets NO comment and pings test-automation-medic here instead;
+      #   - the verdict-comment step did not succeed (steps.verdict-comment.outcome != 'success') — it
+      #     was skipped (no status token) or its POST was rejected (the App lacks comment-write), so the
+      #     author was NOT reached on the PR. Slack is the fallback so the failure is never fully silent.
       # The nightly, not this PR check, is what pages the medic for failures on main.
       - name: Build Slack alert text
         id: msg
         if: >-
           always() && needs.run.result == 'failure' &&
           needs.validate.outputs.is_draft != 'true' &&
-          (needs.validate.outputs.pr_author == '' || (needs.run.outputs.suites_ran != 'true' && needs.run.outputs.hub_start_failed != 'true'))
+          (needs.validate.outputs.pr_author == '' || (needs.run.outputs.suites_ran != 'true' && needs.run.outputs.hub_start_failed != 'true') || steps.verdict-comment.outcome != 'success')
         env:
           # Validated (digits-only) by the `validate` job — empty if the
           # dispatch payload's pr_number was missing/malformed.
@@ -1575,7 +1589,7 @@ jobs:
         if: >-
           always() && needs.run.result == 'failure' &&
           needs.validate.outputs.is_draft != 'true' &&
-          (needs.validate.outputs.pr_author == '' || (needs.run.outputs.suites_ran != 'true' && needs.run.outputs.hub_start_failed != 'true'))
+          (needs.validate.outputs.pr_author == '' || (needs.run.outputs.suites_ran != 'true' && needs.run.outputs.hub_start_failed != 'true') || steps.verdict-comment.outcome != 'success')
         continue-on-error: true
         uses: ./.github/actions/slack-token
         with:
@@ -1589,7 +1603,7 @@ jobs:
           always() && needs.run.result == 'failure' &&
           needs.validate.outputs.is_draft != 'true' &&
           steps.slack-secrets.outputs.SLACK_BOT_TOKEN != '' &&
-          (needs.validate.outputs.pr_author == '' || (needs.run.outputs.suites_ran != 'true' && needs.run.outputs.hub_start_failed != 'true'))
+          (needs.validate.outputs.pr_author == '' || (needs.run.outputs.suites_ran != 'true' && needs.run.outputs.hub_start_failed != 'true') || steps.verdict-comment.outcome != 'success')
         continue-on-error: true
         uses: actions/setup-node@v6
         with:
@@ -1606,7 +1620,7 @@ jobs:
           always() && needs.run.result == 'failure' &&
           needs.validate.outputs.is_draft != 'true' &&
           steps.slack-secrets.outputs.SLACK_BOT_TOKEN != '' &&
-          (needs.validate.outputs.pr_author == '' || (needs.run.outputs.suites_ran != 'true' && needs.run.outputs.hub_start_failed != 'true'))
+          (needs.validate.outputs.pr_author == '' || (needs.run.outputs.suites_ran != 'true' && needs.run.outputs.hub_start_failed != 'true') || steps.verdict-comment.outcome != 'success')
         continue-on-error: true
         env:
           SLACK_TOKEN: ${{ steps.slack-secrets.outputs.SLACK_BOT_TOKEN }}

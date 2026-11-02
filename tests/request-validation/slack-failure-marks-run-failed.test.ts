@@ -229,6 +229,9 @@ describe('hub-pr-check: a failing PR is comment-only, except bot PRs and presuit
   const NO_AUTHOR = "needs.validate.outputs.pr_author == ''";
   const PRESUITE =
     "needs.run.outputs.suites_ran != 'true' && needs.run.outputs.hub_start_failed != 'true'";
+  // Fallback: if the verdict comment was not delivered (skipped for a missing status token, or its
+  // POST failed under continue-on-error), the author was not reached on the PR, so Slack must still fire.
+  const COMMENT_FAILED = "steps.verdict-comment.outcome != 'success'";
   const wf: unknown = parse(readFileSync(join(root, '.github/workflows/hub-pr-check.yml'), 'utf8'));
   const report =
     isRecord(wf) && isRecord(wf.jobs) && isRecord(wf.jobs.report) ? wf.jobs.report : {};
@@ -240,13 +243,22 @@ describe('hub-pr-check: a failing PR is comment-only, except bot PRs and presuit
     expect(slackSteps.length).toBeGreaterThanOrEqual(4);
   });
 
-  it('fires every Slack step only for a bot PR or a presuite failure', () => {
+  it('gives the verdict comment step an id so Slack can see whether it delivered', () => {
+    const comment = steps.find((s) => /comment the suite verdict/i.test(s.name ?? ''));
+    expect(comment?.id).toBe('verdict-comment');
+  });
+
+  it('fires every Slack step for a bot PR, a presuite failure, or an undelivered comment', () => {
     for (const s of slackSteps) {
       const gate = (s.if ?? '').replace(/\s+/g, ' ');
       expect(gate, `Slack step "${s.name}" must fire when pr_author is empty`).toContain(NO_AUTHOR);
       expect(gate, `Slack step "${s.name}" must also fire for a presuite failure`).toContain(
         PRESUITE,
       );
+      expect(
+        gate,
+        `Slack step "${s.name}" must fall back when the verdict comment did not deliver`,
+      ).toContain(COMMENT_FAILED);
     }
   });
 });
