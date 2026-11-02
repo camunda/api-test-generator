@@ -161,12 +161,18 @@ describe('workflows whose manual run is a dry run that posts nothing', () => {
   });
 });
 
-describe('the comment on a camunda-hub PR whose generator gap the PR caused', () => {
+describe('the verdict comment on a failing camunda-hub PR', () => {
+  const wf: unknown = parse(readFileSync(join(root, '.github/workflows/hub-pr-check.yml'), 'utf8'));
+  const report =
+    isRecord(wf) && isRecord(wf.jobs) && isRecord(wf.jobs.report) ? wf.jobs.report : {};
+  const steps: Step[] =
+    isRecord(report) && Array.isArray(report.steps) ? report.steps.flatMap(toStep) : [];
+  const comment = steps.find((s) => /comment the suite verdict/i.test(s.name ?? ''));
+
   it('links the PR-check cookbook', () => {
     const text = readFileSync(join(root, '.github/workflows/hub-pr-check.yml'), 'utf8');
-    expect(text).toContain(
-      '[PR-check cookbook](https://github.com/camunda/api-test-generator/blob/main/docs/hub-pr-check-cookbook.md)',
-    );
+    expect(text).toContain('[PR-check cookbook](');
+    expect(text).toContain('docs/hub-pr-check-cookbook.md');
   });
 
   it('@-tags the PR author so the comment, not Slack, notifies them', () => {
@@ -177,16 +183,25 @@ describe('the comment on a camunda-hub PR whose generator gap the PR caused', ()
     expect(text).toMatch(/PR_AUTHOR:\s*\$\{\{\s*needs\.validate\.outputs\.pr_author\s*\}\}/);
     expect(text).toMatch(/@\$\{PR_AUTHOR\}/);
   });
+
+  it('fires for every failing non-draft PR, not just a caused-by-PR failure', () => {
+    expect(comment, 'a verdict comment step must exist').toBeTruthy();
+    const gate = (comment?.if ?? '').replace(/\s+/g, ' ');
+    expect(gate).toContain("needs.run.result == 'failure'");
+    expect(gate).toContain("needs.validate.outputs.is_draft != 'true'");
+    // The broadened model (2026-10-28 handover): the comment is no longer gated on a specific
+    // category or on caused_by_pr — every failing PR gets one, tagging the author.
+    expect(gate).not.toContain('caused_by_pr');
+    expect(gate).not.toContain('category ==');
+  });
 });
 
-describe('hub-pr-check: a failure the PR caused is comment-only (no Slack)', () => {
-  // caused_by_pr is set only for a high-confidence generator-gap (which also covers a coverage gap
-  // the PR introduced, labelled generator-gap) or a medium+ product regression the PR touched. Both
-  // get a sticky PR comment that @-tags the author, so the Slack steps skip them — but only when
-  // there is a real author to reach (pr_author != ''). A bot/author-less PR keeps its Slack alert,
-  // so hub-medic is still pinged when nobody can be @-tagged.
-  const SUPPRESS =
-    "!(needs.classify.outputs.caused_by_pr == 'true' && needs.validate.outputs.pr_author != '')";
+describe('hub-pr-check: a failing PR is comment-only unless there is no author to tag', () => {
+  // 2026-10-28 handover decision: a PR-check failure is the PR author's to look at on their own PR,
+  // so the sticky verdict comment @-tags the author and the Slack chain is suppressed whenever there
+  // is an author to reach. Slack fires ONLY when pr_author is empty — a bot (renovate[bot]) or a
+  // lookup failure — where nobody can be @-tagged, so the alert falls back to pinging hub-medic.
+  const SUPPRESS = "needs.validate.outputs.pr_author == ''";
   const wf: unknown = parse(readFileSync(join(root, '.github/workflows/hub-pr-check.yml'), 'utf8'));
   const report =
     isRecord(wf) && isRecord(wf.jobs) && isRecord(wf.jobs.report) ? wf.jobs.report : {};
@@ -198,23 +213,12 @@ describe('hub-pr-check: a failure the PR caused is comment-only (no Slack)', () 
     expect(slackSteps.length).toBeGreaterThanOrEqual(4);
   });
 
-  it('skips every Slack step for that outcome', () => {
+  it('fires every Slack step only when there is no author to tag', () => {
     for (const s of slackSteps) {
       expect(
         (s.if ?? '').replace(/\s+/g, ' '),
-        `Slack step "${s.name}" must skip a PR-caused failure`,
+        `Slack step "${s.name}" must fire only when pr_author is empty`,
       ).toContain(SUPPRESS);
     }
-  });
-
-  it('posts a regression comment (product + caused_by_pr) that @-tags the author', () => {
-    const text = readFileSync(join(root, '.github/workflows/hub-pr-check.yml'), 'utf8');
-    // A distinct marker from the generator-gap comment, so the two sticky comments coexist.
-    expect(text).toContain('<!-- api-test-generator:hub-pr-check:regression -->');
-    const regression = steps.find((s) => /regression they introduced/i.test(s.name ?? ''));
-    expect(regression, 'a regression comment step must exist').toBeTruthy();
-    const gate = (regression?.if ?? '').replace(/\s+/g, ' ');
-    expect(gate).toContain("needs.classify.outputs.category == 'product'");
-    expect(gate).toContain("needs.classify.outputs.caused_by_pr == 'true'");
   });
 });

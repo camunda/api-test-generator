@@ -713,7 +713,7 @@ loser deletes its own); the reply lookup is paginated and fails closed.
 Any threading failure (unresolvable channel name, missing Slack history scope) falls
 back to a plain post, so an alert is never lost to the threading logic.
 
-A PR-caused generator gap (the same `caused_by_pr` condition as the comment) is also tracked: the
+A PR-caused generator gap (classify's `caused_by_pr`) is also tracked: the
 `generator-gap-tracker` job keeps one issue per camunda-hub PR
 (`[hub-pr-check] Generator gap on camunda-hub#N`, labels `generator-gap` + `hub`), **assigned to
 the camunda-hub PR's author** (once, and only if unassigned, so a manual reassignment sticks;
@@ -734,38 +734,42 @@ caps/dedupe (this classifier is read-only and opens nothing) and its
 platform-noise prefilter (the Hub PR check already routes startup and pre-suite
 failures deterministically).
 
-A failure the PR itself caused is **comment-only**: `report` leaves a sticky
-comment on the camunda-hub PR that **@-tags the PR author** (`pr_author`,
-charset-validated in `validate`) and **suppresses the Slack alert** — the author
-is reached on their PR instead. `caused_by_pr: true` is set only for a
-high-confidence `generator-gap` (every affected operationId new or changed by the
-PR) or a medium+ `product` regression on an operation the PR touched, so it is
-exactly the "author's own fault" set. Two sticky comments cover it, each edited in
-place and marked resolved on a green run:
+**Every** failing PR is **comment-only** (the 2026-10-28 handover decision): on any
+failing (non-draft) run `report` leaves ONE sticky comment on the camunda-hub PR
+that **@-tags the PR author** (`pr_author`, charset-validated in `validate`) and
+**suppresses the Slack alert** — a PR-check failure is the author's to look at on
+their own PR, not something to page `hub-medic` over (the nightly, not this PR
+check, is what pages the medic for failures on `main`). One marker,
+`api-test-generator:hub-pr-check:verdict`, edited in place on later pushes and
+marked resolved on a green run. The comment's wording follows the `classify`
+verdict and how actionable it is for the author:
 
-- marker `api-test-generator:hub-pr-check:generator-gap` — for a `generator-gap`
-  (which also covers a **coverage gap the PR introduced**, labelled `generator-gap`
-  for an unmapped new/changed operation): says this is a test-generator gap, not a
-  Hub bug, and the check does not block merging; api-test-generator needs a
-  follow-up (linked to the coverage-gap tracking issue) that lands **after** the
+- a **`product`** regression at high confidence — "this one is yours: the fix is in
+  this PR's own Hub code";
+- a **`generator-gap`** (which also covers a **coverage gap the PR introduced**,
+  labelled `generator-gap` for an unmapped new/changed operation) — a test-generator
+  gap, not a Hub bug, that does not block merging; api-test-generator needs a
+  follow-up (linked to the tracking issue when one exists) that lands **after** the
   Hub PR merges and the spec pin is bumped — the generator PR is last, because its
   checks read the pinned spec and cannot name an operation that is not in it yet
   (merge order: Hub PR → pin bump → generator PR);
-- marker `api-test-generator:hub-pr-check:regression` — for a `product` regression:
-  says the fix is in the PR's own Hub code, not api-test-generator.
+- a **`product`** that could not be tied to the PR, or **`unknown`** — a heads-up to
+  open the run and confirm before merging;
+- **`infra` / `flaky` / `startup` / `presuite`** — a heads-up that the failure looks
+  unrelated to the author's change, so no action is needed unless it keeps happening.
 
-Every other failure — a gap or regression on an **untouched** operation, a
-"could not confirm", infra, flaky, unknown — is still Slack-only, no PR comment.
-The Slack-chain steps' `if:` gates carry the exclusion
-`!(caused_by_pr == 'true' && pr_author != '')`: a caused-by-PR failure goes
-comment-only **only when there is an author to reach**. When `pr_author` is empty
-— a bot (e.g. `renovate[bot]`, whose `[bot]` login fails the charset check in
-`validate`) or any lookup failure — there is nobody to @-tag, so the Slack alert
-still fires and pings `hub-medic` (the comment body still posts, without a
-mention). The exclusion is guarded by
-`tests/request-validation/slack-failure-marks-run-failed.test.ts`. The comments
-need Issues or Pull requests: write for the qa-processes App on camunda-hub;
-without it the step only warns.
+Slack is the **fallback for a PR with no author to @-tag**. The Slack-chain steps'
+`if:` gates carry `needs.validate.outputs.pr_author == ''`, so the alert fires (and
+pings `hub-medic`) **only** when `pr_author` is empty — a bot (e.g.
+`renovate[bot]`, whose `[bot]` login fails the charset check in `validate`) or any
+lookup failure, where there is nobody to tag. Whenever there IS an author the
+comment covers it and no Slack is posted. The gate is guarded by
+`tests/request-validation/slack-failure-marks-run-failed.test.ts`. The comment
+needs Issues or Pull requests: write for the qa-processes App on camunda-hub;
+without it the step only warns. The tracking issues are unchanged — the
+`generator-gap-tracker` / `coverage-gap-tracker` jobs still open their
+api-test-generator issues (the generator-gap one assigned to the PR author), and
+the weekday gap digest still lists them once the PR merges.
 `_hub-suite-run.yml`'s own coverage-check step (#505) fails ITS job whenever
 an operation has zero generated test at all (a silent ontology gap) — but
 per #480, missing coverage alone must never be REPORTED as a failing check

@@ -1093,157 +1093,133 @@ jobs:
             -f description="$description" >/dev/null
           echo "Reported '${state}' (${description}) on camunda-hub@${SHA:0:12}"
 
-      # When the PR's OWN spec change is what the generator cannot yet handle (classify's
-      # caused_by_pr, high-confidence generator-gap — this also covers a coverage gap the PR
-      # introduced), the author is told on their own PR instead of finding out from a red status, and
-      # the Slack alert for this case is suppressed (see the Slack steps below). The note links the
-      # api-test-generator tracking issue and makes clear the generator follow-up lands AFTER this PR
-      # merges and the pin is bumped (merge order: Hub PR -> pin bump -> generator PR; the check does
-      # not block merging). Every other failure, including a gap on an operation the PR did not
-      # touch, goes to Slack. One comment per PR, edited in place so a dozen pushes leave one comment.
-      # Never fails the check: the qa-processes App may lack Issues/Pull requests: write on
-      # camunda-hub (unconfirmed), in which case it just warns.
-      - name: Tell the camunda-hub PR author this is a test-generator gap, not a Hub bug
+      # Every failing (non-draft) camunda-hub PR gets one sticky comment on the PR itself, @-tagging
+      # the author, instead of a Slack alert to hub-medic (the Slack chain below now fires only when
+      # there is NO author to tag — a bot such as renovate[bot]). This is the handover decision from
+      # the 2026-10-28 meeting: a PR-check failure is the PR author's to look at on their own PR, not
+      # the medic's to be paged over — the medic owns the nightly, not an in-flight PR. The comment's
+      # wording follows the classify verdict: a real regression is "yours" to fix here; a
+      # test-generator gap is on the api-test-generator side (follow-up lands AFTER this PR merges and
+      # the pin is bumped — merge order: Hub PR -> pin bump -> generator PR; the check does not block
+      # merging); an infra/flaky/could-not-confirm failure is a heads-up, likely not the author's
+      # change. One comment per PR, edited in place so a dozen pushes leave one comment. Never fails
+      # the check: the qa-processes App may lack Issues/Pull requests: write on camunda-hub
+      # (unconfirmed), in which case it just warns.
+      - name: Comment the suite verdict on the camunda-hub PR
         if: >-
           always() && needs.run.result == 'failure' &&
           needs.validate.outputs.pr_number != '' &&
           needs.validate.outputs.is_draft != 'true' &&
-          steps.status-token.outputs.token != '' &&
-          needs.classify.outputs.category == 'generator-gap' &&
-          needs.classify.outputs.caused_by_pr == 'true'
+          steps.status-token.outputs.token != ''
         continue-on-error: true
         env:
           GH_TOKEN: ${{ steps.status-token.outputs.token }}
           PR_NUMBER: ${{ needs.validate.outputs.pr_number }}
           SHA: ${{ needs.validate.outputs.source_sha }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          COOKBOOK_URL: ${{ github.server_url }}/${{ github.repository }}/blob/main/docs/hub-pr-check-cookbook.md
           CATEGORY: ${{ needs.classify.outputs.category }}
+          CONFIDENCE: ${{ needs.classify.outputs.confidence }}
           SUMMARY: ${{ needs.classify.outputs.summary }}
           UNMAPPED: ${{ needs.run.outputs.unmapped_operations }}
+          # classify is skipped when the suites never ran, so these two let the comment derive the
+          # startup / presuite categories itself, exactly as the Slack step does.
+          HUB_START_FAILED: ${{ needs.run.outputs.hub_start_failed }}
+          SUITES_RAN: ${{ needs.run.outputs.suites_ran }}
           ISSUE_URL: ${{ needs.generator-gap-tracker.outputs.issue_url || needs.coverage-gap-tracker.outputs.issue_url }}
           # Charset-validated to ^[A-Za-z0-9]([A-Za-z0-9-]{0,38})$ in the validate job, so it is safe
           # to interpolate directly as @mention (empty for bots / non-plain logins / lookup failure).
           PR_AUTHOR: ${{ needs.validate.outputs.pr_author }}
         run: |
           set -euo pipefail
-          marker='<!-- api-test-generator:hub-pr-check:generator-gap -->'
+          marker='<!-- api-test-generator:hub-pr-check:verdict -->'
           # SUMMARY and UNMAPPED derive from the PR's own spec and the agent's reading of it:
           # no mentions, no markup, no backticks that could close a code span.
           clean() { printf '%s' "$1" | tr '\n' ' ' | tr -d '`@<>' | cut -c"1-$2"; }
+
+          # classify is skipped when the suites never ran (CATEGORY empty), so derive the two
+          # pre-suite categories the same way the Slack step does — the comment and the (bot-only)
+          # Slack fallback must never disagree about which case they are in.
+          if [ "$HUB_START_FAILED" = "true" ]; then
+            CATEGORY=startup
+          elif [ "$SUITES_RAN" != "true" ]; then
+            CATEGORY=presuite
+          fi
+
+          # heading + verdict sentence + how the author is addressed:
+          #   yours = a change to make in this PR; gap = api-test-generator's to fix;
+          #   soft  = open the run to tell; fyi = likely not your change.
+          case "$CATEGORY" in
+            startup)
+              heading="Generated hub suite: Hub did not start"
+              verdict="The Hub PR image did not start or become ready, so no tests ran. Check the run's \"Wait for Hub to be ready\" step for the container's startup error."
+              tag=fyi ;;
+            presuite)
+              heading="Generated hub suite: failed before the tests ran"
+              verdict="The run failed before the suites started, in a setup step (checkout, clone, install, registry login or image pull) rather than in Hub itself. Check the run to see which step."
+              tag=fyi ;;
+            product)
+              if [ "$CONFIDENCE" = "high" ]; then
+                heading="Generated hub suite: likely a regression from this PR"
+                verdict="This looks like a regression this PR introduced in Hub, not a test-generator gap. The fix is in this PR's own Hub code."
+                tag=yours
+              else
+                heading="Generated hub suite: a failure to look at"
+                verdict="This might be a regression, but it could not be tied to this PR with confidence (confidence: ${CONFIDENCE}). Open the run to confirm before merging."
+                tag=soft
+              fi ;;
+            generator-gap)
+              heading="Generated hub suite: test-generator gap (not a Hub bug)"
+              verdict="This looks like the test generator not yet handling a new or changed endpoint, not a Hub bug. It does not block merging; api-test-generator needs a follow-up that lands after this PR merges and the spec pin is bumped (merge order: Hub PR -> pin bump -> generator PR)."
+              tag=gap ;;
+            infra)
+              heading="Generated hub suite: looks like infrastructure"
+              verdict="This looks like an infrastructure failure, not a regression (confidence: ${CONFIDENCE})."
+              tag=fyi ;;
+            flaky)
+              heading="Generated hub suite: looks flaky"
+              verdict="This looks flaky, not a regression (confidence: ${CONFIDENCE})."
+              tag=fyi ;;
+            unknown)
+              heading="Generated hub suite: a failure to look at"
+              verdict="This could not be confirmed as a real regression from this PR (confidence: ${CONFIDENCE})."
+              tag=soft ;;
+            *)
+              heading="Generated hub suite: a failure to look at"
+              verdict="This could be a regression from this PR, a gap in api-test-generator for a new or changed endpoint, or infra/flakiness - open the run to tell which before merging."
+              tag=soft ;;
+          esac
+
           body_file="$(mktemp)"
           {
             echo "$marker"
-            echo "### Generated hub suite: test-generator gap (not a Hub bug)"
+            echo "### ${heading}"
             echo
-            echo "The \`api-test-generator/hub-suite\` check on \`${SHA:0:12}\` looks like the **test generator not yet handling this PR's API change**, not a Hub bug. [Run](${RUN_URL})."
+            echo "The \`api-test-generator/hub-suite\` check on \`${SHA:0:12}\` failed. ${verdict} [Run](${RUN_URL})."
             # Tag the author directly (not via clean(), which strips '@'); pr_author is charset-validated.
             if [ -n "$PR_AUTHOR" ]; then
               echo
-              echo "@${PR_AUTHOR} — heads-up for your PR; resolving this is on the api-test-generator side (see below), not a change you make here."
-            fi
-            if [ -n "$SUMMARY" ] && [ "$CATEGORY" = "generator-gap" ]; then
-              echo
-              echo "> $(clean "$SUMMARY" 200)"
-            fi
-            if [ -n "$UNMAPPED" ]; then
-              echo
-              echo "Operation(s) with no generated test: \`$(clean "$UNMAPPED" 300)\`"
-            fi
-            echo
-            if [ -n "$ISSUE_URL" ]; then
-              echo "This check does not block merging. api-test-generator needs a follow-up to cover the affected operations (tracked at ${ISSUE_URL}); it lands after this PR merges and the spec pin is bumped — see the merge order in the cookbook below."
-            else
-              echo "This check does not block merging. api-test-generator needs a follow-up to cover the affected operations; it lands after this PR merges and the spec pin is bumped — see the merge order in the cookbook below."
-            fi
-            echo
-            echo "What this means and what to do: [PR-check cookbook](https://github.com/camunda/api-test-generator/blob/main/docs/hub-pr-check-cookbook.md)."
-            echo
-            echo "_Posted automatically by api-test-generator's Hub PR check; edited in place on later pushes._"
-          } > "$body_file"
-
-          existing=$(gh api "repos/camunda/camunda-hub/issues/${PR_NUMBER}/comments" --paginate \
-            --jq "[.[] | select(.body | contains(\"${marker}\")) | .id] | first // empty")
-          if [ -n "$existing" ]; then
-            gh api -X PATCH "repos/camunda/camunda-hub/issues/comments/${existing}" -F body=@"$body_file" >/dev/null
-            echo "Updated comment ${existing} on camunda-hub#${PR_NUMBER}."
-          else
-            gh api -X POST "repos/camunda/camunda-hub/issues/${PR_NUMBER}/comments" -F body=@"$body_file" >/dev/null
-            echo "Commented on camunda-hub#${PR_NUMBER}."
-          fi
-
-      # The sticky comment above is only ever rewritten by a run that still qualifies. When a later
-      # push goes green, the old test-generator-gap note would otherwise stay on the PR
-      # saying something the latest status no longer supports. Only a green run counts as proof (a
-      # failed run that is merely classified differently proves nothing about the earlier gap).
-      - name: Mark a stale generator-gap comment as resolved
-        if: >-
-          always() && needs.run.result == 'success' &&
-          needs.validate.outputs.pr_number != '' &&
-          steps.status-token.outputs.token != ''
-        continue-on-error: true
-        env:
-          GH_TOKEN: ${{ steps.status-token.outputs.token }}
-          PR_NUMBER: ${{ needs.validate.outputs.pr_number }}
-          SHA: ${{ needs.validate.outputs.source_sha }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: |
-          set -euo pipefail
-          marker='<!-- api-test-generator:hub-pr-check:generator-gap -->'
-          id=$(gh api "repos/camunda/camunda-hub/issues/${PR_NUMBER}/comments" --paginate \
-            --jq "[.[] | select(.body | contains(\"${marker}\")) | .id] | first // empty")
-          [ -n "$id" ] || { echo "No sticky comment to resolve."; exit 0; }
-          body_file="$(mktemp)"
-          {
-            echo "$marker"
-            echo "### Generated hub suite: resolved"
-            echo
-            echo "The latest \`api-test-generator/hub-suite\` run on \`${SHA:0:12}\` passed, so the earlier test-generator-gap note no longer applies. [Run](${RUN_URL})."
-          } > "$body_file"
-          gh api -X PATCH "repos/camunda/camunda-hub/issues/comments/${id}" -F body=@"$body_file" >/dev/null
-          echo "Marked comment ${id} on camunda-hub#${PR_NUMBER} as resolved."
-
-      # A confident "this PR broke Hub" (classify category 'product', caused_by_pr) is comment-only
-      # too: tell the author on their PR instead of paging hub-medic in Slack. Unlike the
-      # generator-gap note, the fix here is in the PR's own Hub code, not api-test-generator.
-      - name: Tell the camunda-hub PR author this looks like a regression they introduced
-        if: >-
-          always() && needs.run.result == 'failure' &&
-          needs.validate.outputs.pr_number != '' &&
-          needs.validate.outputs.is_draft != 'true' &&
-          steps.status-token.outputs.token != '' &&
-          needs.classify.outputs.category == 'product' &&
-          needs.classify.outputs.caused_by_pr == 'true'
-        continue-on-error: true
-        env:
-          GH_TOKEN: ${{ steps.status-token.outputs.token }}
-          PR_NUMBER: ${{ needs.validate.outputs.pr_number }}
-          SHA: ${{ needs.validate.outputs.source_sha }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          SUMMARY: ${{ needs.classify.outputs.summary }}
-          # Charset-validated in validate, so safe to interpolate directly as an @mention.
-          PR_AUTHOR: ${{ needs.validate.outputs.pr_author }}
-        run: |
-          set -euo pipefail
-          marker='<!-- api-test-generator:hub-pr-check:regression -->'
-          # SUMMARY derives from the agent's reading of the PR: strip anything that could become a
-          # mention or close a code span. pr_author is validated, so it is emitted directly below.
-          clean() { printf '%s' "$1" | tr '\n' ' ' | tr -d '`@<>' | cut -c"1-$2"; }
-          body_file="$(mktemp)"
-          {
-            echo "$marker"
-            echo "### Generated hub suite: likely a regression from this PR"
-            echo
-            echo "The \`api-test-generator/hub-suite\` check on \`${SHA:0:12}\` looks like a **regression this PR introduced in Hub**, not a test-generator gap. [Run](${RUN_URL})."
-            if [ -n "$PR_AUTHOR" ]; then
-              echo
-              echo "@${PR_AUTHOR} — this one is yours: the fix is in this PR's Hub code, not api-test-generator."
+              case "$tag" in
+                yours) echo "@${PR_AUTHOR} — this one is yours: the fix is in this PR's Hub code, not api-test-generator." ;;
+                gap)   echo "@${PR_AUTHOR} — heads-up for your PR; resolving this is on the api-test-generator side (see below), not a change you make here." ;;
+                soft)  echo "@${PR_AUTHOR} — heads-up for your PR; open the run to see whether this needs a change here before merging." ;;
+                fyi)   echo "@${PR_AUTHOR} — heads-up: this looks unrelated to your change, so no action is needed unless it keeps happening." ;;
+              esac
             fi
             if [ -n "$SUMMARY" ]; then
               echo
-              echo "> $(clean "$SUMMARY" 200)"
+              echo "> $(clean "$SUMMARY" 300)"
+            fi
+            if [ -n "$UNMAPPED" ]; then
+              echo
+              echo "Operation(s) with no generated test at all: \`$(clean "$UNMAPPED" 300)\`"
+              if [ -n "$ISSUE_URL" ]; then
+                echo
+                echo "Tracked at ${ISSUE_URL}."
+              fi
             fi
             echo
-            echo "Open the run and read the failing test's request and response to confirm, then fix it before merging. What this means and what to do: [PR-check cookbook](https://github.com/camunda/api-test-generator/blob/main/docs/hub-pr-check-cookbook.md)."
+            echo "What this means and what to do: [PR-check cookbook](${COOKBOOK_URL})."
             echo
             echo "_Posted automatically by api-test-generator's Hub PR check; edited in place on later pushes._"
           } > "$body_file"
@@ -1252,13 +1228,17 @@ jobs:
             --jq "[.[] | select(.body | contains(\"${marker}\")) | .id] | first // empty")
           if [ -n "$existing" ]; then
             gh api -X PATCH "repos/camunda/camunda-hub/issues/comments/${existing}" -F body=@"$body_file" >/dev/null
-            echo "Updated regression comment ${existing} on camunda-hub#${PR_NUMBER}."
+            echo "Updated verdict comment ${existing} on camunda-hub#${PR_NUMBER}."
           else
             gh api -X POST "repos/camunda/camunda-hub/issues/${PR_NUMBER}/comments" -F body=@"$body_file" >/dev/null
-            echo "Commented (regression) on camunda-hub#${PR_NUMBER}."
+            echo "Commented verdict on camunda-hub#${PR_NUMBER}."
           fi
 
-      - name: Mark a stale regression comment as resolved
+      # The sticky comment above is only ever rewritten by a run that still qualifies. When a later
+      # push goes green, the old failure note would otherwise stay on the PR saying something the
+      # latest status no longer supports. Only a green run counts as proof (a failed run that is
+      # merely classified differently proves nothing about the earlier failure).
+      - name: Mark a stale verdict comment as resolved
         if: >-
           always() && needs.run.result == 'success' &&
           needs.validate.outputs.pr_number != '' &&
@@ -1271,19 +1251,19 @@ jobs:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
-          marker='<!-- api-test-generator:hub-pr-check:regression -->'
+          marker='<!-- api-test-generator:hub-pr-check:verdict -->'
           id=$(gh api "repos/camunda/camunda-hub/issues/${PR_NUMBER}/comments" --paginate \
             --jq "[.[] | select(.body | contains(\"${marker}\")) | .id] | first // empty")
-          [ -n "$id" ] || { echo "No regression comment to resolve."; exit 0; }
+          [ -n "$id" ] || { echo "No verdict comment to resolve."; exit 0; }
           body_file="$(mktemp)"
           {
             echo "$marker"
             echo "### Generated hub suite: resolved"
             echo
-            echo "The latest \`api-test-generator/hub-suite\` run on \`${SHA:0:12}\` passed, so the earlier note about a likely regression no longer applies. [Run](${RUN_URL})."
+            echo "The latest \`api-test-generator/hub-suite\` run on \`${SHA:0:12}\` passed, so the earlier failure note no longer applies. [Run](${RUN_URL})."
           } > "$body_file"
           gh api -X PATCH "repos/camunda/camunda-hub/issues/comments/${id}" -F body=@"$body_file" >/dev/null
-          echo "Marked regression comment ${id} on camunda-hub#${PR_NUMBER} as resolved."
+          echo "Marked verdict comment ${id} on camunda-hub#${PR_NUMBER} as resolved."
 
       # Slack heads-up, styled after the AlwaysGreen SaaS-E2E failure alert
       # (camunda/c8-cross-component-e2e-tests) but NOT copying its "a
@@ -1307,20 +1287,19 @@ jobs:
       # excludes drafts (#519) — a WIP push isn't something to page a human
       # over; the commit status (unconditional, see "Report status..."
       # above) still gives the author passive pass/fail feedback.
-      # A failure the PR itself caused (classify's caused_by_pr — set only for a high-confidence
-      # generator-gap, which also covers a coverage gap the PR introduced, or a medium+ product
-      # regression on an operation the PR touched) is comment-only, BUT only when there is a real
-      # author to reach: one of the sticky comments above @-tags the author on their PR, so no Slack
-      # is posted. When pr_author is empty — a bot (e.g. renovate[bot], whose "[bot]" login fails the
-      # charset check in validate), or any lookup failure — there is nobody to tag, so the Slack
-      # alert still fires and pings hub-medic. Every other failure (a gap or regression on an
-      # untouched operation, "could not confirm", infra, flaky, unknown) pings as before.
+      # Every failing PR is comment-only now (the 2026-10-28 handover decision): the sticky comment
+      # above @-tags the author on their own PR for ANY category, so Slack is suppressed whenever
+      # there is an author to reach. Slack fires ONLY when pr_author is empty — a bot (e.g.
+      # renovate[bot], whose "[bot]" login fails the charset check in validate) or any lookup failure
+      # — where there is nobody to @-tag, so the alert falls back to pinging hub-medic (the comment
+      # body still posts, without a mention). The nightly, not this PR check, is what pages the medic
+      # for failures on main.
       - name: Build Slack alert text
         id: msg
         if: >-
           always() && needs.run.result == 'failure' &&
           needs.validate.outputs.is_draft != 'true' &&
-          !(needs.classify.outputs.caused_by_pr == 'true' && needs.validate.outputs.pr_author != '')
+          needs.validate.outputs.pr_author == ''
         env:
           # Validated (digits-only) by the `validate` job — empty if the
           # dispatch payload's pr_number was missing/malformed.
@@ -1550,7 +1529,7 @@ jobs:
         if: >-
           always() && needs.run.result == 'failure' &&
           needs.validate.outputs.is_draft != 'true' &&
-          !(needs.classify.outputs.caused_by_pr == 'true' && needs.validate.outputs.pr_author != '')
+          needs.validate.outputs.pr_author == ''
         continue-on-error: true
         uses: ./.github/actions/slack-token
         with:
@@ -1564,7 +1543,7 @@ jobs:
           always() && needs.run.result == 'failure' &&
           needs.validate.outputs.is_draft != 'true' &&
           steps.slack-secrets.outputs.SLACK_BOT_TOKEN != '' &&
-          !(needs.classify.outputs.caused_by_pr == 'true' && needs.validate.outputs.pr_author != '')
+          needs.validate.outputs.pr_author == ''
         continue-on-error: true
         uses: actions/setup-node@v6
         with:
@@ -1581,7 +1560,7 @@ jobs:
           always() && needs.run.result == 'failure' &&
           needs.validate.outputs.is_draft != 'true' &&
           steps.slack-secrets.outputs.SLACK_BOT_TOKEN != '' &&
-          !(needs.classify.outputs.caused_by_pr == 'true' && needs.validate.outputs.pr_author != '')
+          needs.validate.outputs.pr_author == ''
         continue-on-error: true
         env:
           SLACK_TOKEN: ${{ steps.slack-secrets.outputs.SLACK_BOT_TOKEN }}
