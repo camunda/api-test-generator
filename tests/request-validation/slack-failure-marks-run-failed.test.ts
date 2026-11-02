@@ -194,14 +194,26 @@ describe('the verdict comment on a failing camunda-hub PR', () => {
     expect(gate).not.toContain('caused_by_pr');
     expect(gate).not.toContain('category ==');
   });
+
+  it('excludes a presuite (setup-step) failure — that stays Slack-only, pinging automation', () => {
+    // presuite = suites did not run AND Hub did not fail to start. It is shared-pipeline, the
+    // automation team's responsibility, so it gets no PR comment (handled in Slack instead).
+    const gate = (comment?.if ?? '').replace(/\s+/g, ' ');
+    expect(gate).toContain(
+      "!(needs.run.outputs.suites_ran != 'true' && needs.run.outputs.hub_start_failed != 'true')",
+    );
+  });
 });
 
-describe('hub-pr-check: a failing PR is comment-only unless there is no author to tag', () => {
+describe('hub-pr-check: a failing PR is comment-only, except bot PRs and presuite failures', () => {
   // 2026-10-28 handover decision: a PR-check failure is the PR author's to look at on their own PR,
   // so the sticky verdict comment @-tags the author and the Slack chain is suppressed whenever there
-  // is an author to reach. Slack fires ONLY when pr_author is empty — a bot (renovate[bot]) or a
-  // lookup failure — where nobody can be @-tagged, so the alert falls back to pinging hub-medic.
-  const SUPPRESS = "needs.validate.outputs.pr_author == ''";
+  // is an author to reach. Slack fires in exactly two cases: pr_author is empty — a bot (renovate[bot])
+  // or a lookup failure — where nobody can be @-tagged (fallback → hub-medic); OR a presuite failure
+  // (setup step before the suites ran), which is automation's and gets no comment (→ test-automation-medic).
+  const NO_AUTHOR = "needs.validate.outputs.pr_author == ''";
+  const PRESUITE =
+    "needs.run.outputs.suites_ran != 'true' && needs.run.outputs.hub_start_failed != 'true'";
   const wf: unknown = parse(readFileSync(join(root, '.github/workflows/hub-pr-check.yml'), 'utf8'));
   const report =
     isRecord(wf) && isRecord(wf.jobs) && isRecord(wf.jobs.report) ? wf.jobs.report : {};
@@ -213,12 +225,13 @@ describe('hub-pr-check: a failing PR is comment-only unless there is no author t
     expect(slackSteps.length).toBeGreaterThanOrEqual(4);
   });
 
-  it('fires every Slack step only when there is no author to tag', () => {
+  it('fires every Slack step only for a bot PR or a presuite failure', () => {
     for (const s of slackSteps) {
-      expect(
-        (s.if ?? '').replace(/\s+/g, ' '),
-        `Slack step "${s.name}" must fire only when pr_author is empty`,
-      ).toContain(SUPPRESS);
+      const gate = (s.if ?? '').replace(/\s+/g, ' ');
+      expect(gate, `Slack step "${s.name}" must fire when pr_author is empty`).toContain(NO_AUTHOR);
+      expect(gate, `Slack step "${s.name}" must also fire for a presuite failure`).toContain(
+        PRESUITE,
+      );
     }
   });
 });

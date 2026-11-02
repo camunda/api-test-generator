@@ -755,15 +755,24 @@ verdict and how actionable it is for the author:
   (merge order: Hub PR → pin bump → generator PR);
 - a **`product`** that could not be tied to the PR, or **`unknown`** — a heads-up to
   open the run and confirm before merging;
-- **`infra` / `flaky` / `startup` / `presuite`** — a heads-up that the failure looks
-  unrelated to the author's change, so no action is needed unless it keeps happening.
+- **`infra` / `flaky` / `startup`** — a heads-up that the failure looks unrelated to
+  the author's change, so no action is needed unless it keeps happening.
 
-Slack is the **fallback for a PR with no author to @-tag**. The Slack-chain steps'
-`if:` gates carry `needs.validate.outputs.pr_author == ''`, so the alert fires (and
-pings `hub-medic`) **only** when `pr_author` is empty — a bot (e.g.
-`renovate[bot]`, whose `[bot]` login fails the charset check in `validate`) or any
-lookup failure, where there is nobody to tag. Whenever there IS an author the
-comment covers it and no Slack is posted. The gate is guarded by
+A **`presuite`** failure (a setup step before the suites ran — checkout, clone,
+install, registry login, image pull) is the exception: it is shared-pipeline,
+test-automation's responsibility, not the PR author's, so it gets **no comment** and
+stays in Slack pinging `test-automation-medic`. (A `startup` failure still gets a
+comment — a bad PR image is the author's to look at.)
+
+Slack otherwise fires only as a **fallback for a PR with no author to @-tag**. The
+Slack-chain steps' `if:` gates fire when `pr_author == ''` **or** the failure is
+presuite (`suites_ran != 'true' && hub_start_failed != 'true'`). The ping is routed
+to match: a presuite failure pings `test-automation-medic`; every other (bot-PR)
+case pings `hub-medic` — it is a camunda-hub PR nobody can be @-tagged on, so the
+Hub on-call owns it. A bot (e.g. `renovate[bot]`, whose `[bot]` login fails the
+charset check in `validate`) is the usual no-author case; its comment still posts
+without a mention. Whenever there IS an author and the failure is not presuite, the
+comment covers it and no Slack is posted. The gates are guarded by
 `tests/request-validation/slack-failure-marks-run-failed.test.ts`. The comment
 needs Issues or Pull requests: write for the qa-processes App on camunda-hub;
 without it the step only warns. The tracking issues are unchanged — the
