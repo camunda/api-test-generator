@@ -210,6 +210,15 @@ describe('the verdict comment on a failing camunda-hub PR', () => {
     expect(text).toContain('re-posted on each failing push');
   });
 
+  it('removes/resolves legacy-marker comments too (prefix match, not only :verdict)', () => {
+    // main posts the legacy :generator-gap / :regression markers, so open PRs can carry one. Both the
+    // delete-on-failure and resolve-on-green lookups must match the shared prefix so those migrate.
+    const text = readFileSync(join(root, '.github/workflows/hub-pr-check.yml'), 'utf8');
+    expect(text).toContain("marker_prefix='api-test-generator:hub-pr-check:'");
+    const prefixLookups = text.match(/contains\(\\"\$\{marker_prefix\}\\"\)/g) ?? [];
+    expect(prefixLookups.length).toBeGreaterThanOrEqual(2);
+  });
+
   it('excludes a presuite (setup-step) failure — that stays Slack-only, pinging automation', () => {
     // presuite = suites did not run AND Hub did not fail to start. It is shared-pipeline, the
     // automation team's responsibility, so it gets no PR comment (handled in Slack instead).

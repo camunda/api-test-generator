@@ -1254,6 +1254,12 @@ jobs:
           } > "$body_file"
 
           api="repos/camunda/camunda-hub/issues"
+          # Match any of this check's sticky comments by the shared marker prefix, not just the new
+          # :verdict one. main (the version that runs on real PRs via repository_dispatch) posts the
+          # legacy :generator-gap / :regression markers, so an open PR can already carry one; matching
+          # the prefix removes it here (and resolves it on green below) instead of leaving a stale,
+          # duplicated comment through the transition.
+          marker_prefix='api-test-generator:hub-pr-check:'
           # Post a FRESH comment on every failing push, after removing the previous verdict comment(s).
           # Editing a comment in place sends no notification, so a repeat (or a changed verdict) could
           # be missed; a new POST — and its @mention — always notifies the author, and deleting the
@@ -1261,7 +1267,7 @@ jobs:
           # best-effort: if it is refused, the fresh comment still posts (an extra stale comment is a
           # far smaller problem than a missed notification).
           for id in $(gh api "${api}/${PR_NUMBER}/comments" --paginate \
-            --jq "[.[] | select(.body | contains(\"${marker}\")) | .id] | .[]"); do
+            --jq "[.[] | select(.body | contains(\"${marker_prefix}\")) | .id] | .[]"); do
             gh api -X DELETE "${api}/comments/${id}" >/dev/null 2>&1 \
               && echo "Removed prior verdict comment ${id} on camunda-hub#${PR_NUMBER}." \
               || echo "Could not remove prior verdict comment ${id} (continuing)."
@@ -1287,6 +1293,9 @@ jobs:
         run: |
           set -euo pipefail
           marker='<!-- api-test-generator:hub-pr-check:verdict -->'
+          # Match any of this check's sticky comments by the shared prefix, so a green run also resolves
+          # a legacy :generator-gap / :regression comment that main may have left on an open PR.
+          marker_prefix='api-test-generator:hub-pr-check:'
           api="repos/camunda/camunda-hub/issues"
           body_file="$(mktemp)"
           {
@@ -1299,7 +1308,7 @@ jobs:
           # is normally one, but resolve every match defensively.
           found=0
           for id in $(gh api "${api}/${PR_NUMBER}/comments" --paginate \
-            --jq "[.[] | select(.body | contains(\"${marker}\")) | .id] | .[]"); do
+            --jq "[.[] | select(.body | contains(\"${marker_prefix}\")) | .id] | .[]"); do
             gh api -X PATCH "${api}/comments/${id}" -F body=@"$body_file" >/dev/null
             echo "Marked verdict comment ${id} on camunda-hub#${PR_NUMBER} as resolved."
             found=1
