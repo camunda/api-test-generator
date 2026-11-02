@@ -1307,17 +1307,18 @@ jobs:
       # above) still gives the author passive pass/fail feedback.
       # A failure the PR itself caused (classify's caused_by_pr — set only for a high-confidence
       # generator-gap, which also covers a coverage gap the PR introduced, or a medium+ product
-      # regression on an operation the PR touched) is comment-only: one of the sticky comments above
-      # @-tags the author on their PR, so no Slack is posted. Every other failure (a gap or
-      # regression on an untouched operation, "could not confirm", infra, flaky, unknown) still
-      # pings. The exclusion matches the two comment steps' gates exactly (generator-gap and product,
-      # each with caused_by_pr), so a suppressed alert always leaves the author a comment.
+      # regression on an operation the PR touched) is comment-only, BUT only when there is a real
+      # author to reach: one of the sticky comments above @-tags the author on their PR, so no Slack
+      # is posted. When pr_author is empty — a bot (e.g. renovate[bot], whose "[bot]" login fails the
+      # charset check in validate), or any lookup failure — there is nobody to tag, so the Slack
+      # alert still fires and pings hub-medic. Every other failure (a gap or regression on an
+      # untouched operation, "could not confirm", infra, flaky, unknown) pings as before.
       - name: Build Slack alert text
         id: msg
         if: >-
           always() && needs.run.result == 'failure' &&
           needs.validate.outputs.is_draft != 'true' &&
-          !(needs.classify.outputs.caused_by_pr == 'true')
+          !(needs.classify.outputs.caused_by_pr == 'true' && needs.validate.outputs.pr_author != '')
         env:
           # Validated (digits-only) by the `validate` job — empty if the
           # dispatch payload's pr_number was missing/malformed.
@@ -1547,7 +1548,7 @@ jobs:
         if: >-
           always() && needs.run.result == 'failure' &&
           needs.validate.outputs.is_draft != 'true' &&
-          !(needs.classify.outputs.caused_by_pr == 'true')
+          !(needs.classify.outputs.caused_by_pr == 'true' && needs.validate.outputs.pr_author != '')
         continue-on-error: true
         uses: ./.github/actions/slack-token
         with:
@@ -1561,7 +1562,7 @@ jobs:
           always() && needs.run.result == 'failure' &&
           needs.validate.outputs.is_draft != 'true' &&
           steps.slack-secrets.outputs.SLACK_BOT_TOKEN != '' &&
-          !(needs.classify.outputs.caused_by_pr == 'true')
+          !(needs.classify.outputs.caused_by_pr == 'true' && needs.validate.outputs.pr_author != '')
         continue-on-error: true
         uses: actions/setup-node@v6
         with:
@@ -1578,7 +1579,7 @@ jobs:
           always() && needs.run.result == 'failure' &&
           needs.validate.outputs.is_draft != 'true' &&
           steps.slack-secrets.outputs.SLACK_BOT_TOKEN != '' &&
-          !(needs.classify.outputs.caused_by_pr == 'true')
+          !(needs.classify.outputs.caused_by_pr == 'true' && needs.validate.outputs.pr_author != '')
         continue-on-error: true
         env:
           SLACK_TOKEN: ${{ steps.slack-secrets.outputs.SLACK_BOT_TOKEN }}

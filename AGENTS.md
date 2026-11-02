@@ -754,9 +754,13 @@ place and marked resolved on a green run:
 Every other failure — a gap or regression on an **untouched** operation, a
 "could not confirm", infra, flaky, unknown — is still Slack-only, no PR comment.
 The Slack-chain steps' `if:` gates carry the exclusion
-`!(caused_by_pr == 'true')`, which matches the two comment steps' gates exactly,
-so a suppressed alert always leaves a comment behind (guarded by
-`tests/request-validation/slack-failure-marks-run-failed.test.ts`). The comments
+`!(caused_by_pr == 'true' && pr_author != '')`: a caused-by-PR failure goes
+comment-only **only when there is an author to reach**. When `pr_author` is empty
+— a bot (e.g. `renovate[bot]`, whose `[bot]` login fails the charset check in
+`validate`) or any lookup failure — there is nobody to @-tag, so the Slack alert
+still fires and pings `hub-medic` (the comment body still posts, without a
+mention). The exclusion is guarded by
+`tests/request-validation/slack-failure-marks-run-failed.test.ts`. The comments
 need Issues or Pull requests: write for the qa-processes App on camunda-hub;
 without it the step only warns.
 `_hub-suite-run.yml`'s own coverage-check step (#505) fails ITS job whenever

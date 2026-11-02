@@ -182,9 +182,11 @@ describe('the comment on a camunda-hub PR whose generator gap the PR caused', ()
 describe('hub-pr-check: a failure the PR caused is comment-only (no Slack)', () => {
   // caused_by_pr is set only for a high-confidence generator-gap (which also covers a coverage gap
   // the PR introduced, labelled generator-gap) or a medium+ product regression the PR touched. Both
-  // get a sticky PR comment that @-tags the author, so the Slack steps skip the whole caused_by_pr
-  // set — a suppressed alert always leaves a comment behind.
-  const SUPPRESS = "!(needs.classify.outputs.caused_by_pr == 'true')";
+  // get a sticky PR comment that @-tags the author, so the Slack steps skip them — but only when
+  // there is a real author to reach (pr_author != ''). A bot/author-less PR keeps its Slack alert,
+  // so hub-medic is still pinged when nobody can be @-tagged.
+  const SUPPRESS =
+    "!(needs.classify.outputs.caused_by_pr == 'true' && needs.validate.outputs.pr_author != '')";
   const wf: unknown = parse(readFileSync(join(root, '.github/workflows/hub-pr-check.yml'), 'utf8'));
   const report =
     isRecord(wf) && isRecord(wf.jobs) && isRecord(wf.jobs.report) ? wf.jobs.report : {};
