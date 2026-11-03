@@ -1,6 +1,6 @@
 # Hub Nightly Channel Cookbook
 
-> **Goal:** read any message in `#camunda-hub-nightly-test-results` and know what it means, whether it is
+> **Goal:** read any message in `#top-hub-nightly-test-results` and know what it means, whether it is
 > yours to act on, and what to do. You need to know Hub, not how the generator works: the few steps that touch the generator are spelled out in "Run it by hand" below, and the big picture is in [how-it-works.md](how-it-works.md). Terms are explained in "Words used" in how-it-works.md.
 > Messages about a single camunda-hub PR are in `#camunda-hub-pr-e2e-results` instead; see
 > [hub-pr-check-cookbook.md](hub-pr-check-cookbook.md).
