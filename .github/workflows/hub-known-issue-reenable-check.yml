@@ -184,7 +184,7 @@ jobs:
           token: ${{ steps.slack.outputs.SLACK_BOT_TOKEN }}
           payload: |
             {
-              "channel": "#camunda-hub-nightly-test-results",
+              "channel": "#top-hub-nightly-test-results",
               "text": ${{ toJSON(steps.slack-message.outputs.text) }},
               "mrkdwn": true
             }

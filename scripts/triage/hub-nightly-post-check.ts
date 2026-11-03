@@ -1,6 +1,6 @@
 // Checks, once a morning, that last night's nightly run and its triage run actually happened.
 //
-// The nightly (02:00 UTC) and the triage that follows it post to #camunda-hub-nightly-test-results.
+// The nightly (02:00 UTC) and the triage that follows it post to #top-hub-nightly-test-results.
 // A failed Slack step turns its run red, but if a run never starts (a disabled schedule, an outage)
 // or hangs, nothing posts and nothing is red, so a missing post would go unnoticed. This looks at
 // the two workflows' runs for today (UTC) and posts one alert when one is missing, stuck or ended
@@ -234,7 +234,7 @@ async function main(): Promise<void> {
     listNightly: (since) => listRuns(repo, 'nightly-camunda-hub.yml', token, since),
     listTriage: (since) => listRuns(repo, 'triage-camunda-hub-nightly.yml', token, since),
     post: (text, slack) =>
-      postDigest(text, slack, env('SLACK_CHANNEL') || '#camunda-hub-nightly-test-results'),
+      postDigest(text, slack, env('SLACK_CHANNEL') || '#top-hub-nightly-test-results'),
     log: (line) => console.log(line),
     error: (line) => console.error(line),
   });

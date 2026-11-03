@@ -13,7 +13,7 @@ Workflow: [`hub-response-coverage.yml`](../.github/workflows/hub-response-covera
 
 | Where | What it shows |
 |---|---|
-| Slack `#camunda-hub-nightly-test-results` | The summary (see below) |
+| Slack `#top-hub-nightly-test-results` | The summary (see below) |
 | Tracking issue `[hub-response-coverage] Endpoints missing response or bad-request tests` | An index: one line per API area, linking to that area's issue |
 | One issue per API area `[hub-response-coverage] <Area>: missing response or bad-request tests` | A table of that area's endpoints and what each is missing |
 | Run summary and the `hub-coverage-report` artifact | The full per-endpoint table, `history.csv` (one row per scheduled run), `page.html` |

@@ -14,7 +14,7 @@ describe('the spec-bump "check failed" post', () => {
 
   it('goes to the Hub channel for the Hub config and the OCA channel for camunda-oca', () => {
     expect(post).toContain(
-      "matrix.private && '#camunda-hub-nightly-test-results' || '#c8-orchestration-cluster-e2e-test-results'",
+      "matrix.private && '#top-hub-nightly-test-results' || '#c8-orchestration-cluster-e2e-test-results'",
     );
   });
 
