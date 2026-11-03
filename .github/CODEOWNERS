@@ -10,3 +10,8 @@
 /request-validation/        @camunda/hub-backend @camunda/test-automation-team
 /emitter-sdk/               @camunda/hub-backend @camunda/test-automation-team
 /configs/camunda-oca/       @camunda/hub-backend @camunda/test-automation-team
+
+# The camunda-oca spec-pin bump (the chore/spec-bump-camunda-oca PR) is OCA's own concern, so it goes
+# to the test automation team only — not the Hub backend team. More specific than the rule above, so it
+# wins (CODEOWNERS is last-match-wins).
+/configs/camunda-oca/spec-pin.json  @camunda/test-automation-team
