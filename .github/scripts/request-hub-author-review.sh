@@ -46,16 +46,19 @@ DRY_RUN="${DRY_RUN:-}"
 [ -n "$PR" ] || die "PR is required"
 [ -n "$GEN_TOKEN" ] || die "GEN_TOKEN is required (Pull requests: write on $GEN_REPO)"
 
-# Idempotency, mirroring the gap-issue assignee guard: only act when nobody has been requested yet,
-# so a human's manual reviewer change sticks across re-runs.
+# Idempotency, mirroring the gap-issue assignee guard: only act when no INDIVIDUAL reviewer has been
+# requested yet, so a human's manual reviewer change sticks across re-runs. Team requests are excluded
+# from the count — CODEOWNERS (#718) auto-requests @camunda/hub-backend on every PR, so counting teams
+# would make this always see a reviewer and never add the endpoint's author (a team entry has no
+# `.login`; a user entry does).
 have=$(GH_TOKEN="$GEN_TOKEN" gh pr view "$PR" --repo "$GEN_REPO" \
-  --json reviewRequests --jq '.reviewRequests | length' 2>/dev/null || echo "")
+  --json reviewRequests --jq '[.reviewRequests[] | select(.login)] | length' 2>/dev/null || echo "")
 if [ -z "$have" ]; then
   warn "could not read review requests on $GEN_REPO#$PR (token/access?) — leaving CODEOWNERS to request the team"
   exit 0
 fi
 if [ "$have" != "0" ]; then
-  echo "A reviewer is already requested on $GEN_REPO#$PR — leaving it as is."
+  echo "An individual reviewer is already requested on $GEN_REPO#$PR — leaving it as is."
   exit 0
 fi
 
@@ -65,17 +68,29 @@ RESOLVED_LOGIN=""
 resolve_author() {
   op="$1"
   RESOLVED_LOGIN=""
+  # OpenAPI operationIds are identifier-safe ([A-Za-z0-9_]). Anything else is unexpected input; rather
+  # than risk a malformed/injected regex below, treat it as unattributable and leave it to CODEOWNERS.
+  case "$op" in
+    "" | *[!A-Za-z0-9_]*)
+      warn "operation '$op': not an identifier-safe operationId — cannot attribute"
+      return 0
+      ;;
+  esac
   # 1. Which spec file declares it — a local grep of the sibling working tree (no token, depth-safe).
-  file=$(grep -rl --include='*.yaml' --include='*.yml' --include='*.json' \
-    -e "operationId: $op" -e "\"operationId\": \"$op\"" "$HUB_DIR/$HUB_SPEC_DIR" 2>/dev/null | head -1)
+  #    Match the COMPLETE operationId (end-anchored) so `getFile` does not also match `getFileVersions`.
+  file=$(grep -rlE --include='*.yaml' --include='*.yml' --include='*.json' \
+    -e "operationId:[[:space:]]*[\"']?${op}[\"']?[[:space:]]*(#.*)?\$" \
+    -e "\"operationId\"[[:space:]]*:[[:space:]]*\"${op}\"" \
+    "$HUB_DIR/$HUB_SPEC_DIR" 2>/dev/null | head -1)
   if [ -z "$file" ]; then
     warn "operation '$op': no spec file under $HUB_SPEC_DIR declares it — cannot attribute"
     return 0
   fi
   rel="${file#"$HUB_DIR"/}"
 
-  # 2. The commit that introduced the operationId, preferred; else the most recent commit touching the
-  #    file. Uses the Contents:read token (the qa-processes issues-only token cannot list commits).
+  # 2. The commit that INTRODUCED the operationId (a line adding it). Uses the Contents:read token (the
+  #    qa-processes issues-only token cannot list commits). Only a true introduction is attributed: we do
+  #    NOT fall back to the latest editor of the file, who may have touched an unrelated endpoint or docs.
   commits=$(GH_TOKEN="$HUB_CONTENTS_TOKEN" gh api \
     "repos/camunda/camunda-hub/commits?path=$rel&per_page=100" \
     --jq '.[].sha' 2>/dev/null || echo "")
@@ -89,13 +104,17 @@ resolve_author() {
   for sha in $(echo "$commits" | tac); do
     patch=$(GH_TOKEN="$HUB_CONTENTS_TOKEN" gh api "repos/camunda/camunda-hub/commits/$sha" \
       --jq '[.files[].patch // ""] | join("\n")' 2>/dev/null || echo "")
-    if echo "$patch" | grep -qE "^\+.*operationId.*[\": ]$op([\"[:space:]]|$)"; then
+    if echo "$patch" | grep -qE "^\+.*operationId.*[\": ]$op([\"[:space:]]|\$)"; then
       intro="$sha"
       break
     fi
   done
-  # Fall back to the newest commit touching the file (current owner-ish) when no additive hit is found.
-  [ -n "$intro" ] || intro=$(echo "$commits" | head -1)
+  # No introducing commit in the scanned history (older than the last 100 file commits, or patches
+  # unavailable) → leave unresolved rather than guess. CODEOWNERS remains the reviewer.
+  if [ -z "$intro" ]; then
+    warn "operation '$op': no introducing commit found in the last 100 commits touching $rel — cannot attribute"
+    return 0
+  fi
 
   # 3. commit -> GitHub login. Prefer the resolved commit author; fall back to the author of the PR the
   #    commit belongs to (handles squash merges), which needs Pull requests: read.
