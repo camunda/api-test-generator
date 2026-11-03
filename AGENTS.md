@@ -760,8 +760,12 @@ for the author:
   (merge order: Hub PR → pin bump → generator PR);
 - a **`product`** that could not be tied to the PR, or **`unknown`** — a heads-up to
   open the run and confirm before merging;
-- **`infra` / `flaky` / `startup`** — a heads-up that the failure looks unrelated to
-  the author's change, so no action is needed unless it keeps happening.
+- **`infra` / `flaky`** — a heads-up that the failure looks unrelated to the author's
+  change, so no action is needed unless it keeps happening;
+- **`startup`** (Hub PR image did not start) — a heads-up to inspect before merging,
+  not a dismissal: a change that stops Hub booting reaches this branch too, so it may
+  be the author's (the `soft` tag / "if your change could affect startup, it may be
+  the cause" verdict).
 
 A **`presuite`** failure (a setup step before the suites ran — checkout, clone,
 install, registry login, image pull) is the exception: it is shared-pipeline,
