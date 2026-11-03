@@ -98,13 +98,24 @@ resolve_author() {
     warn "operation '$op': could not list commits for $rel (needs Contents: read on camunda-hub) — cannot attribute"
     return 0
   fi
+  # The exact operationId declaration as it appears in a diff line, in either spec form, quote-tolerant
+  # and end-anchored — the same shape as the file lookup above, so a bare mention (e.g. the id used in a
+  # test or example) is not treated as a declaration.
+  decl_re="(operationId:[[:space:]]*[\"']?${op}[\"']?[[:space:]]*(#.*)?\$|\"operationId\"[[:space:]]*:[[:space:]]*\"${op}\")"
   # shellcheck disable=SC2086
-  # Oldest first, so the first commit whose diff ADDS the operationId is where it was introduced.
+  # Oldest first: the first commit that ADDS the declaration **in the spec file's own patch** and does
+  # NOT also remove it is where the operation was introduced. Scanning only `$rel`'s patch avoids
+  # attributing a commit that merely mentioned the id in another file; the added-not-removed check avoids
+  # mistaking a formatting reflow (which removes and re-adds the same line) for the introduction. If the
+  # real introduction is outside this window, no commit here qualifies → unresolved → CODEOWNERS.
   intro=""
   for sha in $(echo "$commits" | tac); do
-    patch=$(GH_TOKEN="$HUB_CONTENTS_TOKEN" gh api "repos/camunda/camunda-hub/commits/$sha" \
-      --jq '[.files[].patch // ""] | join("\n")' 2>/dev/null || echo "")
-    if echo "$patch" | grep -qE "^\+.*operationId.*[\": ]$op([\"[:space:]]|\$)"; then
+    patch=$(GH_TOKEN="$HUB_CONTENTS_TOKEN" gh api "repos/camunda/camunda-hub/commits/$sha" 2>/dev/null \
+      | jq -r --arg rel "$rel" '[.files[]? | select(.filename == $rel) | .patch // ""] | join("\n")' \
+        2>/dev/null || echo "")
+    [ -n "$patch" ] || continue
+    if printf '%s\n' "$patch" | grep -qE "^\+[[:space:]]*${decl_re}" &&
+      ! printf '%s\n' "$patch" | grep -qE "^-[[:space:]]*${decl_re}"; then
       intro="$sha"
       break
     fi
