@@ -46,19 +46,25 @@ DRY_RUN="${DRY_RUN:-}"
 [ -n "$PR" ] || die "PR is required"
 [ -n "$GEN_TOKEN" ] || die "GEN_TOKEN is required (Pull requests: write on $GEN_REPO)"
 
-# Idempotency, mirroring the gap-issue assignee guard: only act when no INDIVIDUAL reviewer has been
-# requested yet, so a human's manual reviewer change sticks across re-runs. Team requests are excluded
-# from the count — CODEOWNERS (#718) auto-requests @camunda/hub-backend on every PR, so counting teams
-# would make this always see a reviewer and never add the endpoint's author (a team entry has no
-# `.login`; a user entry does).
+# Idempotency, mirroring the gap-issue assignee guard: only act when no INDIVIDUAL reviewer has yet been
+# requested OR has already submitted a review, so the author is requested once and a human's manual
+# reviewer change sticks across re-runs. Two exclusions:
+#   - team requests don't count — CODEOWNERS (#718) auto-requests @camunda/hub-backend on every PR, and a
+#     team entry has no `.login` (a user entry does), so counting teams would always see a reviewer;
+#   - a submitted review drops OUT of reviewRequests, so without counting completed reviews a later run
+#     would re-request (and re-notify) an author who has already reviewed. Non-bot `reviews[]` are added
+#     to the count and deduped against pending requests.
 have=$(GH_TOKEN="$GEN_TOKEN" gh pr view "$PR" --repo "$GEN_REPO" \
-  --json reviewRequests --jq '[.reviewRequests[] | select(.login)] | length' 2>/dev/null || echo "")
+  --json reviewRequests,reviews \
+  --jq '([.reviewRequests[] | select(.login) | .login]
+         + [.reviews[] | .author.login | select(. and (endswith("[bot]") | not))]) | unique | length' \
+  2>/dev/null || echo "")
 if [ -z "$have" ]; then
   warn "could not read review requests on $GEN_REPO#$PR (token/access?) — leaving CODEOWNERS to request the team"
   exit 0
 fi
 if [ "$have" != "0" ]; then
-  echo "An individual reviewer is already requested on $GEN_REPO#$PR — leaving it as is."
+  echo "An individual reviewer is already requested on or has reviewed $GEN_REPO#$PR — leaving it as is."
   exit 0
 fi
 
@@ -103,19 +109,22 @@ resolve_author() {
   # test or example) is not treated as a declaration.
   decl_re="(operationId:[[:space:]]*[\"']?${op}[\"']?[[:space:]]*(#.*)?\$|\"operationId\"[[:space:]]*:[[:space:]]*\"${op}\")"
   # shellcheck disable=SC2086
-  # Oldest first: the first commit that ADDS the declaration **in the spec file's own patch** and does
-  # NOT also remove it is where the operation was introduced. Scanning only `$rel`'s patch avoids
-  # attributing a commit that merely mentioned the id in another file; the added-not-removed check avoids
-  # mistaking a formatting reflow (which removes and re-adds the same line) for the introduction. If the
-  # real introduction is outside this window, no commit here qualifies → unresolved → CODEOWNERS.
+  # Oldest first: the first commit that ADDS the declaration in the spec file's own patch and does NOT
+  # remove it ANYWHERE in the same commit is where the operation was introduced. Added is checked in
+  # `$rel`'s patch only, so a mere mention of the id in a test or example elsewhere never attributes the
+  # endpoint. Removed is checked across ALL the commit's file patches, so both a formatting reflow
+  # (remove + re-add in the same file) and a move between spec files (removed from one file, added to
+  # another) are rejected rather than attributed to the editor/mover. grep reads from here-strings, not a
+  # pipe, so pipefail + a SIGPIPE on a large patch (grep -q exits on first match) cannot flip the result.
+  # No qualifying commit in the window → unresolved → CODEOWNERS.
   intro=""
   for sha in $(echo "$commits" | tac); do
-    patch=$(GH_TOKEN="$HUB_CONTENTS_TOKEN" gh api "repos/camunda/camunda-hub/commits/$sha" 2>/dev/null \
-      | jq -r --arg rel "$rel" '[.files[]? | select(.filename == $rel) | .patch // ""] | join("\n")' \
-        2>/dev/null || echo "")
-    [ -n "$patch" ] || continue
-    if printf '%s\n' "$patch" | grep -qE "^\+[[:space:]]*${decl_re}" &&
-      ! printf '%s\n' "$patch" | grep -qE "^-[[:space:]]*${decl_re}"; then
+    commit=$(GH_TOKEN="$HUB_CONTENTS_TOKEN" gh api "repos/camunda/camunda-hub/commits/$sha" 2>/dev/null || echo "")
+    [ -n "$commit" ] || continue
+    rel_patch=$(jq -r --arg rel "$rel" '[.files[]? | select(.filename == $rel) | .patch // ""] | join("\n")' <<< "$commit" 2>/dev/null || echo "")
+    all_patch=$(jq -r '[.files[]? | .patch // ""] | join("\n")' <<< "$commit" 2>/dev/null || echo "")
+    if grep -qE "^\+[[:space:]]*${decl_re}" <<< "$rel_patch" &&
+      ! grep -qE "^-[[:space:]]*${decl_re}" <<< "$all_patch"; then
       intro="$sha"
       break
     fi
