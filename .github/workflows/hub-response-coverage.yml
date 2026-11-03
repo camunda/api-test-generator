@@ -2,7 +2,7 @@
 #
 # For every operation in the latest camunda-hub spec, compares the response codes the
 # spec documents (2xx/400/401/403/404/409) against the status codes the generated
-# suites assert, and posts the totals to #camunda-hub-nightly-test-results with the
+# suites assert, and posts the totals to #top-hub-nightly-test-results with the
 # change since the previous report. Static analysis of generated output — it does not
 # need a running Hub and cannot fail on a flaky backend. The full per-operation matrix
 # is in the run summary and the `hub-coverage-report` artifact, whose `history.csv` carries
@@ -253,7 +253,7 @@ jobs:
           token: ${{ steps.slack.outputs.SLACK_BOT_TOKEN }}
           payload: |
             {
-              "channel": "#camunda-hub-nightly-test-results",
+              "channel": "#top-hub-nightly-test-results",
               "text": ${{ toJSON(steps.message.outputs.text) }},
               "mrkdwn": true
             }
@@ -270,7 +270,7 @@ jobs:
           token: ${{ steps.slack.outputs.SLACK_BOT_TOKEN }}
           payload: |
             {
-              "channel": "#camunda-hub-nightly-test-results",
+              "channel": "#top-hub-nightly-test-results",
               "thread_ts": ${{ toJSON(steps.slack-notify.outputs.ts) }},
               "text": ${{ toJSON(steps.agent-prs.outputs.text) }},
               "mrkdwn": true

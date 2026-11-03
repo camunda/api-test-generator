@@ -898,7 +898,7 @@ instead; one that still does (`confirmed: true`) gets filed with the fresh
 curl exchange as extra evidence. Positive-suite failures aren't covered —
 there's no evidence-capture mechanism there yet to replay from. It posts a
 triaged digest to
-`#camunda-hub-nightly-test-results` via the same Slack bot. Auth: `CLAUDE_API_KEY`
+`#top-hub-nightly-test-results` via the same Slack bot. Auth: `CLAUDE_API_KEY`
 at `secret/data/products/qa/ci/common`
 (agent) + [`slack-token`](.github/actions/slack-token) (Slack) +
 [`hub-clone-token`](.github/actions/hub-clone-token) (workspace-cli clone of the
@@ -923,7 +923,7 @@ The **nightly post check** ([hub-nightly-post-check.yml](.github/workflows/hub-n
 `scripts/triage/hub-nightly-post-check.ts`) runs daily at 04:30 UTC, after the nightly (02:00) and its triage have
 finished. A failed Slack step already turns a run red, but a run that never starts or hangs posts nothing and is not
 red, so this looks at today's runs (UTC) of `nightly-camunda-hub.yml` and `triage-camunda-hub-nightly.yml` and posts one
-alert to `#camunda-hub-nightly-test-results`, pinging `hub-medic`, when the scheduled nightly did not start (a manual run does not
+alert to `#top-hub-nightly-test-results`, pinging `hub-medic`, when the scheduled nightly did not start (a manual run does not
 stand in for it), is still running, or ended as anything but success or failure (a nightly with failing tests is red but still posts), or when the triage run for that
 nightly (its title, set by `run-name` in the triage workflow, names the nightly's run id) did not run, is still running, or ended as anything but success (`skipped` and `neutral` mean no digest;
 neither a manual triage run nor the triage of a manual nightly stands in for it). Silent when both ran. A manual run is a dry run
@@ -941,7 +941,7 @@ the matching entries, regenerates camunda-hub, runs a narrow local guard
 `tests/codegen/known-issue-summary-consistency.test.ts`), and — only if that's
 clean — opens a **draft** PR (branch `chore/hub-unskip-<issue-number>`, label
 `nightly-api-fix`) plus a Slack heads-up to
-`#camunda-hub-nightly-test-results`. If the local guard fails (the upstream fix
+`#top-hub-nightly-test-results`. If the local guard fails (the upstream fix
 was partial, or a hardcoded invariant still expects the op suppressed), it
 reverts and reports instead of opening a broken PR. Entirely deterministic —
 no agent involved, unlike the triage flow above; detecting a closed issue and
@@ -959,7 +959,7 @@ non-spammy convention.
 The **hub response coverage report** (guide: [docs/hub-response-coverage-report.md](docs/hub-response-coverage-report.md);
 [hub-response-coverage.yml](.github/workflows/hub-response-coverage.yml)) is a
 scheduled (Monday 05:00 UTC) + `workflow_dispatch` job that posts a weekly summary to
-`#camunda-hub-nightly-test-results`. It bundles camunda-hub's latest `main` (unpinned,
+`#top-hub-nightly-test-results`. It bundles camunda-hub's latest `main` (unpinned,
 like the nightly), generates both suites, and runs
 [`scripts/e2e/hub_response_coverage.py`](scripts/e2e/hub_response_coverage.py), which
 compares every response code the spec documents (2xx/400/401/403/404/409; 500 is
@@ -1059,7 +1059,7 @@ push.
 
 For **camunda-hub** only, when the *operation* surface changed (an operationId
 added/removed, not just a field), it also posts a Slack alert to
-`#camunda-hub-nightly-test-results` (Slack bot token via the same Vault JWT auth)
+`#top-hub-nightly-test-results` (Slack bot token via the same Vault JWT auth)
 linking the bump PR / tracking issue it just created — so the hub team sees a
 new upstream domain in their channel, not only as a GitHub issue (#435). The
 op-surface diff is already computed for the routing above, so the Slack step

@@ -875,7 +875,7 @@ jobs:
           token: ${{ steps.slack-token.outputs.SLACK_BOT_TOKEN }}
           payload: |
             {
-              "channel": "#camunda-hub-nightly-test-results",
+              "channel": "#top-hub-nightly-test-results",
               "thread_ts": ${{ toJSON(steps.slack-ready.outputs.ts) }},
               "text": ${{ toJSON(steps.slack-ready.outputs.text) }},
               "mrkdwn": true
@@ -1024,7 +1024,7 @@ jobs:
           token: ${{ steps.slack-token.outputs.SLACK_BOT_TOKEN }}
           payload: |
             {
-              "channel": "#camunda-hub-nightly-test-results",
+              "channel": "#top-hub-nightly-test-results",
               "thread_ts": ${{ toJSON(steps.slack-ready.outputs.ts) }},
               "text": ${{ toJSON(steps.slack-ready.outputs.text) }},
               "mrkdwn": true
