@@ -146,6 +146,20 @@ describe('buildMap', () => {
     expect(await buildMap(api)).toEqual({ alice: 'U1', bob: 'U2' });
   });
 
+  it('inserts a login that collides with an Object.prototype key as an own property', async () => {
+    const { api } = fakeApi({
+      'team.profile.get': () => GH_FIELD,
+      'users.list': () => ({
+        ok: true,
+        members: [{ id: 'U1', profile: { fields: { Xf01: { value: 'constructor' } } } }],
+      }),
+    });
+    const map = await buildMap(api);
+    expect(Object.hasOwn(map, 'constructor')).toBe(true);
+    expect(map.constructor).toBe('U1');
+    expect(mention('constructor', map)).toBe('<@U1>');
+  });
+
   it('returns an empty map when the GitHub field cannot be found (no scan)', async () => {
     const { api, calls } = fakeApi({
       'team.profile.get': () => ({ ok: false, error: 'missing_scope' }),
@@ -188,6 +202,16 @@ describe('mention', () => {
     expect(mention('carol', map)).toBe('');
     expect(mention('', map)).toBe('');
     expect(mention(undefined, map)).toBe('');
+  });
+
+  it('handles logins that collide with Object.prototype keys (constructor, toString, …)', () => {
+    // These are valid GitHub handles but also inherited prototype properties; a bare `map[key]`
+    // would return a function and produce a malformed mention. Own-property lookup must be used.
+    expect(mention('constructor', {})).toBe('');
+    expect(mention('toString', {})).toBe('');
+    expect(mention('valueOf', { alice: 'U1' })).toBe('');
+    expect(mention('constructor', { constructor: 'U9' })).toBe('<@U9>');
+    expect(mention('ToString', { tostring: 'U8' })).toBe('<@U8>');
   });
 });
 

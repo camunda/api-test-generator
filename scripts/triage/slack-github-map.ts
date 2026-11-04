@@ -103,7 +103,7 @@ export async function buildMap(
         const inline = member.profile?.fields;
         if (inline && fieldId in inline) {
           const login = githubLogin(inline[fieldId]?.value);
-          if (login && !(login in map)) map[login] = member.id;
+          if (login && !Object.hasOwn(map, login)) map[login] = member.id;
         } else {
           // users.list did not carry custom fields for this member — resolve it per-user below.
           needProfile.push(member.id);
@@ -119,7 +119,7 @@ export async function buildMap(
       const fields = resp.ok ? resp.profile?.fields : null;
       if (!fields || Array.isArray(fields)) continue; // users.profile.get is the object-of-values shape
       const login = githubLogin(fields[fieldId]?.value);
-      if (login && !(login in map)) map[login] = userId;
+      if (login && !Object.hasOwn(map, login)) map[login] = userId;
     }
   } catch {
     return map;
@@ -130,7 +130,10 @@ export async function buildMap(
 // '<@U123>' when the login maps to a Slack user, else '' (caller falls back to the medic).
 export function mention(login: string | undefined, map: Record<string, string>): string {
   const key = (login ?? '').replace(/^@/, '').toLowerCase();
-  const id = key ? map[key] : '';
+  // Object.hasOwn, not `map[key]` directly: a login like `constructor` or `toString` is a real
+  // GitHub handle but also an inherited Object.prototype property, so a bare lookup would return a
+  // function and produce a malformed `<@…>`. Own-property only.
+  const id = key && Object.hasOwn(map, key) ? map[key] : '';
   return id ? `<@${id}>` : '';
 }
 

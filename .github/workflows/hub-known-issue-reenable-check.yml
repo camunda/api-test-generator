@@ -166,6 +166,11 @@ jobs:
       - name: Resolve fix-author Slack mentions
         if: always() && steps.slack.outputs.SLACK_BOT_TOKEN != ''
         continue-on-error: true
+        # Bounds the elapsed time, not just failure: the per-user profile scan can be many
+        # sequential calls, so cap the whole step well below the job budget. If it overruns it is
+        # killed (continue-on-error keeps the run going) and the summary keeps no fixerMention, so
+        # the formatter falls back to the GitHub-profile link and the alert still posts.
+        timeout-minutes: 5
         env:
           SLACK_TOKEN: ${{ steps.slack.outputs.SLACK_BOT_TOKEN }}
         run: node scripts/triage/slack-github-map.ts --enrich "${{ github.workspace }}/hub-reenable-summary.json" --key fixer
