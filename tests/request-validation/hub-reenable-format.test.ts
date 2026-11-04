@@ -204,9 +204,30 @@ describe('re-enable check: suite-wide issues closed as not planned', () => {
   });
 });
 
-describe('re-enable check Slack message: ping', () => {
-  it('pings hub-medic when there is something to report, and stays silent otherwise', () => {
-    expect(format([suiteWide('COMPLETED')])).toContain('<!subteam^S014VK4482H|hub-medic>');
+describe('re-enable check Slack message: hub-medic is a fallback', () => {
+  const HUB = '<!subteam^S014VK4482H|hub-medic>';
+  const openedItem = (fixerMention: string) => ({
+    type: 'opened',
+    url: 'https://github.com/camunda/camunda-hub/issues/40001',
+    title: 'getFolder',
+    operations: 'getFolder',
+    pr_url: 'https://github.com/camunda/api-test-generator/pull/1',
+    fixer: 'octocat',
+    fixerMention,
+  });
+
+  it('pings hub-medic only as a fallback — when no fix author is @-mentioned', () => {
+    // suite-wide closure has no fix author to mention → medic is the fallback
+    expect(format([suiteWide('COMPLETED')])).toContain(HUB);
+    // a fix author named only by GitHub link (no real mention resolved) still falls back to medic
+    expect(format([openedItem('')])).toContain(HUB);
+  });
+
+  it('does NOT ping hub-medic when a fix author is really @-mentioned', () => {
+    expect(format([openedItem('<@U123>')])).not.toContain(HUB);
+  });
+
+  it('stays silent when there is nothing to report', () => {
     expect(format([]).trim()).toBe('');
   });
 });
