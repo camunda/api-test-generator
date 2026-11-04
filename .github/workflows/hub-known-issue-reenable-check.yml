@@ -163,7 +163,13 @@ jobs:
       # formatter prefers it over the GitHub-profile link. Fail-soft and best-effort: without the
       # Slack user scopes or a populated GitHub profile field the map is empty, so the formatter
       # falls back to naming the author by GitHub link — never blocks the alert.
-      - name: Resolve fix-author Slack mentions
+      # Named without "Slack" on purpose: this is a best-effort pre-processing step, NOT the alert
+      # itself. Its failure must never fail the run (the heads-up still posts, falling back to the
+      # GitHub-profile link), so it is deliberately not wired into fail-if-slack-failed — unlike the
+      # actual Slack-posting steps below. slack-failure-marks-run-failed.test.ts keys the "must be in
+      # the fail check" rule on a continue-on-error step whose name matches /slack/i, so keep this
+      # name clear of that word.
+      - name: Resolve fix-author @-mentions
         if: always() && steps.slack.outputs.SLACK_BOT_TOKEN != ''
         continue-on-error: true
         # Bounds the elapsed time, not just failure: the per-user profile scan can be many
