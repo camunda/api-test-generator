@@ -958,9 +958,10 @@ the author's Slack profile carries their GitHub link
 resolves GitHub login → Slack id via `users.list` + the custom GitHub profile
 field); without that mapping — or until the Slack app is granted `users:read` /
 `users.profile:read` — it falls back to naming the author by GitHub-profile link.
-`hub-medic` is pinged on the message only as a **fallback** — when no fix author is
-`<@>`-mentioned on it (nobody resolved, or only GitHub-link names) — so a resolved
-author is not double-paged alongside the medic.
+`hub-medic` is pinged on the message only as a **fallback** — whenever **any** reported
+item lacks a resolved `<@>`-mention (a suite-wide closure, or an author only named by a
+GitHub link) — so an item whose owner is mentioned is not double-paged, but no item is
+left without a notified owner.
 Entirely deterministic —
 no agent involved, unlike the triage flow above; detecting a closed issue and
 removing a JSON entry are pure mechanics. Same two-App-token split as the

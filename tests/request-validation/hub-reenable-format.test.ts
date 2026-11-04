@@ -227,6 +227,12 @@ describe('re-enable check Slack message: hub-medic is a fallback', () => {
     expect(format([openedItem('<@U123>')])).not.toContain(HUB);
   });
 
+  it('still pings hub-medic when a mentioned item is mixed with an un-mentioned one', () => {
+    // A resolved fixer owns only their item; a suite-wide closure in the same message has no
+    // mention, so the medic fallback must still fire (otherwise that item has no notified owner).
+    expect(format([openedItem('<@U123>'), suiteWide('COMPLETED')])).toContain(HUB);
+  });
+
   it('stays silent when there is nothing to report', () => {
     expect(format([]).trim()).toBe('');
   });
