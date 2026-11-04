@@ -1512,8 +1512,9 @@ jobs:
             printf ':rotating_light: *Generated hub suite keeps failing without any test evidence* — camunda-hub PR %s has failed 3 times today and none of those runs left evidence of a failing test. That points at the pipeline (Hub start, report upload, run summary or the runner) rather than at the PR. <%s|Latest run>\n\n%s %s please take a look.\n' \
               "${pr_ref:-(PR number unavailable)}" "$RUN_URL" "$hub_medic" "$ta_medic" > "${RUNNER_TEMP}/escalation.txt"
           fi
+          marker_tag=$( [ "$CATEGORY" = "presuite" ] && echo presuite || echo noevidence )
           node scripts/triage/slack-thread.ts \
             --channel "#camunda-hub-pr-e2e-results" \
             --date "$(date -u +%Y-%m-%d)" \
-            --marker "hub-pr:${PR_NUMBER:-${SHA:0:12}}:escalated:${CATEGORY}" \
+            --marker "hub-pr:${PR_NUMBER:-${SHA:0:12}}:escalated:${marker_tag}" \
             --text-file "${RUNNER_TEMP}/escalation.txt"

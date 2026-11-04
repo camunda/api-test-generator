@@ -94,7 +94,7 @@ with the same fingerprint edits that reply in place rather than posting again, a
 While the Slack bot lacks that permission, it falls back to a separate message per run. Every PR to this repo requests a review from
 `@camunda/hub` (see `.github/CODEOWNERS`). The daily gap digest and the coverage-fix agent's thread reply ping nobody
 by name, so whoever is on call as `hub-medic` reads both Slack channels each morning: PR-check alerts and the gap digest
-are in `#camunda-hub-pr-e2e-results`, everything else is in `#camunda-hub-nightly-test-results`.
+are in `#camunda-hub-pr-e2e-results`, everything else is in `#top-hub-nightly-test-results`.
 
 **Questions or help:** ask in `#ask-qa` and tag `@test-automation-medic`. The enablement team always replies there.
 

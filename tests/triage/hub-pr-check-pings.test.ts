@@ -74,16 +74,16 @@ describe('hub-pr-check Slack pings', () => {
     expect(escalation).toContain('"$hub_medic" "$ta_medic"');
   });
 
-  it('escalation uses distinct markers for presuite vs non-presuite', () => {
+  it('escalation uses two stable markers: presuite and noevidence', () => {
     const escalation = workflow.slice(workflow.indexOf('Escalate a repeated'));
     const markers = [...escalation.matchAll(/--marker\s+"([^"]+)"/g)].map((m) => m[1]);
-    const CATEGORY = ['$', '{CATEGORY}'].join('');
-    expect(markers.length).toBeGreaterThan(0);
-    for (const marker of markers) {
-      expect(
-        marker,
-        'marker must include CATEGORY so each route gets its own Slack reply',
-      ).toContain(CATEGORY);
-    }
+    expect(markers).toHaveLength(1);
+    const marker_tag = ['$', '{marker_tag}'].join('');
+    expect(
+      markers[0],
+      'marker must use marker_tag (presuite | noevidence), not raw CATEGORY',
+    ).toContain(marker_tag);
+    expect(escalation).toContain('presuite');
+    expect(escalation).toContain('noevidence');
   });
 });
