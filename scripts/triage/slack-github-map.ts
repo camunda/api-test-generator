@@ -134,6 +134,14 @@ export function mention(login: string | undefined, map: Record<string, string>):
   return id ? `<@${id}>` : '';
 }
 
+// True when at least one item carries a non-empty login under `key` — i.e. there is someone to
+// resolve. Lets a caller skip the whole-workspace Slack lookup on a no-op run (empty summary, or
+// every `<key>` blank), which would otherwise cost up to MAX_PROFILE_FETCHES profile calls once
+// the scopes are enabled, for no mention.
+export function needsLookup(items: Array<Record<string, unknown>>, key: string): boolean {
+  return items.some((i) => typeof i[key] === 'string' && i[key] !== '');
+}
+
 function slackApi(token: string): SlackApi {
   const headers = { Authorization: `Bearer ${token}` };
   return {
@@ -160,11 +168,12 @@ function arg(name: string): string {
 async function main(): Promise<void> {
   const token = process.env.SLACK_TOKEN ?? process.env.SLACK_BOT_TOKEN ?? '';
   const fieldOverride = process.env.SLACK_GITHUB_FIELD_ID ?? '';
-  const map = token ? await buildMap(slackApi(token), fieldOverride) : {};
-  if (!token) console.error('SLACK_TOKEN is empty; no mentions resolved, callers fall back');
+  const api = token ? slackApi(token) : undefined;
 
   const single = arg('login');
   if (single) {
+    if (!api) console.error('SLACK_TOKEN is empty; mention not resolved, caller falls back');
+    const map = api ? await buildMap(api, fieldOverride) : {};
     process.stdout.write(mention(single, map));
     return;
   }
@@ -174,6 +183,12 @@ async function main(): Promise<void> {
     const key = arg('key') || 'fixer';
     // biome-ignore lint/plugin: runtime contract boundary for parsed JSON (the summary file)
     const items = JSON.parse(readFileSync(file, 'utf8')) as Array<Record<string, unknown>>;
+    // Only hit Slack when there is at least one login to resolve AND a token to do it with — a
+    // no-op run (empty summary, or every `<key>` blank) must not scan the whole workspace.
+    const need = needsLookup(items, key);
+    if (need && !api)
+      console.error('SLACK_TOKEN is empty; mentions not resolved, caller falls back');
+    const map = api && need ? await buildMap(api, fieldOverride) : {};
     for (const item of items) {
       const login = typeof item[key] === 'string' ? item[key] : '';
       item[`${key}Mention`] = mention(login, map);

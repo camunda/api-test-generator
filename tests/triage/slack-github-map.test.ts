@@ -8,6 +8,7 @@ import {
   buildMap,
   githubLogin,
   mention,
+  needsLookup,
   resolveFieldId,
   type SlackApi,
   type SlackResponse,
@@ -187,6 +188,17 @@ describe('mention', () => {
     expect(mention('carol', map)).toBe('');
     expect(mention('', map)).toBe('');
     expect(mention(undefined, map)).toBe('');
+  });
+});
+
+describe('needsLookup', () => {
+  it('is true only when some item carries a non-empty login under the key', () => {
+    expect(needsLookup([{ fixer: 'alice' }], 'fixer')).toBe(true);
+    expect(needsLookup([{ fixer: '' }, { type: 'x' }], 'fixer')).toBe(false);
+    expect(needsLookup([], 'fixer')).toBe(false);
+    // the key must match — a login under a different key is not something to resolve
+    expect(needsLookup([{ author: 'alice' }], 'fixer')).toBe(false);
+    expect(needsLookup([{ author: 'alice' }], 'author')).toBe(true);
   });
 });
 
