@@ -22,7 +22,7 @@ There are four things. The weekly report and the agent PRs need you every week; 
 | What | Where you see it | When | Is it yours? | Guide |
 |---|---|---|---|---|
 | **PR check** | A status on your camunda-hub pull request, and an alert in `#camunda-hub-pr-e2e-results` when red (a yellow alert when only a coverage gap was found, with a green status) | Every Hub PR, except drafts, forks, PRs into `self-managed/*` and changes that cannot affect the API (details in the PR check guide) | Only when red. The alert says whose problem it is. The check never blocks merging | [PR check guide](hub-pr-check-cookbook.md) |
-| **Nightly run** | Posts in `#camunda-hub-nightly-test-results` | Every night, 02:00 UTC | Only when something failed. A normal night has 0 failures | [Nightly guide](hub-nightly-cookbook.md) |
+| **Nightly run** | Posts in `#top-hub-nightly-test-results` | Every night, 02:00 UTC | Only when something failed. A normal night has 0 failures | [Nightly guide](hub-nightly-cookbook.md) |
 | **Weekly coverage report** | A post in the same channel | Monday, 05:00 UTC | Yes: it lists the API cases still not tested | [Coverage report guide](hub-response-coverage-report.md) |
 | **Coverage-fix PRs** | Small draft pull requests in this repo, opened by an AI agent | After the Monday report | Yes: you review them. A person always decides to merge | [Coverage report guide](hub-response-coverage-report.md) |
 
