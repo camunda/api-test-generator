@@ -1,17 +1,17 @@
-# The Hub backend team owns this repo. A PR requests their review automatically
+# The Hub team owns this repo. A PR requests their review automatically
 # (a draft PR requests it when it is marked ready).
-*  @camunda/hub-backend
+*  @camunda/hub
 
 # The engine and the camunda-oca config also build OCA's tests, and the test automation team stays
 # responsible for OCA. A PR touching them requests both teams; either one can review.
-/semantic-graph-extractor/  @camunda/hub-backend @camunda/test-automation-team
-/path-analyser/             @camunda/hub-backend @camunda/test-automation-team
-/materializer/              @camunda/hub-backend @camunda/test-automation-team
-/request-validation/        @camunda/hub-backend @camunda/test-automation-team
-/emitter-sdk/               @camunda/hub-backend @camunda/test-automation-team
-/configs/camunda-oca/       @camunda/hub-backend @camunda/test-automation-team
+/semantic-graph-extractor/  @camunda/hub @camunda/test-automation-team
+/path-analyser/             @camunda/hub @camunda/test-automation-team
+/materializer/              @camunda/hub @camunda/test-automation-team
+/request-validation/        @camunda/hub @camunda/test-automation-team
+/emitter-sdk/               @camunda/hub @camunda/test-automation-team
+/configs/camunda-oca/       @camunda/hub @camunda/test-automation-team
 
 # The camunda-oca spec-pin bump (the chore/spec-bump-camunda-oca PR) is OCA's own concern, so it goes
-# to the test automation team only — not the Hub backend team. More specific than the rule above, so it
+# to the test automation team only — not the Hub team. More specific than the rule above, so it
 # wins (CODEOWNERS is last-match-wins).
 /configs/camunda-oca/spec-pin.json  @camunda/test-automation-team

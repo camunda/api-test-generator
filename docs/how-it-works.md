@@ -92,7 +92,7 @@ the escalation pings `test-automation-medic` alone for presuite, or both groups 
 works, each distinct failure is one reply under the day's message, keyed on the PR and a fingerprint of what failed: a re-run
 with the same fingerprint edits that reply in place rather than posting again, and only a changed failure adds a new reply.
 While the Slack bot lacks that permission, it falls back to a separate message per run. Every PR to this repo requests a review from
-`@camunda/hub-backend` (see `.github/CODEOWNERS`). The daily gap digest and the coverage-fix agent's thread reply ping nobody
+`@camunda/hub` (see `.github/CODEOWNERS`). The daily gap digest and the coverage-fix agent's thread reply ping nobody
 by name, so whoever is on call as `hub-medic` reads both Slack channels each morning: PR-check alerts and the gap digest
 are in `#camunda-hub-pr-e2e-results`, everything else is in `#camunda-hub-nightly-test-results`.
 
