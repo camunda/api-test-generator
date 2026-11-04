@@ -22,6 +22,7 @@ interface Step {
   name?: string;
   uses?: string;
   if?: string;
+  run?: string;
   continueOnError: boolean;
   outcomes?: string;
 }
@@ -37,6 +38,7 @@ function toStep(raw: unknown): Step[] {
       name: str(raw.name),
       uses: str(raw.uses),
       if: str(raw.if),
+      run: str(raw.run),
       continueOnError: raw['continue-on-error'] === true,
       outcomes: isRecord(raw.with) ? str(raw.with.outcomes) : undefined,
     },
@@ -161,11 +163,119 @@ describe('workflows whose manual run is a dry run that posts nothing', () => {
   });
 });
 
-describe('the comment on a camunda-hub PR whose generator gap the PR caused', () => {
+describe('the verdict comment on a failing camunda-hub PR', () => {
+  const wf: unknown = parse(readFileSync(join(root, '.github/workflows/hub-pr-check.yml'), 'utf8'));
+  const report =
+    isRecord(wf) && isRecord(wf.jobs) && isRecord(wf.jobs.report) ? wf.jobs.report : {};
+  const steps: Step[] =
+    isRecord(report) && Array.isArray(report.steps) ? report.steps.flatMap(toStep) : [];
+  const comment = steps.find((s) => /comment the suite verdict/i.test(s.name ?? ''));
+
   it('links the PR-check cookbook', () => {
     const text = readFileSync(join(root, '.github/workflows/hub-pr-check.yml'), 'utf8');
-    expect(text).toContain(
-      '[PR-check cookbook](https://github.com/camunda/api-test-generator/blob/main/docs/hub-pr-check-cookbook.md)',
+    expect(text).toContain('[PR-check cookbook](');
+    expect(text).toContain('docs/hub-pr-check-cookbook.md');
+  });
+
+  it('@-tags the PR author so the comment, not Slack, notifies them', () => {
+    const text = readFileSync(join(root, '.github/workflows/hub-pr-check.yml'), 'utf8');
+    // The author login is plumbed into the comment step and emitted directly (not via clean(),
+    // which strips '@'); it is charset-validated in the validate job, so the mention is safe.
+    // (Regex, not a string literal, so the GitHub-Actions `${{ }}` does not trip noTemplateCurlyInString.)
+    expect(text).toMatch(/PR_AUTHOR:\s*\$\{\{\s*needs\.validate\.outputs\.pr_author\s*\}\}/);
+    expect(text).toMatch(/@\$\{PR_AUTHOR\}/);
+  });
+
+  it('fires for every failing non-draft PR, not just a caused-by-PR failure', () => {
+    expect(comment, 'a verdict comment step must exist').toBeTruthy();
+    const gate = (comment?.if ?? '').replace(/\s+/g, ' ');
+    expect(gate).toContain("needs.run.result == 'failure'");
+    expect(gate).toContain("needs.validate.outputs.is_draft != 'true'");
+    // The broadened model (2026-10-28 handover): the comment is no longer gated on a specific
+    // category or on caused_by_pr — every failing PR gets one, tagging the author.
+    expect(gate).not.toContain('caused_by_pr');
+    expect(gate).not.toContain('category ==');
+  });
+
+  it('posts a fresh comment on every failing push (never a silent edit that can be missed)', () => {
+    // A silent edit sends no GitHub notification, so a repeat or changed verdict could be missed. The
+    // step removes the prior verdict comment and POSTs a fresh one each failing push, so every push
+    // notifies the author — it must DELETE then POST, and must not PATCH (edit) the failure comment.
+    const run = typeof comment?.run === 'string' ? comment.run : '';
+    expect(run, 'a verdict comment step must exist').not.toBe('');
+    expect(run).toContain('-X DELETE');
+    expect(run).toContain('-X POST');
+    expect(run).not.toContain('-X PATCH');
+    const text = readFileSync(join(root, '.github/workflows/hub-pr-check.yml'), 'utf8');
+    expect(text).toContain('re-posted on each failing push');
+  });
+
+  it('removes/resolves legacy-marker comments too, scoped to this check own comments', () => {
+    // main posts the legacy :generator-gap / :regression markers, so open PRs can carry one. Both the
+    // delete-on-failure and resolve-on-green lookups must match the shared prefix so those migrate —
+    // but scoped to a Bot author whose body STARTS WITH the marker, so a reviewer comment that quotes
+    // the marker is never matched (and so never deleted).
+    const text = readFileSync(join(root, '.github/workflows/hub-pr-check.yml'), 'utf8');
+    expect(text).toContain("marker_prefix='<!-- api-test-generator:hub-pr-check:'");
+    const scopedLookups =
+      text.match(
+        /select\(\(\.user\.type == \\"Bot\\"\) and \(\.body \| startswith\(\\"\$\{marker_prefix\}\\"\)\)\)/g,
+      ) ?? [];
+    expect(scopedLookups.length).toBeGreaterThanOrEqual(2);
+    // Guard against a regression to the unscoped substring match that could delete review discussion.
+    // (Regex, not a string literal, so the ${...} does not trip noTemplateCurlyInString.)
+    expect(text).not.toMatch(/select\(\.body \| contains\(\\"\$\{marker_prefix\}\\"\)\)/);
+  });
+
+  it('excludes a presuite (setup-step) failure — that stays Slack-only, pinging automation', () => {
+    // presuite = suites did not run AND Hub did not fail to start. It is shared-pipeline, the
+    // automation team's responsibility, so it gets no PR comment (handled in Slack instead).
+    const gate = (comment?.if ?? '').replace(/\s+/g, ' ');
+    expect(gate).toContain(
+      "!(needs.run.outputs.suites_ran != 'true' && needs.run.outputs.hub_start_failed != 'true')",
     );
+  });
+});
+
+describe('hub-pr-check: a failing PR is comment-only, except bot PRs and presuite failures', () => {
+  // 2026-10-28 handover decision: a PR-check failure is the PR author's to look at on their own PR,
+  // so the sticky verdict comment @-tags the author and the Slack chain is suppressed whenever there
+  // is an author to reach. Slack fires in exactly two cases: pr_author is empty — a bot (renovate[bot])
+  // or a lookup failure — where nobody can be @-tagged (fallback → hub-medic); OR a presuite failure
+  // (setup step before the suites ran), which is automation's and gets no comment (→ test-automation-medic).
+  const NO_AUTHOR = "needs.validate.outputs.pr_author == ''";
+  const PRESUITE =
+    "needs.run.outputs.suites_ran != 'true' && needs.run.outputs.hub_start_failed != 'true'";
+  // Fallback: if the verdict comment was not delivered (skipped for a missing status token, or its
+  // POST failed under continue-on-error), the author was not reached on the PR, so Slack must still fire.
+  const COMMENT_FAILED = "steps.verdict-comment.outcome != 'success'";
+  const wf: unknown = parse(readFileSync(join(root, '.github/workflows/hub-pr-check.yml'), 'utf8'));
+  const report =
+    isRecord(wf) && isRecord(wf.jobs) && isRecord(wf.jobs.report) ? wf.jobs.report : {};
+  const steps: Step[] =
+    isRecord(report) && Array.isArray(report.steps) ? report.steps.flatMap(toStep) : [];
+  const slackSteps = steps.filter((s) => /slack/i.test(s.name ?? ''));
+
+  it('has the report job with its Slack steps', () => {
+    expect(slackSteps.length).toBeGreaterThanOrEqual(4);
+  });
+
+  it('gives the verdict comment step an id so Slack can see whether it delivered', () => {
+    const comment = steps.find((s) => /comment the suite verdict/i.test(s.name ?? ''));
+    expect(comment?.id).toBe('verdict-comment');
+  });
+
+  it('fires every Slack step for a bot PR, a presuite failure, or an undelivered comment', () => {
+    for (const s of slackSteps) {
+      const gate = (s.if ?? '').replace(/\s+/g, ' ');
+      expect(gate, `Slack step "${s.name}" must fire when pr_author is empty`).toContain(NO_AUTHOR);
+      expect(gate, `Slack step "${s.name}" must also fire for a presuite failure`).toContain(
+        PRESUITE,
+      );
+      expect(
+        gate,
+        `Slack step "${s.name}" must fall back when the verdict comment did not deliver`,
+      ).toContain(COMMENT_FAILED);
+    }
   });
 });

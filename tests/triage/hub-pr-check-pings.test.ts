@@ -8,11 +8,23 @@ const workflow = readFileSync(
   'utf8',
 );
 
-/** The `ping=` assigned in each branch of the verdict `case "$CATEGORY"` in the report step. */
+/**
+ * The `ping=` assigned in each branch of the verdict `case "$CATEGORY"` in the report step.
+ * The report step has two such `case` blocks: the comment builder (sets `tag`/`heading`, no ping —
+ * it @-tags the PR author) and the Slack-fallback builder (sets `ping` for a bot/no-author PR).
+ * Ping routing lives in the second one, so parse the `case` block that actually assigns `ping=`.
+ */
 function pingsByCategory(): Record<string, string[]> {
-  const start = workflow.indexOf('case "$CATEGORY" in');
-  const end = workflow.indexOf('\n          esac\n', start);
-  const block = workflow.slice(start, end);
+  let block = '';
+  for (const m of workflow.matchAll(/case "\$CATEGORY" in/g)) {
+    const s = m.index ?? 0;
+    const e = workflow.indexOf('\n          esac\n', s);
+    const candidate = workflow.slice(s, e);
+    if (/\n\s*ping="/.test(candidate)) {
+      block = candidate;
+      break;
+    }
+  }
   const out: Record<string, string[]> = {};
   let current = '';
   for (const line of block.split('\n')) {

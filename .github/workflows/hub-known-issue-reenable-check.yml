@@ -158,6 +158,29 @@ jobs:
           SUMMARY_FILE: ${{ github.workspace }}/hub-reenable-summary.json
         run: bash .github/scripts/hub-reenable-check.sh
 
+      # Resolve each fix author's GitHub login to a real Slack @-mention (the handover-call ask:
+      # tag the person who landed the fix). Adds a `fixerMention` to each summary item; the
+      # formatter prefers it over the GitHub-profile link. Fail-soft and best-effort: without the
+      # Slack user scopes or a populated GitHub profile field the map is empty, so the formatter
+      # falls back to naming the author by GitHub link — never blocks the alert.
+      # Named without "Slack" on purpose: this is a best-effort pre-processing step, NOT the alert
+      # itself. Its failure must never fail the run (the heads-up still posts, falling back to the
+      # GitHub-profile link), so it is deliberately not wired into fail-if-slack-failed — unlike the
+      # actual Slack-posting steps below. slack-failure-marks-run-failed.test.ts keys the "must be in
+      # the fail check" rule on a continue-on-error step whose name matches /slack/i, so keep this
+      # name clear of that word.
+      - name: Resolve fix-author @-mentions
+        if: always() && steps.slack.outputs.SLACK_BOT_TOKEN != ''
+        continue-on-error: true
+        # Bounds the elapsed time, not just failure: the per-user profile scan can be many
+        # sequential calls, so cap the whole step well below the job budget. If it overruns it is
+        # killed (continue-on-error keeps the run going) and the summary keeps no fixerMention, so
+        # the formatter falls back to the GitHub-profile link and the alert still posts.
+        timeout-minutes: 5
+        env:
+          SLACK_TOKEN: ${{ steps.slack.outputs.SLACK_BOT_TOKEN }}
+        run: node scripts/triage/slack-github-map.ts --enrich "${{ github.workspace }}/hub-reenable-summary.json" --key fixer
+
       # --- Slack heads-up, only when there's something to report ---------------
       - name: Build Slack message
         id: slack-message

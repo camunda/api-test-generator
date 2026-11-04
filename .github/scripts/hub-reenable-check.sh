@@ -111,6 +111,34 @@ while IFS= read -r group; do
     continue
   fi
 
+  # Who landed the fix for this now-closed blocker. We assign them the unskip
+  # PR (so they verify the re-enabled test passes against their own fix) and,
+  # if re-enabling breaks locally, name them on the "needs manual
+  # investigation" Slack alert — a partial fix is theirs to finish. Best-effort
+  # and never fatal: `closed_by` is the camunda-hub user who closed the issue
+  # (normally whoever merged the fix), falling back to the first assignee. A
+  # bot, an app actor, or an empty result just means no one is tagged.
+  # GH_TOKEN_HUB is already confirmed non-empty above; a failed lookup is fine.
+  fixer=""
+  fixer_pair=$(GH_TOKEN="$GH_TOKEN_HUB" gh api "repos/${HUB_REPO}/issues/${issue_num}" \
+    --jq '(.closed_by.login // "") + "\t" + (.assignees[0].login // "")' 2>/dev/null || true)
+  for cand in "${fixer_pair%%$'\t'*}" "${fixer_pair#*$'\t'}"; do
+    case "$cand" in
+      '' | *'[bot]' | app/*) continue ;;
+    esac
+    # Accept only a well-formed GitHub login. gh/jq already yields a login or ''
+    # (the `// ""` defaults turn a missing field or an error body into empty),
+    # but validate the charset here so that even an unexpected API response can
+    # never put arbitrary text into the summary, the Slack mention or the
+    # GitHub-profile link. GitHub logins are 1–39 alphanumerics/hyphens.
+    if [[ "$cand" =~ ^[A-Za-z0-9-]{1,39}$ ]]; then
+      fixer="$cand"
+      break
+    fi
+  done
+  [ -n "$fixer" ] && echo "Fix author for ${url}: ${fixer}" \
+    || echo "No taggable fix author resolved for ${url}"
+
   ops="$(jq -r '.entries | map(.operationId) | unique | join(", ")' <<<"$group")"
   branch="chore/hub-unskip-${issue_num}"
 
@@ -176,8 +204,8 @@ while IFS= read -r group; do
   if [ "$checks_ok" != "true" ]; then
     echo "::warning::Blocker ${url}: re-enabling broke local generate/tests — see /tmp/hub-reenable-generate.log. Reverting, NOT opening a PR."
     git checkout -- "$POSITIVE_SUPPRESS" "$REQUEST_VALIDATION" 2>/dev/null || true
-    add_summary "$(jq -nc --arg url "$url" --arg title "$title" --arg ops "$ops" \
-      '{type: "aborted_broke_checks", url: $url, title: $title, operations: $ops}')"
+    add_summary "$(jq -nc --arg url "$url" --arg title "$title" --arg ops "$ops" --arg fixer "$fixer" \
+      '{type: "aborted_broke_checks", url: $url, title: $title, operations: $ops, fixer: $fixer}')"
     continue
   fi
 
@@ -238,8 +266,23 @@ operation(s) get their tests back: ${ops}." >/dev/null
   fi
 
   echo "Opened unskip PR: ${pr_url}"
-  add_summary "$(jq -nc --arg url "$url" --arg title "$title" --arg ops "$ops" --arg pr "$pr_url" \
-    '{type: "opened", url: $url, title: $title, operations: $ops, pr_url: $pr}')"
+
+  # Assign the fix author so the re-enabled test lands back on the person who
+  # closed the blocker. Best-effort: if they lack access to this repo the
+  # assign fails — warn, drop them from the summary (so Slack doesn't claim an
+  # assignee that didn't stick), and leave the PR otherwise intact.
+  if [ -n "$fixer" ]; then
+    if GH_TOKEN="$GH_TOKEN_GENERATOR" gh pr edit "$pr_url" --add-assignee "$fixer" \
+      >/dev/null 2>/tmp/hub-reenable-assign.err; then
+      echo "Assigned ${fixer} (closed camunda-hub#${issue_num}) to ${pr_url}"
+    else
+      echo "::warning::Could not assign ${fixer} to the unskip PR (${pr_url}) — they may lack access to ${GEN_REPO}: $(cat /tmp/hub-reenable-assign.err 2>/dev/null)"
+      fixer=""
+    fi
+  fi
+
+  add_summary "$(jq -nc --arg url "$url" --arg title "$title" --arg ops "$ops" --arg pr "$pr_url" --arg fixer "$fixer" \
+    '{type: "opened", url: $url, title: $title, operations: $ops, pr_url: $pr, fixer: $fixer}')"
 
   # No live-Hub validation is dispatched here, and hub-pr-live-check.yml skips PRs from the automation account
   # (the AI agents use the same identity), so a person runs hub-ondemand-test.yml on this branch before merging.

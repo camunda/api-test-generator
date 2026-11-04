@@ -21,7 +21,7 @@ There are four things. The weekly report and the agent PRs need you every week; 
 
 | What | Where you see it | When | Is it yours? | Guide |
 |---|---|---|---|---|
-| **PR check** | A status on your camunda-hub pull request, and an alert in `#camunda-hub-pr-e2e-results` when red (a yellow alert when only a coverage gap was found, with a green status) | Every Hub PR, except drafts, forks, PRs into `self-managed/*` and changes that cannot affect the API (details in the PR check guide) | Only when red. The alert says whose problem it is. The check never blocks merging | [PR check guide](hub-pr-check-cookbook.md) |
+| **PR check** | A status on your camunda-hub pull request, plus — on almost every red run — a **comment that @-tags you** with the verdict (no Slack). Slack (`#camunda-hub-pr-e2e-results`) is the fallback for a bot PR with nobody to tag (→ `hub-medic`) and for a setup-step failure before the tests ran (→ `test-automation-medic`) | Every Hub PR, except drafts, forks, PRs into `self-managed/*` and changes that cannot affect the API (details in the PR check guide) | Only when red. The comment says whose problem it is. The check never blocks merging | [PR check guide](hub-pr-check-cookbook.md) |
 | **Nightly run** | Posts in `#top-hub-nightly-test-results` | Every night, 02:00 UTC | Only when something failed. A normal night has 0 failures | [Nightly guide](hub-nightly-cookbook.md) |
 | **Weekly coverage report** | A post in the same channel | Monday, 05:00 UTC | Yes: it lists the API cases still not tested | [Coverage report guide](hub-response-coverage-report.md) |
 | **Coverage-fix PRs** | Small draft pull requests in this repo, opened by an AI agent | After the Monday report | Yes: you review them. A person always decides to merge | [Coverage report guide](hub-response-coverage-report.md) |
@@ -37,9 +37,9 @@ Four more posts show up only when needed:
 
 | You see | Do this |
 |---|---|
-| Red PR check, alert says "likely a real regression" | It is probably your change. Read what the alert points to |
-| Red PR check, alert says "api-test-generator not yet handling a new/changed endpoint" | Not a Hub bug, but you act first: open the generator PR (see the PR check guide). Stuck? Ask in `#ask-qa` (tag `@test-automation-medic`) |
-| Red PR check, alert says "infrastructure failure" | Not yours. Open the failed step and find the outside cause. Stuck? Ask in `#ask-qa` (tag `@test-automation-medic`) with the run link |
+| Red PR check, comment says "likely a real regression" | It is probably your change. Read what the comment points to |
+| Red PR check, comment says "api-test-generator not yet handling a new/changed endpoint" | Not a Hub bug, but you act first: open the generator PR (see the PR check guide). Stuck? Ask in `#ask-qa` (tag `@test-automation-medic`) |
+| Red PR check, comment says "infrastructure failure" | Open the failed step and find the outside cause. Stuck? Ask in `#ask-qa` (tag `@test-automation-medic`) with the run link |
 | Nightly post shows failures | Open the triage thread: one line per failure says whose it is |
 | No nightly post in the morning (a 04:30 UTC alert usually says so) | The run or the posting broke, not Hub. See ["When a post is missing"](hub-nightly-cookbook.md#when-a-post-is-missing) in the nightly guide |
 | Spec-bump alert | Hub's API changed. Usually the bot has already opened a PR that updates the pinned spec: review it and merge it. If the alert says it is blocked or the check failed, it links a tracking issue or the run instead (see [the nightly guide](hub-nightly-cookbook.md#the-spec-bump-alert-0300)) |
@@ -108,7 +108,7 @@ are in `#camunda-hub-pr-e2e-results`, everything else is in `#top-hub-nightly-te
 - **Operation:** one API endpoint, as the spec names it (for example `getWorkspace`). The guides use "endpoint" and "operation" for the same thing.
 - **Generator gap:** the generator does not understand something in Hub's API. The result is a generated test that is **wrong** and fails or, for a new endpoint it does not know yet, **no test at all**. It is a **cause**, and it is not a Hub bug. The fix is a generator PR, usually a config entry.
 - **Coverage gap:** a test is **missing**: an endpoint, response or kind of bad request with none yet. It is a **measurement**, it never fails a test, and it is a to-do, not an incident. A test can be missing because the generator could not build it, or because it was skipped on purpose for a Hub bug.
-- **Unmapped operation:** the narrowest coverage gap: an endpoint with **no generated test at all**. For a new endpoint in your PR the cause is that the generator does not know the endpoint yet, so the PR check words it as "api-test-generator not yet handling a new/changed endpoint". The missing test is still a coverage gap; the alert names the cause.
+- **Unmapped operation:** the narrowest coverage gap: an endpoint with **no generated test at all**. For a new endpoint in your PR the cause is that the generator does not know the endpoint yet, so the PR check words it as "api-test-generator not yet handling a new/changed endpoint". The missing test is still a coverage gap; the PR comment names the cause.
 - **Coverage:** how many of the API's answers (success, 403, 404, bad request...) have a test.
 - **Pin:** the camunda-hub commit whose API description the invariant tests are checked against. The spec-bump alert moves it.
 - **Invariant tests:** tests in this repo that check the generated output against the pinned spec. They guard the generator, not Hub.

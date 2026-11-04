@@ -713,14 +713,7 @@ loser deletes its own); the reply lookup is paginated and fails closed.
 Any threading failure (unresolvable channel name, missing Slack history scope) falls
 back to a plain post, so an alert is never lost to the threading logic.
 
-**Current state (run log of 7 Oct, `report` job, "Notify Slack" step):** the Slack bot lacks the `channels:read`
-scope, so `conversations.list` fails with `missing_scope` and every alert is posted as a top-level message instead of a
-reply under the day's message. In practice each failed run posts its own message: nothing is edited or grouped, a failure that pings pings each time, and the 3-failure
-escalation does not fire, because a plain post returns no `seen` counter (the quiet reply's text still promises it). Giving
-the bot `channels:read` and `channels:history` turns the threaded behaviour above on. After changing the scopes, check
-that the "Notify Slack" step no longer prints "Slack threading failed".
-
-A PR-caused generator gap (the same `caused_by_pr` condition as the comment) is also tracked: the
+A PR-caused generator gap (classify's `caused_by_pr`) is also tracked: the
 `generator-gap-tracker` job keeps one issue per camunda-hub PR
 (`[hub-pr-check] Generator gap on camunda-hub#N`, labels `generator-gap` + `hub`), **assigned to
 the camunda-hub PR's author** (once, and only if unassigned, so a manual reassignment sticks;
@@ -741,17 +734,60 @@ caps/dedupe (this classifier is read-only and opens nothing) and its
 platform-noise prefilter (the Hub PR check already routes startup and pre-suite
 failures deterministically).
 
-Only when the PR's own spec change is what breaks the generator — a
-high-confidence `generator-gap` with `caused_by_pr: true` (every affected
-operationId new or changed by the PR, per the spec diff) — `report` also leaves
-one sticky comment on the camunda-hub PR (marker
-`api-test-generator:hub-pr-check:generator-gap`, edited in place) saying
-api-test-generator must be updated first and linking the coverage-gap tracking
-issue; the reverse of AlwaysGreen's "hub PR must not merge first" note on a
-shared-repo fix PR. Every other failure — a gap on an untouched operation,
-product, infra, flaky, unknown — is Slack-only. The comment needs Issues or
-Pull requests: write for the qa-processes App on camunda-hub; without it the
-step only warns.
+**Every** failing PR is **comment-only** (the 2026-10-28 handover decision): on any
+failing (non-draft) run `report` leaves ONE sticky comment on the camunda-hub PR
+that **@-tags the PR author** (`pr_author`, charset-validated in `validate`) and
+**suppresses the Slack alert** — a PR-check failure is the author's to look at on
+their own PR, not something to page `hub-medic` over (the nightly, not this PR
+check, is what pages the medic for failures on `main`). A **fresh comment is posted on
+every failing push** — the step removes the prior verdict comment and POSTs a new one
+each time — because editing a comment in place sends no GitHub notification, so a
+repeat or a changed verdict could be silently edited past the author and missed; a new
+POST (and its @mention) always notifies, and deleting the prior keeps exactly one
+verdict comment on the PR (the delete is best-effort: if refused, the fresh comment
+still posts). A green run edits that comment to "resolved" (good news needs no new
+ping). The comment's wording follows the `classify` verdict and how actionable it is
+for the author:
+
+- a **`product`** regression at high confidence — "this one is yours: the fix is in
+  this PR's own Hub code";
+- a **`generator-gap`** (which also covers a **coverage gap the PR introduced**,
+  labelled `generator-gap` for an unmapped new/changed operation) — a test-generator
+  gap, not a Hub bug, that does not block merging; api-test-generator needs a
+  follow-up (linked to the tracking issue when one exists) that lands **after** the
+  Hub PR merges and the spec pin is bumped — the generator PR is last, because its
+  checks read the pinned spec and cannot name an operation that is not in it yet
+  (merge order: Hub PR → pin bump → generator PR);
+- a **`product`** that could not be tied to the PR, or **`unknown`** — a heads-up to
+  open the run and confirm before merging;
+- **`infra` / `flaky`** — a heads-up that the failure looks unrelated to the author's
+  change, so no action is needed unless it keeps happening;
+- **`startup`** (Hub PR image did not start) — a heads-up to inspect before merging,
+  not a dismissal: a change that stops Hub booting reaches this branch too, so it may
+  be the author's (the `soft` tag / "if your change could affect startup, it may be
+  the cause" verdict).
+
+A **`presuite`** failure (a setup step before the suites ran — checkout, clone,
+install, registry login, image pull) is the exception: it is shared-pipeline,
+test-automation's responsibility, not the PR author's, so it gets **no comment** and
+stays in Slack pinging `test-automation-medic`. (A `startup` failure still gets a
+comment — a bad PR image is the author's to look at.)
+
+Slack otherwise fires only as a **fallback for a PR with no author to @-tag**. The
+Slack-chain steps' `if:` gates fire when `pr_author == ''` **or** the failure is
+presuite (`suites_ran != 'true' && hub_start_failed != 'true'`). The ping is routed
+to match: a presuite failure pings `test-automation-medic`; every other (bot-PR)
+case pings `hub-medic` — it is a camunda-hub PR nobody can be @-tagged on, so the
+Hub on-call owns it. A bot (e.g. `renovate[bot]`, whose `[bot]` login fails the
+charset check in `validate`) is the usual no-author case; its comment still posts
+without a mention. Whenever there IS an author and the failure is not presuite, the
+comment covers it and no Slack is posted. The gates are guarded by
+`tests/request-validation/slack-failure-marks-run-failed.test.ts`. The comment
+needs Issues or Pull requests: write for the qa-processes App on camunda-hub;
+without it the step only warns. The tracking issues are unchanged — the
+`generator-gap-tracker` / `coverage-gap-tracker` jobs still open their
+api-test-generator issues (the generator-gap one assigned to the PR author), and
+the weekday gap digest still lists them once the PR merges.
 `_hub-suite-run.yml`'s own coverage-check step (#505) fails ITS job whenever
 an operation has zero generated test at all (a silent ontology gap) — but
 per #480, missing coverage alone must never be REPORTED as a failing check
@@ -909,9 +945,20 @@ the matching entries, regenerates camunda-hub, runs a narrow local guard
 `tests/codegen/known-issue-summary-consistency.test.ts`), and — only if that's
 clean — opens a **draft** PR (branch `chore/hub-unskip-<issue-number>`, label
 `nightly-api-fix`) plus a Slack heads-up to
-`#top-hub-nightly-test-results`. If the local guard fails (the upstream fix
-was partial, or a hardcoded invariant still expects the op suppressed), it
-reverts and reports instead of opening a broken PR. Entirely deterministic —
+`#top-hub-nightly-test-results`. Both name the person who landed the hub fix
+(the blocker's `closed_by`, else its first assignee; bots/app actors skipped):
+the PR assigns them (best-effort — dropped if they lack repo access) so the
+re-enabled test lands back on them to verify. If the local guard fails (the
+upstream fix was partial, or a hardcoded invariant still expects the op
+suppressed), it reverts and reports instead of opening a broken PR — and the
+"needs manual investigation" Slack alert cc-s that same fix author, since a
+partial fix is theirs to finish. The Slack cc is a real `<@user>` mention when
+the author's Slack profile carries their GitHub link
+([`scripts/triage/slack-github-map.ts`](scripts/triage/slack-github-map.ts)
+resolves GitHub login → Slack id via `users.list` + the custom GitHub profile
+field); without that mapping — or until the Slack app is granted `users:read` /
+`users.profile:read` — it falls back to naming the author by GitHub-profile link.
+Entirely deterministic —
 no agent involved, unlike the triage flow above; detecting a closed issue and
 removing a JSON entry are pure mechanics. Same two-App-token split as the
 triage agent (`GH_TOKEN_HUB` for the issue-state check, `GH_TOKEN_GENERATOR`
