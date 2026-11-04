@@ -158,6 +158,18 @@ jobs:
           SUMMARY_FILE: ${{ github.workspace }}/hub-reenable-summary.json
         run: bash .github/scripts/hub-reenable-check.sh
 
+      # Resolve each fix author's GitHub login to a real Slack @-mention (the handover-call ask:
+      # tag the person who landed the fix). Adds a `fixerMention` to each summary item; the
+      # formatter prefers it over the GitHub-profile link. Fail-soft and best-effort: without the
+      # Slack user scopes or a populated GitHub profile field the map is empty, so the formatter
+      # falls back to naming the author by GitHub link — never blocks the alert.
+      - name: Resolve fix-author Slack mentions
+        if: always() && steps.slack.outputs.SLACK_BOT_TOKEN != ''
+        continue-on-error: true
+        env:
+          SLACK_TOKEN: ${{ steps.slack.outputs.SLACK_BOT_TOKEN }}
+        run: node scripts/triage/slack-github-map.ts --enrich "${{ github.workspace }}/hub-reenable-summary.json" --key fixer
+
       # --- Slack heads-up, only when there's something to report ---------------
       - name: Build Slack message
         id: slack-message

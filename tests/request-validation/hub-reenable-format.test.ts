@@ -118,6 +118,21 @@ describe('re-enable check Slack message: naming the fix author', () => {
     expect(text).not.toContain('cc <https://github.com');
     expect(format([broke()])).not.toContain('cc <https://github.com');
   });
+
+  it('prefers a real Slack @-mention over the GitHub link when fixerMention is set', () => {
+    // fixerMention is the <@id> the slack-github-map resolver adds in the workflow.
+    const openedText = format([{ ...opened('octocat'), fixerMention: '<@U123>' }]);
+    expect(openedText).toContain('assigned <@U123> (landed the fix)');
+    expect(openedText).not.toContain('https://github.com/octocat');
+
+    const brokeText = format([{ ...broke('octocat'), fixerMention: '<@U123>' }]);
+    expect(brokeText).toContain('Likely a partial fix — cc <@U123> (closed the blocker).');
+  });
+
+  it('falls back to the GitHub link when fixerMention is empty (unresolved)', () => {
+    const text = format([{ ...opened('octocat'), fixerMention: '' }]);
+    expect(text).toContain('assigned <https://github.com/octocat|@octocat>');
+  });
 });
 
 describe('re-enable check: suite-wide issues closed as not planned', () => {

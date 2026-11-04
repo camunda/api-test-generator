@@ -909,7 +909,13 @@ re-enabled test lands back on them to verify. If the local guard fails (the
 upstream fix was partial, or a hardcoded invariant still expects the op
 suppressed), it reverts and reports instead of opening a broken PR — and the
 "needs manual investigation" Slack alert cc-s that same fix author, since a
-partial fix is theirs to finish. Entirely deterministic —
+partial fix is theirs to finish. The Slack cc is a real `<@user>` mention when
+the author's Slack profile carries their GitHub link
+([`scripts/triage/slack-github-map.ts`](scripts/triage/slack-github-map.ts)
+resolves GitHub login → Slack id via `users.list` + the custom GitHub profile
+field); without that mapping — or until the Slack app is granted `users:read` /
+`users.profile:read` — it falls back to naming the author by GitHub-profile link.
+Entirely deterministic —
 no agent involved, unlike the triage flow above; detecting a closed issue and
 removing a JSON entry are pure mechanics. Same two-App-token split as the
 triage agent (`GH_TOKEN_HUB` for the issue-state check, `GH_TOKEN_GENERATOR`
