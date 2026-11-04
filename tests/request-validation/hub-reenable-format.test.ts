@@ -334,6 +334,15 @@ describe('re-enable check: op-scoped fix-author resolution and assignment (end-t
     expect(item?.fixer).toBe('');
   });
 
+  it('rejects a non-login candidate so arbitrary API text never becomes the fixer', () => {
+    // Defensive: even if gh/jq returned something that is not a GitHub login (e.g. an error
+    // phrase), the charset guard drops it rather than letting it reach the summary / Slack link.
+    const item = runOpScoped({ closedBy: 'Not Found', assignee: '', guardPasses: false }).find(
+      (i) => i.type === 'aborted_broke_checks',
+    );
+    expect(item?.fixer).toBe('');
+  });
+
   it('assigns the fix author on the opened unskip PR', () => {
     const item = runOpScoped({ closedBy: 'alice', guardPasses: true, assignFails: false }).find(
       (i) => i.type === 'opened',

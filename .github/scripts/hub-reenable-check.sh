@@ -125,11 +125,16 @@ while IFS= read -r group; do
   for cand in "${fixer_pair%%$'\t'*}" "${fixer_pair#*$'\t'}"; do
     case "$cand" in
       '' | *'[bot]' | app/*) continue ;;
-      *)
-        fixer="$cand"
-        break
-        ;;
     esac
+    # Accept only a well-formed GitHub login. gh/jq already yields a login or ''
+    # (the `// ""` defaults turn a missing field or an error body into empty),
+    # but validate the charset here so that even an unexpected API response can
+    # never put arbitrary text into the summary, the Slack mention or the
+    # GitHub-profile link. GitHub logins are 1–39 alphanumerics/hyphens.
+    if [[ "$cand" =~ ^[A-Za-z0-9-]{1,39}$ ]]; then
+      fixer="$cand"
+      break
+    fi
   done
   [ -n "$fixer" ] && echo "Fix author for ${url}: ${fixer}" \
     || echo "No taggable fix author resolved for ${url}"
