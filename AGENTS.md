@@ -902,9 +902,14 @@ the matching entries, regenerates camunda-hub, runs a narrow local guard
 `tests/codegen/known-issue-summary-consistency.test.ts`), and — only if that's
 clean — opens a **draft** PR (branch `chore/hub-unskip-<issue-number>`, label
 `nightly-api-fix`) plus a Slack heads-up to
-`#top-hub-nightly-test-results`. If the local guard fails (the upstream fix
-was partial, or a hardcoded invariant still expects the op suppressed), it
-reverts and reports instead of opening a broken PR. Entirely deterministic —
+`#top-hub-nightly-test-results`. Both name the person who landed the hub fix
+(the blocker's `closed_by`, else its first assignee; bots/app actors skipped):
+the PR assigns them (best-effort — dropped if they lack repo access) so the
+re-enabled test lands back on them to verify. If the local guard fails (the
+upstream fix was partial, or a hardcoded invariant still expects the op
+suppressed), it reverts and reports instead of opening a broken PR — and the
+"needs manual investigation" Slack alert cc-s that same fix author, since a
+partial fix is theirs to finish. Entirely deterministic —
 no agent involved, unlike the triage flow above; detecting a closed issue and
 removing a JSON entry are pure mechanics. Same two-App-token split as the
 triage agent (`GH_TOKEN_HUB` for the issue-state check, `GH_TOKEN_GENERATOR`

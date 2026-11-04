@@ -22,12 +22,16 @@ fi
 jq -r '
   def line(item):
     item.url as $url | item.title as $title | (item.operations // "") as $ops |
+    (item.fixer // "") as $fixer |
+    ("<https://github.com/" + $fixer + "|@" + $fixer + ">") as $fixerlink |
     if item.type == "opened" then
       "🎉 <" + $url + "|camunda-hub#" + ($url | split("/") | last) + "> (_" + $title + "_) is closed — re-enabled: `" + $ops + "` → <" + item.pr_url + "|draft PR> (pending live-Hub validation)"
+      + (if $fixer != "" then " — assigned " + $fixerlink + " (landed the fix)" else "" end)
     elif item.type == "already_in_flight" then
       "🎉 <" + $url + "|camunda-hub#" + ($url | split("/") | last) + "> is closed — `" + $ops + "` already has an open unskip PR: <" + item.pr_url + ">"
     elif item.type == "aborted_broke_checks" then
       "⚠️ <" + $url + "|camunda-hub#" + ($url | split("/") | last) + "> is closed, but re-enabling `" + $ops + "` breaks local generate/tests — needs manual investigation (see the workflow run log)."
+      + (if $fixer != "" then " Likely a partial fix — cc " + $fixerlink + " (closed the blocker)." else "" end)
     elif item.type == "aborted_no_token" then
       "⚠️ <" + $url + "|camunda-hub#" + ($url | split("/") | last) + "> is closed and `" + $ops + "` is ready to re-enable, but no generator token was available this run — will retry."
     elif item.type == "aborted_pr_create_failed" then

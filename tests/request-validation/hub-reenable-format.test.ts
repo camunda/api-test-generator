@@ -76,6 +76,50 @@ describe('re-enable check Slack message', () => {
   });
 });
 
+describe('re-enable check Slack message: naming the fix author', () => {
+  const opened = (fixer?: string) => ({
+    type: 'opened',
+    url: 'https://github.com/camunda/camunda-hub/issues/30001',
+    title: 'getFolder returns the wrong shape',
+    operations: 'getFolder',
+    pr_url: 'https://github.com/camunda/api-test-generator/pull/999',
+    ...(fixer === undefined ? {} : { fixer }),
+  });
+  const broke = (fixer?: string) => ({
+    type: 'aborted_broke_checks',
+    url: 'https://github.com/camunda/camunda-hub/issues/30002',
+    title: 'updateFile optimistic lock',
+    operations: 'updateFile',
+    ...(fixer === undefined ? {} : { fixer }),
+  });
+
+  it('names the fix author as the PR assignee when one was resolved', () => {
+    const text = format([opened('octocat')]);
+    expect(text).toContain('assigned <https://github.com/octocat|@octocat> (landed the fix)');
+  });
+
+  it('omits the assignee note when no fix author was resolved', () => {
+    const text = format([opened('')]);
+    expect(text).toContain('draft PR');
+    expect(text).not.toContain('assigned');
+    // An older summary with no `fixer` field at all behaves the same.
+    expect(format([opened()])).not.toContain('assigned');
+  });
+
+  it('cc-s the fix author on a partial-fix (needs-manual-investigation) alert', () => {
+    const text = format([broke('octocat')]);
+    expect(text).toContain('needs manual investigation');
+    expect(text).toContain('Likely a partial fix — cc <https://github.com/octocat|@octocat>');
+  });
+
+  it('still reports the broken re-enable when no fix author was resolved', () => {
+    const text = format([broke('')]);
+    expect(text).toContain('needs manual investigation');
+    expect(text).not.toContain('cc <https://github.com');
+    expect(format([broke()])).not.toContain('cc <https://github.com');
+  });
+});
+
 describe('re-enable check: suite-wide issues closed as not planned', () => {
   /** Runs hub-reenable-check.sh in a scratch repo whose gh stub answers every issue with the given state. */
   function runCheck(knownIssues: unknown[], ghAnswer: string) {
