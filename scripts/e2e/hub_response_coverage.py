@@ -37,7 +37,6 @@ import sys
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 CONFIG = 'camunda-hub'
 GUIDE_URL = 'https://github.com/camunda/api-test-generator/blob/main/docs/hub-response-coverage-report.md'
-HUB_MEDIC = '<!subteam^S014VK4482H|hub-medic>'
 HTTP_METHODS = {'get', 'put', 'post', 'delete', 'patch'}
 BUCKETS = ('2xx', '400', '401', '403', '404', '409')
 # 500 is documented everywhere and cannot be provoked on purpose.
@@ -514,6 +513,26 @@ def known_note(urls):
     return f' (known, tracked: {", ".join(label(u) for u in urls)})' if urls else ' (known, tracked)'
 
 
+def regressed(s, prev):
+    """True when coverage got worse since the previous report — the only case worth actively pinging a
+    human about. Quiet or improving weeks return False so the weekly message posts without a mention.
+    'Worse' = fewer endpoints fully tested, fewer endpoints with all bad-request kinds, more endpoints
+    with no test at all, or a brand-new endpoint that shipped with no test."""
+    if not prev:
+        return False
+    if s['fullyAsserted'] < prev.get('fullyAsserted', s['fullyAsserted']):
+        return True
+    if s['requestChecks'][0] < prev.get('requestChecks', s['requestChecks'])[0]:
+        return True
+    cur_zero = set(s['zeroTestOperations'])
+    if len(cur_zero) > len(set(prev.get('zeroTestOperations', []))):
+        return True
+    new_ops = set(s['operationIds']) - set(prev.get('operationIds', []))
+    if new_ops & cur_zero:
+        return True
+    return False
+
+
 def slack(s, prev, args):
     # Leads with the report's documented main question — does every endpoint test every status code it
     # can return? (2xx/400/401/403/404/409; a documented 500 is not checked) — then the bad-request-kind
@@ -542,6 +561,14 @@ def slack(s, prev, args):
         'endpoints still missing a kind is an upper bound)_',
         '',
     ]
+    # Ping a human (e.g. hub-medic) ONLY when coverage regressed week-over-week — a flat or improving
+    # week posts the same message with no mention, so the weekly report never becomes a page people
+    # learn to ignore. The mention text (a Slack subteam handle) is supplied by the workflow.
+    mention = getattr(args, 'regression_mention', '')
+    if mention and regressed(s, prev):
+        lines.insert(
+            0,
+            f':rotating_light: {mention} — Hub API test coverage dropped since last week. Details below.')
     code_bits = [f'{b} ({s["codeGaps"][b]})' for b in BUCKETS if s['codeGaps'].get(b)]
     lines.append(
         '• Status codes not tested yet: ' + (' · '.join(code_bits) if code_bits else 'none :tada:'))
@@ -577,17 +604,6 @@ def slack(s, prev, args):
         links.append(f'<{args.tracking_url}|Tracking issue>')
     links.append(f'<{GUIDE_URL}|📖 Guide>')
     lines += ['', ' · '.join(links)]
-    # Ping hub-medic whenever the report lists any actionable gap. Gate on the report's full
-    # active-gap set: a code-bucket gap (opsMissingResponseTest excludes 403 — see codeGap in
-    # build_summary), a bad-request-kind gap (requestCheckGaps), an endpoint with no test, or an
-    # "Other test gaps" dimension (lifecycle / optional-field / response-shape, the `other` list).
-    if (
-        any(s['codeGaps'].get(b) for b in BUCKETS)
-        or s['requestCheckGaps']
-        or s['zeroTestOperations']
-        or other
-    ):
-        lines += ['', ':rotating_light: ' + HUB_MEDIC]
     return '\n'.join(lines) + '\n'
 
 
@@ -764,6 +780,9 @@ def main():
     ap.add_argument('--spec-ref', default='')
     ap.add_argument('--run-url', default='')
     ap.add_argument('--tracking-url', default='')
+    ap.add_argument('--regression-mention', default='',
+                    help='Slack mention (e.g. a <!subteam^ID|name> handle) added to the message only '
+                         'when coverage regressed since the previous report. Empty = never mention.')
     args = ap.parse_args()
 
     summary, rows = build(args)

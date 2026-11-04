@@ -85,7 +85,10 @@ The Hub team:
 - changes the generator when a gap needs new behaviour. The agent only reports those, and a person opens the change. The code is in `request-validation/`, `path-analyser/` and `materializer/`, and [AGENTS.md](../AGENTS.md) lists the rules a change must follow.
 
 **Who gets pinged.** `hub-medic` is pinged for every alert except presuite: a failed PR check, a newly filed Hub issue, a fix or suppress PR
-that needs review, the spec-bump alert, the re-enable check, the missing-post alert, and the weekly report when it lists gaps.
+that needs review, the spec-bump alert, the re-enable check, the missing-post alert, and the weekly report when coverage regressed
+since the previous week (a flat or improving week posts with no mention). The re-enable check additionally **names the person who
+landed the Hub fix** — it assigns them the unskip PR, or, if re-enabling breaks locally (a partial fix), cc-s them on the
+"needs manual investigation" alert, so finishing it is theirs.
 `test-automation-medic` alone is pinged when a PR check fails before the tests start (a setup problem such as a clone
 token or registry login — shared pipeline, not Hub-owned). A PR check that fails with no test evidence is posted without a ping; if the same PR fails 3 times in a day,
 the escalation pings `test-automation-medic` alone for presuite, or both groups for other no-evidence failures. When Slack threading

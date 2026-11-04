@@ -28,10 +28,12 @@ if [ -s "$REPORT_DIR/issue.md" ]; then
     "$REPORT_DIR/area-index.md" "$REPORT_DIR/issue.md" > "$REPORT_DIR/issue.rendered.md"
   if [ -z "$found" ]; then
     url=$(gh issue create --title "$ISSUE_TITLE" --body-file "$REPORT_DIR/issue.rendered.md" \
-      --label missing-coverage --label auto-generated --label hub)
+      --label missing-coverage --label auto-generated --label hub --label team/hub)
   else
     [ "$state" = "OPEN" ] || gh issue reopen "$num"
-    gh issue edit "$num" --body-file "$REPORT_DIR/issue.rendered.md"
+    # Add team/hub on the edit path too, so a pre-existing open tracking issue (edited in place, never
+    # recreated) also lands on the Hub board. --add-label is idempotent when the label is already set.
+    gh issue edit "$num" --body-file "$REPORT_DIR/issue.rendered.md" --add-label team/hub
     gh issue comment "$num" --body "Re-checked on $(date -u +%F): still missing. See the updated list above. $RUN_URL"
     url="$REPO_URL/issues/$num"
   fi

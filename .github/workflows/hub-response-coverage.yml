@@ -142,7 +142,22 @@ jobs:
             --previous previous/summary.json \
             --previous-history previous/history.csv \
             --spec-ref "${{ steps.hub-sha.outputs.sha }}" \
-            --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+            --regression-mention '<!subteam^S014VK4482H|hub-medic>'
+
+      # The dedicated Hub-team ownership label. Only this label routes the coverage tracking + area
+      # issues onto the Hub team board (via a board auto-add rule on `label:team/hub`); the broad `hub`
+      # config-scope label is NOT used for that, because it also tags test-automation's own generator
+      # work. `gh label create --force` is idempotent (creates it, or leaves an existing one as-is).
+      - name: Ensure the team/hub label exists
+        if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && !inputs.dry_run)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh label create 'team/hub' \
+            --description 'Owned by the Hub team (auto-added to the Hub board)' \
+            --color 0E8A16 --force
 
       # One issue per API area (the spec's first tag) that has a gap, same rules as the summary issue:
       # found by exact title in any state, rewritten in place, reopened if the gap returns, closed when
