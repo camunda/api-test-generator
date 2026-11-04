@@ -330,6 +330,10 @@ jobs:
         run: |
           gh label create kind/bug --repo camunda/camunda-hub --color d73a4a --description "A confirmed defect" 2>/dev/null || true
           gh label create nightly-detected --repo camunda/camunda-hub --color 5319e7 --description "Filed by the camunda-hub nightly API triage agent" 2>/dev/null || true
+          # A dedicated, agent-only marker for dashboards: "this product bug was caught by the
+          # api-test-generator pipeline". Kept separate from nightly-detected, which humans also apply
+          # to their own nightly write-ups, so it cannot give a clean count. Only the agent sets this.
+          gh label create qa/api-test-generator --repo camunda/camunda-hub --color 0e8a16 --description "Product bug caught by the api-test-generator pipeline (for metrics)" 2>/dev/null || true
           # The agent never opens a PR here (issues only), but a human fixing a
           # filed issue is asked to carry this label — pre-create it so the
           # close-stale-nightly-api-fix-prs janitor's camunda-hub leg (and the
@@ -704,7 +708,7 @@ jobs:
              Once past that check: compute the fingerprint, dedup by the
              \`nightly-api-triage fp=<fp>\` marker (then by symptom), and either link the existing issue
              or file a new one with \`gh issue create --repo camunda/camunda-hub\` using GH_TOKEN_HUB
-             (labels kind/bug + nightly-detected, already pre-created; fingerprint marker in the body).
+             (labels kind/bug + nightly-detected + qa/api-test-generator, already pre-created; fingerprint marker in the body).
              If GH_TOKEN_HUB is empty or filing fails, set action "report-only" with file_error.
           7. For EVERY product bug you just filed OR found already-known (known_issue: true) — not only
              newly-filed ones — also suppress the affected test in api-test-generator: per the
