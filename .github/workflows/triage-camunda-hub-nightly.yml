@@ -749,6 +749,87 @@ jobs:
       # and commented the run link; that was removed when hub-pr-live-check.yml shipped (#513), and the automatic run
       # was then limited to PRs from people.)
 
+      # Attribute a nightly generator-fix PR to the endpoint's author (handover
+      # call, 2026-10-28: a generator gap "belongs end-to-end" to whoever added
+      # the operation, so they review it). Best-effort and purely additive — on
+      # any miss the PR keeps its @camunda/hub CODEOWNERS review, so this can
+      # never make a run worse, hence continue-on-error. ONLY test-generation /
+      # unmapped-op fix PRs (fix_pr_url) are attributed; a product-bug suppress
+      # PR (suppress_pr_url) is deliberately excluded, because a regression is
+      # often not in the endpoint's own spec and blame would mis-attribute it.
+      - name: Assign nightly fix PRs to the endpoint author (best-effort)
+        if: ${{ steps.reports.outputs.has_reports == 'true' && steps.qa-token-generator.outputs.token != '' }}
+        continue-on-error: true
+        env:
+          WORKSPACE_NAME: ${{ steps.ws.outputs.name }}
+          GH_TOKEN_GENERATOR: ${{ steps.qa-token-generator.outputs.token }}
+          # Contents:Read on camunda-hub — the helper maps a commit SHA -> login.
+          HUB_TOKEN: ${{ steps.hub-token.outputs.token }}
+        run: |
+          set -uo pipefail
+          f="${GITHUB_WORKSPACE}/hub-triage.json"
+          [ -s "$f" ] || { echo "no triage result — nothing to attribute"; exit 0; }
+          jq empty "$f" 2>/dev/null || { echo "::warning::triage result is not JSON — skipping endpoint-author attribution"; exit 0; }
+          hub_dir="${HOME}/workspaces/${WORKSPACE_NAME}/camunda-hub"
+          if [ ! -d "${hub_dir}/.git" ]; then
+            echo "::warning::camunda-hub checkout not found at ${hub_dir} — skipping endpoint-author attribution"
+            exit 0
+          fi
+
+          TAB=$(printf '\t')
+          pairs_file=$(mktemp)
+          prs_file=$(mktemp)
+          # (fix_pr_url <TAB> operationId) for test-generation + unmapped-op fix
+          # PRs only. Suppress PRs (suppress_pr_url) are intentionally not here.
+          jq -r '
+            ( [ (.failures // [])[]
+                | select((.subcategory // "") == "test-generation"
+                         and (.action // "") == "fix-pr"
+                         and ((.fix_pr_url // "") != "")
+                         and ((.operationId // "") != "")) ]
+            + [ (.unmapped_operations // [])[]
+                | select((.action // "") == "fix-pr"
+                         and ((.fix_pr_url // "") != "")
+                         and ((.operationId // "") != "")) ] )
+            | .[] | "\(.fix_pr_url)\t\(.operationId)"
+          ' "$f" | sort -u > "$pairs_file"
+          if [ ! -s "$pairs_file" ]; then
+            echo "No test-generation/unmapped-op fix PRs to attribute."
+            rm -f "$pairs_file" "$prs_file"; exit 0
+          fi
+          cut -f1 "$pairs_file" | sort -u > "$prs_file"
+
+          # One PR at a time (files, not pipes, so $logins survives the loop);
+          # resolve each of its operations' authors and assign the deduped set.
+          while IFS= read -r pr; do
+            [ -n "$pr" ] || continue
+            logins=""
+            while IFS="$TAB" read -r p op; do
+              [ "$p" = "$pr" ] || continue
+              login=$(GH_TOKEN="$HUB_TOKEN" bash .github/scripts/hub-endpoint-author.sh "$op" "$hub_dir" || true)
+              [ -n "$login" ] || continue
+              case " ${logins} " in *" ${login} "*) : ;; *) logins="${logins:+${logins} }${login}" ;; esac
+            done < "$pairs_file"
+            if [ -z "$logins" ]; then
+              echo "No endpoint author resolved for ${pr} — leaving @camunda/hub review."
+              continue
+            fi
+            echo "Attributing ${pr} to: ${logins}"
+            for login in $logins; do
+              if GH_TOKEN="$GH_TOKEN_GENERATOR" gh pr edit "$pr" --add-assignee "$login" 2>/tmp/assign.err; then
+                echo "  assigned ${login}"
+              else
+                echo "::warning::could not assign ${login} to ${pr} (they may lack ${GITHUB_REPOSITORY} access): $(cat /tmp/assign.err 2>/dev/null)"
+              fi
+              if GH_TOKEN="$GH_TOKEN_GENERATOR" gh pr edit "$pr" --add-reviewer "$login" 2>/tmp/review.err; then
+                echo "  requested review from ${login}"
+              else
+                echo "::warning::could not request review from ${login} on ${pr}: $(cat /tmp/review.err 2>/dev/null)"
+              fi
+            done
+          done < "$prs_file"
+          rm -f "$pairs_file" "$prs_file"
+
       # No reports downloaded → write an inconclusive result so Slack announces it
       # (never a green digest). Mirrors the c8 "no false all-clear" rule.
       - name: Write inconclusive result (no reports)
