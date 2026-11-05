@@ -52,12 +52,27 @@ fi
 # request is how the Hub team is brought to a new-domain bump. Best-effort and
 # hub-leg only ($1 = PR number or branch): a team that lacks repo access just
 # logs a warning, never fails the run; oca's pin routes to its own team.
+#
+# Request it ONCE over the life of the rolling bump PR. The existing-PR path runs
+# every day, and re-adding a reviewer who has already reviewed re-opens their
+# completed review and re-notifies them — so a marker label makes the request
+# idempotent across runs. The label is only set after a successful request, so a
+# request that failed (team without access yet) is retried on the next run.
+HUB_REVIEW_MARKER="hub-review-requested"
 request_hub_review() {
   [ "${IS_PRIVATE:-}" = "true" ] || return 0
+  if gh pr view "$1" --json labels --jq '.labels[].name' 2>/dev/null \
+      | grep -qx "$HUB_REVIEW_MARKER"; then
+    echo "@camunda/hub review already requested on the bump PR (marker present) — not re-requesting."
+    return 0
+  fi
+  gh label create "$HUB_REVIEW_MARKER" --color 0e8a16 \
+    --description "spec-bump bump PR: @camunda/hub review already requested" 2>/dev/null || true
   if gh pr edit "$1" --add-reviewer camunda/hub >/dev/null 2>&1; then
+    gh pr edit "$1" --add-label "$HUB_REVIEW_MARKER" >/dev/null 2>&1 || true
     echo "Requested @camunda/hub review on the bump PR."
   else
-    echo "::warning::Could not request @camunda/hub review on the bump PR (the team may lack ${GITHUB_REPOSITORY:-this repo} access)."
+    echo "::warning::Could not request @camunda/hub review on the bump PR (the team may lack ${GITHUB_REPOSITORY:-this repo} access) — will retry next run."
   fi
 }
 

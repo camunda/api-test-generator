@@ -40,4 +40,12 @@ describe('spec-bump-check hub bump PR reviewer', () => {
     // request_hub_review returns early unless IS_PRIVATE=true (oca routes elsewhere).
     expect(openPr).toMatch(/IS_PRIVATE[^\n]*\|\|\s*return 0/);
   });
+
+  it('requests the review only once — a marker label guards the daily re-run', () => {
+    // The existing-PR path runs daily; without a guard it would re-request (and
+    // re-notify) an already-reviewed bump PR. The marker is checked before
+    // requesting and set only after a successful request.
+    expect(openPr).toContain('HUB_REVIEW_MARKER="hub-review-requested"');
+    expect(openPr).toMatch(/grep -qx "\$HUB_REVIEW_MARKER"/);
+  });
 });
