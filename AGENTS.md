@@ -1082,7 +1082,9 @@ For **camunda-hub** only, when the *operation* surface changed (an operationId
 added/removed, not just a field), it also posts a Slack alert to
 `#top-hub-nightly-test-results` (Slack bot token via the same Vault JWT auth)
 linking the bump PR / tracking issue it just created — so the hub team sees a
-new upstream domain in their channel, not only as a GitHub issue (#435). The
+new upstream domain in their channel, not only as a GitHub issue (#435). This
+drift alert **pings nobody** — a new domain reaches the Hub team through the bump
+PR's reviewer instead; only a failed-run alert pages `hub-medic`. The
 op-surface diff is already computed for the routing above, so the Slack step
 only formats + links; it does not recompute.
 
