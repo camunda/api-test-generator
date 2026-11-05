@@ -88,16 +88,43 @@ function runAssign(triage: unknown, opts: Opts = {}): { log: string[]; stdout: s
 const count = (log: string[], needle: string) => log.filter((l) => l.includes(needle)).length;
 
 describe('hub-assign-fix-prs.sh', () => {
-  it('excludes a product-bug suppress PR (never touches it)', () => {
-    const { log, stdout } = runAssign({
-      failures: [
-        { subcategory: null, action: 'report-only', suppress_pr_url: 'PR_SUP', operationId: 'opX' },
-      ],
-      unmapped_operations: [],
-    });
-    expect(count(log, 'PR_SUP')).toBe(0);
-    expect(log).toHaveLength(0);
-    expect(stdout).toContain('No test-generation/unmapped-op fix PRs');
+  it('requests review (no assignee) for a product-bug suppress PR', () => {
+    const { log } = runAssign(
+      {
+        failures: [
+          {
+            subcategory: null,
+            action: 'report-only',
+            suppress_pr_url: 'PR_SUP',
+            operationId: 'opX',
+          },
+        ],
+        unmapped_operations: [],
+      },
+      { authors: { opX: 'alice' } },
+    );
+    expect(log).toContain('pr edit PR_SUP --add-reviewer alice');
+    // a suppress PR is reviewed, never assigned — the owner sanity-checks it
+    expect(count(log, 'PR_SUP --add-assignee')).toBe(0);
+  });
+
+  it('falls back to the team for a suppress PR whose author cannot be resolved', () => {
+    const { log } = runAssign(
+      {
+        failures: [
+          {
+            subcategory: null,
+            action: 'file',
+            issue_url: 'url',
+            suppress_pr_url: 'PR_SUP2',
+            operationId: 'opY',
+          },
+        ],
+      },
+      { authors: {} },
+    );
+    expect(log).toContain('pr edit PR_SUP2 --add-reviewer camunda/hub');
+    expect(count(log, 'PR_SUP2 --add-assignee')).toBe(0);
   });
 
   it('assigns and requests review for a test-generation fix PR', () => {
@@ -226,7 +253,7 @@ describe('hub-assign-fix-prs.sh', () => {
     expect(out).toContain('not JSON');
   });
 
-  it('does nothing when there are no fix PRs', () => {
+  it('does nothing when there are no fix or suppress PRs', () => {
     const { log, stdout } = runAssign({
       failures: [
         { subcategory: null, action: 'skip', category: 'infrastructure', operationId: 'q' },
@@ -234,7 +261,7 @@ describe('hub-assign-fix-prs.sh', () => {
       unmapped_operations: [],
     });
     expect(log).toHaveLength(0);
-    expect(stdout).toContain('No test-generation/unmapped-op fix PRs');
+    expect(stdout).toContain('No fix or suppress PRs to attribute');
   });
 
   it('skips when the camunda-hub checkout is missing', () => {

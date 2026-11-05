@@ -204,25 +204,22 @@ case "$MODE" in
       #     against paging on a schema-violating/incomplete agent-authored
       #     entry that claims action "file" without one.
       #   - test_automation_medic: action == "fix-pr" with a non-empty
-      #     fix_pr_url (a fresh generator-side fix PR) OR a non-empty
-      #     suppress_pr_url (a suppress PR — also lives in api-test-generator,
-      #     needs our review) OR its own could-not-classify signal
-      #     (category: "infrastructure" AND confidence: "low", the exact
-      #     fallback combination the classification guidance defines —
-      #     NOT any low-confidence finding, an unrelated future use of
-      #     confidence should not page anyone)
-      #     — deduped to exactly one mention even if more than one of these
-      #     happened to be true for the same finding (the schema does not
-      #     declare them mutually exclusive).
+      #     fix_pr_url (a fresh generator-side fix PR) OR its own
+      #     could-not-classify signal (category: "infrastructure" AND
+      #     confidence: "low", the exact fallback combination the
+      #     classification guidance defines — NOT any low-confidence finding,
+      #     an unrelated future use of confidence should not page anyone)
+      #     — deduped to exactly one mention even if both are true.
+      #
+      # A product-bug SUPPRESS PR (suppress_pr_url) pings NOBODY here: its
+      # endpoint owner is already requested as reviewer by hub-assign-fix-prs.sh,
+      # and the Hub bug is surfaced on its own — a FRESH bug pings hub_medic via
+      # action=="file" below, and an already-known one is, by design, not
+      # re-paged. So a suppress PR, new or known, stays quiet in Slack.
       #
       # hub_medic never fires on an already-known recurrence (action ==
       # "report-only"/"skip") — otherwise it gets paged nightly for something
-      # already tracked and unfixed. The test_automation_medic suppress_pr_url
-      # trigger is intentionally independent of action: per the guidance, a
-      # suppress PR is opened for every confirmed bug, including one already
-      # known (action == "report-only", known_issue == true) — the PR is
-      # fresh and needs review either way, even though the underlying hub
-      # issue is not.
+      # already tracked and unfixed.
       #
       # One mention per finding, inline in the thread reply only (never the
       # top-level summary message) so it stays precise, not a blanket ping.
@@ -275,7 +272,7 @@ case "$MODE" in
       # reasoning, response bodies, etc.) lives in the linked issue, PR, or
       # nightly run, not repeated here — this is a pointer, not the evidence.
       def line(f):
-        ((((f.action // "") == "fix-pr" and has_url(f.fix_pr_url)) or has_url(f.suppress_pr_url)) or undecided(f)) as $needs_ta_medic
+        (((f.action // "") == "fix-pr" and has_url(f.fix_pr_url)) or undecided(f)) as $needs_ta_medic
         | ([
             (if (f.known_issue // false) then compactLink(f.known_issue_url; ":ticket:") else "" end),
             relatedCommitNote(f.related_commit; f),

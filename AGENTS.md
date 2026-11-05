@@ -879,9 +879,13 @@ decision). It is best-effort and additive: a bot/unresolved author, or a
 contributor without access to this repo, falls back to an explicit
 `@camunda/hub` team review request (this repo has no CODEOWNERS of its own
 yet, so the step requests the team itself rather than relying on one), so it
-can never make a run worse. A **product-bug suppress
-PR** is deliberately excluded — a regression is often not in the endpoint's own
-spec, so blame would mis-attribute; those keep `@camunda/hub`. A PR the agent
+can never make a run worse. A **product-bug suppress PR** gets the endpoint
+owner as **reviewer only** (no assignee) with the same team fallback — they
+sanity-check that suppressing their endpoint's test is right, but the Hub bug
+itself (tracked in the filed issue) is not theirs, and blame would mis-attribute
+it. The triage Slack digest **does not ping** for a suppress PR (its reviewer
+handles it); a **freshly-filed** Hub bug still pings on its own line, while an
+already-known one stays silent. A PR the agent
 opens is **not** run automatically against a live Hub:
 [hub-pr-live-check.yml](.github/workflows/hub-pr-live-check.yml) fires on every
 same-repo `pull_request` targeting `main` whose diff doesn't touch `.github/**`,
