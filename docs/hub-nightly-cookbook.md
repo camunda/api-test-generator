@@ -13,10 +13,14 @@ A set of automatic jobs then post what they found. Most nights the posts are gre
 **A normal night has 0 failed tests.** Known Hub bugs do not count as failures: their tests are either skipped or run
 without the one assertion Hub cannot meet yet. So any number above 0 is news.
 
-**Who acts.** The Hub team acts on everything in this channel. The spec-bump alert, the re-enable check, the weekly
-report and the missing-post alert ping `hub-medic`, so the person on call reviews the PR it opened, or decides what to do
-with the post. See "Who gets pinged" in [how-it-works.md](how-it-works.md). A PR labelled `nightly-api-fix` (a suppress,
-fix or unskip PR) is closed after 3 days without activity unless it carries `do-not-close`.
+**Who acts.** The Hub team acts on everything in this channel — but not every post pages the person on call, so read
+every post, not only the ones that mention you. The **missing-post alert** always pings `hub-medic`. The rest are
+conditional: the **spec-bump alert** pings `hub-medic` only when the check itself failed — an ordinary spec-drift post
+pings nobody and reaches the team through its bump PR's `@camunda/hub` reviewer; the **weekly report** mentions
+`hub-medic` only when coverage regressed since the previous week; and the **re-enable check** pings `hub-medic` only
+when a reported item has no named fixer (otherwise it names the person who landed the Hub fix). See "Who gets pinged" in
+[how-it-works.md](how-it-works.md). A PR labelled `nightly-api-fix` (a suppress, fix or unskip PR) is closed after 3
+days without activity unless it carries `do-not-close`.
 
 **What you will see, in the order it happens** (all times UTC; examples of each message are in the sections below):
 

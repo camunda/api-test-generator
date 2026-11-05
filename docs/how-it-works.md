@@ -84,19 +84,36 @@ The Hub team:
 - keeps the Hub settings in `configs/camunda-hub/`. Most coverage gaps are fixed there, and the coverage-fix agent handles many of them;
 - changes the generator when a gap needs new behaviour. The agent only reports those, and a person opens the change. The code is in `request-validation/`, `path-analyser/` and `materializer/`, and [AGENTS.md](../AGENTS.md) lists the rules a change must follow.
 
-**Who gets pinged.** `hub-medic` is pinged for every alert except presuite: a failed PR check, a newly filed Hub issue, a fix or suppress PR
-that needs review, the spec-bump alert, the re-enable check, the missing-post alert, and the weekly report when coverage regressed
-since the previous week (a flat or improving week posts with no mention). The re-enable check additionally **names the person who
-landed the Hub fix** — it assigns them the unskip PR, or, if re-enabling breaks locally (a partial fix), cc-s them on the
-"needs manual investigation" alert, so finishing it is theirs.
-`test-automation-medic` alone is pinged when a PR check fails before the tests start (a setup problem such as a clone
-token or registry login — shared pipeline, not Hub-owned). A PR check that fails with no test evidence is posted without a ping; if the same PR fails 3 times in a day,
-the escalation pings `test-automation-medic` alone for presuite, or both groups for other no-evidence failures. When Slack threading
-works, each distinct failure is one reply under the day's message, keyed on the PR and a fingerprint of what failed: a re-run
-with the same fingerprint edits that reply in place rather than posting again, and only a changed failure adds a new reply.
-While the Slack bot lacks that permission, it falls back to a separate message per run. Every PR to this repo requests a review from
-`@camunda/hub` (see `.github/CODEOWNERS`). The daily gap digest and the coverage-fix agent's thread reply ping nobody
-by name, so whoever is on call as `hub-medic` reads both Slack channels each morning: PR-check alerts and the gap digest
+**Who gets pinged — not every post is a page.** The on-call group is `hub-medic`, but most posts name a
+specific owner first and fall back to `hub-medic` only when none can be named, so several posts deliberately
+page nobody. `hub-medic` is pinged outright only for a newly filed Hub issue (a product bug the nightly
+triage found), a fix or suppress PR that needs review, and the missing-post alert. The rest are conditional:
+
+- **A failing camunda-hub PR check** is not a page by default. A normal failing run posts **no Slack**; it
+  leaves a comment on the camunda-hub PR that @-tags its author, whose change it is. `hub-medic` is pinged
+  only as a **fallback** — a bot PR with no author to tag, or a run whose verdict comment could not be
+  posted. `test-automation-medic` alone is pinged when a PR check fails *before* the tests start (a setup
+  problem such as a clone token or registry login — shared pipeline, not Hub-owned). A failure with no test
+  evidence is posted without a ping; if the same PR fails 3 times in a day, the escalation pings
+  `test-automation-medic` alone for presuite, or both groups for other no-evidence failures.
+- **The spec-bump alert** pages `hub-medic` **only when the check itself failed** and cannot tell whether
+  the spec drifted. An ordinary spec-drift post (a new or changed upstream operation) **pings nobody**: the
+  bump PR it opens carries an `@camunda/hub` reviewer, and that review is the notification.
+- **The re-enable check** names **the person who landed the Hub fix** — it assigns them the unskip PR, or, if
+  re-enabling breaks locally (a partial fix), cc-s them on the "needs manual investigation" alert, so
+  finishing it is theirs. `hub-medic` is pinged only as a **per-item fallback** — when a reported item has no
+  resolved fixer mention (a suite-wide closure, or an author reachable only by a GitHub link) — so an item
+  whose owner is already named is not double-paged and none is left unowned.
+- **The weekly coverage report** @-mentions `hub-medic` **only when coverage regressed** since the previous
+  week; a flat or improving week posts with no mention, so the report never becomes a page people learn to
+  ignore.
+
+When Slack threading works, each distinct PR-check failure is one reply under the day's message, keyed on the
+PR and a fingerprint of what failed: a re-run with the same fingerprint edits that reply in place rather than
+posting again, and only a changed failure adds a new reply. While the Slack bot lacks that permission, it
+falls back to a separate message per run. Every PR to this repo requests a review from `@camunda/hub` (see
+`.github/CODEOWNERS`). The daily gap digest and the coverage-fix agent's thread reply ping nobody by name, so
+whoever is on call as `hub-medic` reads both Slack channels each morning: PR-check alerts and the gap digest
 are in `#camunda-hub-pr-e2e-results`, everything else is in `#top-hub-nightly-test-results`.
 
 **Questions or help:** ask in `#ask-qa` and tag `@test-automation-medic`. The enablement team always replies there.
