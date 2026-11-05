@@ -751,10 +751,12 @@ jobs:
 
       # Attribute a nightly generator-fix PR to the endpoint's author (handover
       # call, 2026-10-28: a generator gap "belongs end-to-end" to whoever added
-      # the operation, so they review it). Best-effort and purely additive — on
-      # any miss the PR keeps its @camunda/hub CODEOWNERS review, so this can
-      # never make a run worse, hence continue-on-error. ONLY test-generation /
-      # unmapped-op fix PRs (fix_pr_url) are attributed; a product-bug suppress
+      # the operation, so they review it). Best-effort and purely additive —
+      # when no individual author resolves, the step requests the @camunda/hub
+      # TEAM review explicitly (this repo has no CODEOWNERS of its own yet, so
+      # the fallback can't be left implicit), so a fix PR always has a reviewer;
+      # continue-on-error means a miss never fails the run. ONLY test-generation
+      # / unmapped-op fix PRs (fix_pr_url) are attributed; a product-bug suppress
       # PR (suppress_pr_url) is deliberately excluded, because a regression is
       # often not in the endpoint's own spec and blame would mis-attribute it.
       - name: Assign nightly fix PRs to the endpoint author (best-effort)
@@ -777,6 +779,9 @@ jobs:
           fi
 
           TAB=$(printf '\t')
+          # The Hub team, requested as reviewer when no individual author resolves
+          # (the explicit fallback — this repo has no CODEOWNERS of its own yet).
+          hub_team="camunda/hub"
           pairs_file=$(mktemp)
           prs_file=$(mktemp)
           # (fix_pr_url <TAB> operationId) for test-generation + unmapped-op fix
@@ -811,7 +816,12 @@ jobs:
               case " ${logins} " in *" ${login} "*) : ;; *) logins="${logins:+${logins} }${login}" ;; esac
             done < "$pairs_file"
             if [ -z "$logins" ]; then
-              echo "No endpoint author resolved for ${pr} — leaving @camunda/hub review."
+              # Fallback: request the Hub team explicitly, since nothing else will.
+              if GH_TOKEN="$GH_TOKEN_GENERATOR" gh pr edit "$pr" --add-reviewer "$hub_team" 2>/tmp/review.err; then
+                echo "No endpoint author resolved for ${pr} — requested ${hub_team} team review."
+              else
+                echo "::warning::no endpoint author resolved for ${pr} and could not request ${hub_team} review (the team may lack ${GITHUB_REPOSITORY} access): $(cat /tmp/review.err 2>/dev/null)"
+              fi
               continue
             fi
             echo "Attributing ${pr} to: ${logins}"

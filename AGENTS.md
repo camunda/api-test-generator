@@ -876,8 +876,10 @@ operation's spec line to its commit's GitHub login
 ([`.github/scripts/hub-endpoint-author.sh`](.github/scripts/hub-endpoint-author.sh)),
 so "a generator gap belongs end-to-end to whoever added the endpoint" (handover
 decision). It is best-effort and additive: a bot/unresolved author, or a
-contributor without access to this repo, falls back to the `@camunda/hub`
-CODEOWNERS review, so it can never make a run worse. A **product-bug suppress
+contributor without access to this repo, falls back to an explicit
+`@camunda/hub` team review request (this repo has no CODEOWNERS of its own
+yet, so the step requests the team itself rather than relying on one), so it
+can never make a run worse. A **product-bug suppress
 PR** is deliberately excluded — a regression is often not in the endpoint's own
 spec, so blame would mis-attribute; those keep `@camunda/hub`. A PR the agent
 opens is **not** run automatically against a live Hub:
