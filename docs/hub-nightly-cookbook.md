@@ -159,7 +159,7 @@ invariant tests.
 
 ## The re-enable check (04:00)
 
-This post pings `hub-medic`. It appears at about 04:00 UTC and is silent on most days. The draft PR it opens requests a review from the Hub backend team when it is marked ready. Each message ends with an **Open the workflow run** link.
+This post names the person who landed the Hub fix, and pings `hub-medic` only as a fallback — when a reported item has no such owner to name. It appears at about 04:00 UTC and is silent on most days. The draft PR it opens assigns that person and requests a review from `@camunda/hub` (via `.github/CODEOWNERS`) when it is marked ready. Each message ends with an **Open the workflow run** link.
 
 Skipped tests point to a Hub bug. This job watches those bugs. When one closes, it tries to bring the tests back.
 

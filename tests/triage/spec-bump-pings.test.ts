@@ -25,3 +25,17 @@ describe('spec-bump-check Slack pings', () => {
     expect(line).not.toContain('\\n');
   });
 });
+
+describe('spec-bump-check hub spec-drift alert', () => {
+  // The op-surface / coverage-drift alert (the "Build hub Slack message" step) is hub-only and
+  // always ends its text with a hub-medic page — a new upstream domain is the Hub team's to adopt.
+  it('exposes the hub-medic subteam to the message builder', () => {
+    expect(workflow).toContain("HUB_MEDIC='<!subteam^S014VK4482H|hub-medic>'");
+  });
+
+  it('appends the hub-medic page to the drift alert text', () => {
+    // Build the needle without a literal `${` so biome does not read it as a template placeholder.
+    const page = [':rotating_light: $', '{e.HUB_MEDIC}'].join('');
+    expect(workflow).toContain(page);
+  });
+});

@@ -1423,27 +1423,21 @@ jobs:
           case "$CATEGORY" in
             startup)
               verdict="The Hub PR image did not start or become ready, so no tests ran. Check the run's \"Wait for Hub to be ready\" step for the container's startup error."
-              ping="${hub_medic}"
               ;;
             presuite)
               verdict="The run failed before the suites started, in a setup step (checkout, clone, install, registry login or image pull) rather than in Hub itself. Check the run to see which step."
-              ping="${ta_medic}"
               ;;
             product)
               verdict="Likely a real regression from this PR (confidence: ${CONFIDENCE}). ${SUMMARY}"
-              ping="${hub_medic}"
               ;;
             generator-gap)
               verdict="Likely api-test-generator not yet handling a new/changed endpoint shape, not a hub bug (confidence: ${CONFIDENCE}). ${SUMMARY}"
-              ping="${hub_medic}"
               ;;
             infra)
               verdict="Looks like an infrastructure failure, not a regression (confidence: ${CONFIDENCE}). ${SUMMARY}"
-              ping="${hub_medic}"
               ;;
             flaky)
               verdict="Looks flaky, not a regression (confidence: ${CONFIDENCE}). ${SUMMARY}"
-              ping="${hub_medic}"
               ;;
             unknown)
               # Rule #4's hardening made this category more likely to fire —
@@ -1455,7 +1449,6 @@ jobs:
               # hedge below, which forces a reader to open the run just to
               # see a one-line diagnostic that was already computed.
               verdict="Could not confirm this is a real regression from this PR (confidence: ${CONFIDENCE}). ${SUMMARY}"
-              ping="${hub_medic}"
               ;;
             *)
               # Unreachable in practice — the parse step's own enum
@@ -1463,13 +1456,12 @@ jobs:
               # cases above by the time it gets here. Kept as a defensive
               # fallback in case that guarantee is ever weakened upstream.
               verdict="Could be a real regression from this PR, an unhandled case in api-test-generator for a new/changed endpoint (unmapped operation, unmodelled schema shape), or infra/flakiness — check the run to tell which before this merges."
-              ping="${hub_medic}"
               ;;
           esac
 
-          # This Slack alert now fires only in two cases (see the step's `if:`): a presuite failure
-          # (any author) or a bot PR with no author to @-tag. Route the ping to match, overriding the
-          # per-category ping set above:
+          # This Slack alert fires only in two cases (see the step's `if:`): a presuite failure
+          # (any author) or a bot PR with no author to @-tag. The per-category `case` above sets only
+          # the verdict text; the ping is the single value routed here, by the two cases that reach Slack:
           #   - presuite -> test-automation-medic: shared-pipeline setup (clone token, registry login)
           #     the Hub team cannot fix. (presuite uses streak mode below, so the escalation, not this
           #     line, is what actually pings — but keep them consistent.)

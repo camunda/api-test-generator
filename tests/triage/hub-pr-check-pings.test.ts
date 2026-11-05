@@ -9,66 +9,59 @@ const workflow = readFileSync(
 );
 
 /**
- * The `ping=` assigned in each branch of the verdict `case "$CATEGORY"` in the report step.
- * The report step has two such `case` blocks: the comment builder (sets `tag`/`heading`, no ping —
- * it @-tags the PR author) and the Slack-fallback builder (sets `ping` for a bot/no-author PR).
- * Ping routing lives in the second one, so parse the `case` block that actually assigns `ping=`.
+ * The Slack ping is routed by a single if/else override after the verdict `case`, not by the
+ * `case` itself (which sets only the verdict text). The override's value is the one read into the
+ * alert's closing line (`closing="${ping} please take a look."`), so it is the live routing to
+ * guard — a per-category `ping=` inside the `case` would be dead code, silently overwritten here.
  */
-function pingsByCategory(): Record<string, string[]> {
-  let block = '';
-  for (const m of workflow.matchAll(/case "\$CATEGORY" in/g)) {
-    const s = m.index ?? 0;
-    const e = workflow.indexOf('\n          esac\n', s);
-    const candidate = workflow.slice(s, e);
-    if (/\n\s*ping="/.test(candidate)) {
-      block = candidate;
-      break;
-    }
-  }
-  const out: Record<string, string[]> = {};
-  let current = '';
+function pingOverride(): string {
+  const anchor = workflow.indexOf('if [ "$CATEGORY" = "presuite" ]; then\n            ping=');
+  const end = workflow.indexOf('\n          fi\n', anchor);
+  return workflow.slice(anchor, end);
+}
+
+/** The categories handled by the Slack verdict `case` (the one directly before the ping override). */
+function slackVerdictCategories(): string[] {
+  const commentIdx = workflow.indexOf('This Slack alert fires only in two cases');
+  const caseStart = workflow.lastIndexOf('case "$CATEGORY" in', commentIdx);
+  const caseEnd = workflow.indexOf('\n          esac\n', caseStart);
+  const block = workflow.slice(caseStart, caseEnd);
+  const cats: string[] = [];
   for (const line of block.split('\n')) {
     const label = line.match(/^ {12}([a-z-]+|\*)\)\s*$/);
-    if (label?.[1]) {
-      current = label[1];
-      out[current] = [];
-    }
-    const ping = line.match(/^\s*ping="([^"]*)"/);
-    if (ping && current) out[current]?.push(ping[1] ?? '');
+    if (label?.[1]) cats.push(label[1]);
   }
-  return out;
+  return cats;
 }
 
 describe('hub-pr-check Slack pings', () => {
-  const pings = pingsByCategory();
   // The shell variables the workflow expands, written without a `${` so lint does not read them as a template.
   const HUB = ['$', '{hub_medic}'].join('');
   const TA = ['$', '{ta_medic}'].join('');
 
-  it('finds every verdict category', () => {
-    expect(Object.keys(pings).sort()).toEqual(
+  it('the Slack verdict case covers every category', () => {
+    expect(slackVerdictCategories().sort()).toEqual(
       ['*', 'flaky', 'generator-gap', 'infra', 'presuite', 'product', 'startup', 'unknown'].sort(),
     );
   });
 
-  it('pings hub-medic for every verdict except presuite', () => {
-    for (const [category, values] of Object.entries(pings)) {
-      expect(values.length, category).toBeGreaterThan(0);
-      if (category === 'presuite') {
-        for (const value of values) expect(value, category).not.toContain(HUB);
-      } else {
-        for (const value of values) expect(value, category).toContain(HUB);
-      }
-    }
+  it('routes the ping in a single if/else override, not per-category', () => {
+    const override = pingOverride();
+    expect(override, 'the live ping override must exist').not.toBe('');
+    // Exactly one ping assignment per branch — no per-category ping survives to be overwritten.
+    expect([...workflow.matchAll(/\n\s*ping="/g)]).toHaveLength(2);
   });
 
-  it('adds test-automation-medic only for a failure before the suites started', () => {
-    for (const [category, values] of Object.entries(pings)) {
-      for (const value of values) {
-        if (category === 'presuite') expect(value).toContain(TA);
-        else expect(value, category).not.toContain(TA);
-      }
-    }
+  it('pings test-automation-medic for presuite, and only presuite', () => {
+    const [presuiteBranch, elseBranch] = pingOverride().split('else');
+    expect(presuiteBranch).toContain(TA);
+    expect(presuiteBranch).not.toContain(HUB);
+    expect(elseBranch).not.toContain(TA);
+  });
+
+  it('pings hub-medic for every other (bot-PR fallback) category', () => {
+    const [, elseBranch] = pingOverride().split('else');
+    expect(elseBranch).toContain(HUB);
   });
 
   it('escalation pings only test-automation-medic for presuite', () => {

@@ -774,8 +774,10 @@ stays in Slack pinging `test-automation-medic`. (A `startup` failure still gets 
 comment — a bad PR image is the author's to look at.)
 
 Slack otherwise fires only as a **fallback for a PR with no author to @-tag**. The
-Slack-chain steps' `if:` gates fire when `pr_author == ''` **or** the failure is
-presuite (`suites_ran != 'true' && hub_start_failed != 'true'`). The ping is routed
+Slack-chain steps' `if:` gates fire when `pr_author == ''`, **or** the failure is
+presuite (`suites_ran != 'true' && hub_start_failed != 'true'`), **or** the verdict
+comment did not post (`steps.verdict-comment.outcome != 'success'` — no status token,
+or the App lacks comment-write, so the author was not reached on the PR). The ping is routed
 to match: a presuite failure pings `test-automation-medic`; every other (bot-PR)
 case pings `hub-medic` — it is a camunda-hub PR nobody can be @-tagged on, so the
 Hub on-call owns it. A bot (e.g. `renovate[bot]`, whose `[bot]` login fails the

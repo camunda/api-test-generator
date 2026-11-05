@@ -216,3 +216,49 @@ describe('triage Slack thread: who is pinged', () => {
     }
   });
 });
+
+describe('triage Slack thread: unmapped operations', () => {
+  const HUB_MEDIC = '<!subteam^S014VK4482H|hub-medic>';
+  const pr = 'https://github.com/camunda/api-test-generator/pull/1';
+  const pings = (text: string) => text.split(HUB_MEDIC).length - 1;
+
+  function unmappedLine(u: Record<string, unknown>): string {
+    const dir = mkdtempSync(join(tmpdir(), 'triage-unmapped-'));
+    const file = join(dir, 'hub-triage.json');
+    writeFileSync(
+      file,
+      JSON.stringify({ failures: [], unmapped_operations: [{ operationId: 'getThing', ...u }] }),
+    );
+    return execFileSync('bash', [script, file, 'thread'], { encoding: 'utf8' });
+  }
+
+  it('renders the unmapped bullet and the operationId', () => {
+    const text = unmappedLine({ action: 'report-only' });
+    expect(text).toContain('unmapped — `getThing` — no generated test');
+  });
+
+  it('pings hub-medic once when a fresh fix PR was opened for the gap', () => {
+    const text = unmappedLine({ action: 'fix-pr', fix_pr_url: pr });
+    expect(pings(text)).toBe(1);
+    expect(text).toContain(`:hammer_and_wrench: <${pr}>`);
+  });
+
+  it('does not ping when an existing PR already covers the gap (skip)', () => {
+    const text = unmappedLine({ action: 'skip', fix_pr_url: pr });
+    expect(pings(text)).toBe(0);
+    expect(text).toContain(`:recycle: <${pr}>`);
+  });
+
+  it('does not ping for a report-only gap with no fix PR, and never pages test-automation-medic', () => {
+    for (const u of [
+      { action: 'report-only' },
+      { action: 'fix-pr', fix_pr_url: '' },
+      { action: 'fix-pr', fix_pr_url: pr },
+    ]) {
+      const text = unmappedLine(u);
+      expect(text).not.toContain('test-automation-medic');
+    }
+    expect(pings(unmappedLine({ action: 'report-only' }))).toBe(0);
+    expect(pings(unmappedLine({ action: 'fix-pr', fix_pr_url: '' }))).toBe(0);
+  });
+});
