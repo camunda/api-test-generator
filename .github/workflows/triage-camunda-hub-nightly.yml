@@ -825,6 +825,7 @@ jobs:
               continue
             fi
             echo "Attributing ${pr} to: ${logins}"
+            reviewer_ok=0
             for login in $logins; do
               if GH_TOKEN="$GH_TOKEN_GENERATOR" gh pr edit "$pr" --add-assignee "$login" 2>/tmp/assign.err; then
                 echo "  assigned ${login}"
@@ -833,10 +834,22 @@ jobs:
               fi
               if GH_TOKEN="$GH_TOKEN_GENERATOR" gh pr edit "$pr" --add-reviewer "$login" 2>/tmp/review.err; then
                 echo "  requested review from ${login}"
+                reviewer_ok=1
               else
                 echo "::warning::could not request review from ${login} on ${pr}: $(cat /tmp/review.err 2>/dev/null)"
               fi
             done
+            # If every individual review request failed (e.g. the resolved author
+            # is not a collaborator on this repo), fall back to the Hub team so the
+            # PR still has a reviewer — the same no-access fallback as the empty
+            # case above, just reached after attribution rather than instead of it.
+            if [ "$reviewer_ok" -eq 0 ]; then
+              if GH_TOKEN="$GH_TOKEN_GENERATOR" gh pr edit "$pr" --add-reviewer "$hub_team" 2>/tmp/review.err; then
+                echo "  no individual review request succeeded for ${pr} — requested ${hub_team} team review."
+              else
+                echo "::warning::no reviewer could be requested for ${pr} (neither the author nor ${hub_team}): $(cat /tmp/review.err 2>/dev/null)"
+              fi
+            fi
           done < "$prs_file"
           rm -f "$pairs_file" "$prs_file"
 
