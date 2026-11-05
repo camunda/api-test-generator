@@ -769,89 +769,11 @@ jobs:
           HUB_TOKEN: ${{ steps.hub-token.outputs.token }}
         run: |
           set -uo pipefail
-          f="${GITHUB_WORKSPACE}/hub-triage.json"
-          [ -s "$f" ] || { echo "no triage result — nothing to attribute"; exit 0; }
-          jq empty "$f" 2>/dev/null || { echo "::warning::triage result is not JSON — skipping endpoint-author attribution"; exit 0; }
+          # Orchestration lives in a script so it can be unit-tested
+          # (tests/triage/hub-assign-fix-prs.test.ts) — the filtering, the
+          # suppress-PR exclusion, grouping, assignment and the team fallback.
           hub_dir="${HOME}/workspaces/${WORKSPACE_NAME}/camunda-hub"
-          if [ ! -d "${hub_dir}/.git" ]; then
-            echo "::warning::camunda-hub checkout not found at ${hub_dir} — skipping endpoint-author attribution"
-            exit 0
-          fi
-
-          TAB=$(printf '\t')
-          # The Hub team, requested as reviewer when no individual author resolves
-          # (the explicit fallback — this repo has no CODEOWNERS of its own yet).
-          hub_team="camunda/hub"
-          pairs_file=$(mktemp)
-          prs_file=$(mktemp)
-          # (fix_pr_url <TAB> operationId) for test-generation + unmapped-op fix
-          # PRs only. Suppress PRs (suppress_pr_url) are intentionally not here.
-          jq -r '
-            ( [ (.failures // [])[]
-                | select((.subcategory // "") == "test-generation"
-                         and (.action // "") == "fix-pr"
-                         and ((.fix_pr_url // "") != "")
-                         and ((.operationId // "") != "")) ]
-            + [ (.unmapped_operations // [])[]
-                | select((.action // "") == "fix-pr"
-                         and ((.fix_pr_url // "") != "")
-                         and ((.operationId // "") != "")) ] )
-            | .[] | "\(.fix_pr_url)\t\(.operationId)"
-          ' "$f" | sort -u > "$pairs_file"
-          if [ ! -s "$pairs_file" ]; then
-            echo "No test-generation/unmapped-op fix PRs to attribute."
-            rm -f "$pairs_file" "$prs_file"; exit 0
-          fi
-          cut -f1 "$pairs_file" | sort -u > "$prs_file"
-
-          # One PR at a time (files, not pipes, so $logins survives the loop);
-          # resolve each of its operations' authors and assign the deduped set.
-          while IFS= read -r pr; do
-            [ -n "$pr" ] || continue
-            logins=""
-            while IFS="$TAB" read -r p op; do
-              [ "$p" = "$pr" ] || continue
-              login=$(GH_TOKEN="$HUB_TOKEN" bash .github/scripts/hub-endpoint-author.sh "$op" "$hub_dir" || true)
-              [ -n "$login" ] || continue
-              case " ${logins} " in *" ${login} "*) : ;; *) logins="${logins:+${logins} }${login}" ;; esac
-            done < "$pairs_file"
-            if [ -z "$logins" ]; then
-              # Fallback: request the Hub team explicitly, since nothing else will.
-              if GH_TOKEN="$GH_TOKEN_GENERATOR" gh pr edit "$pr" --add-reviewer "$hub_team" 2>/tmp/review.err; then
-                echo "No endpoint author resolved for ${pr} — requested ${hub_team} team review."
-              else
-                echo "::warning::no endpoint author resolved for ${pr} and could not request ${hub_team} review (the team may lack ${GITHUB_REPOSITORY} access): $(cat /tmp/review.err 2>/dev/null)"
-              fi
-              continue
-            fi
-            echo "Attributing ${pr} to: ${logins}"
-            reviewer_ok=0
-            for login in $logins; do
-              if GH_TOKEN="$GH_TOKEN_GENERATOR" gh pr edit "$pr" --add-assignee "$login" 2>/tmp/assign.err; then
-                echo "  assigned ${login}"
-              else
-                echo "::warning::could not assign ${login} to ${pr} (they may lack ${GITHUB_REPOSITORY} access): $(cat /tmp/assign.err 2>/dev/null)"
-              fi
-              if GH_TOKEN="$GH_TOKEN_GENERATOR" gh pr edit "$pr" --add-reviewer "$login" 2>/tmp/review.err; then
-                echo "  requested review from ${login}"
-                reviewer_ok=1
-              else
-                echo "::warning::could not request review from ${login} on ${pr}: $(cat /tmp/review.err 2>/dev/null)"
-              fi
-            done
-            # If every individual review request failed (e.g. the resolved author
-            # is not a collaborator on this repo), fall back to the Hub team so the
-            # PR still has a reviewer — the same no-access fallback as the empty
-            # case above, just reached after attribution rather than instead of it.
-            if [ "$reviewer_ok" -eq 0 ]; then
-              if GH_TOKEN="$GH_TOKEN_GENERATOR" gh pr edit "$pr" --add-reviewer "$hub_team" 2>/tmp/review.err; then
-                echo "  no individual review request succeeded for ${pr} — requested ${hub_team} team review."
-              else
-                echo "::warning::no reviewer could be requested for ${pr} (neither the author nor ${hub_team}): $(cat /tmp/review.err 2>/dev/null)"
-              fi
-            fi
-          done < "$prs_file"
-          rm -f "$pairs_file" "$prs_file"
+          bash .github/scripts/hub-assign-fix-prs.sh "${GITHUB_WORKSPACE}/hub-triage.json" "$hub_dir"
 
       # No reports downloaded → write an inconclusive result so Slack announces it
       # (never a green digest). Mirrors the c8 "no false all-clear" rule.
