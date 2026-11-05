@@ -170,3 +170,74 @@ describe('triage Slack summary: recent-change counter', () => {
     expect(text).not.toContain('no Hub bug filed');
   });
 });
+
+describe('triage Slack thread: who is pinged', () => {
+  // Subteam ids, asserted medic-agnostically where #718 will re-route the
+  // fix-PR / unclassifiable pings from test-automation-medic to hub-medic; the
+  // suppress-PR assertions are exact because that is what this change guards.
+  const HUB_MEDIC = 'S014VK4482H';
+  const TA_MEDIC = 'S09UF0EV0HG';
+  const issue = `${HUB}/issues/1`;
+  const pr = 'https://github.com/camunda/api-test-generator/pull/1';
+  const pings = (t: string) => t.split(':rotating_light:').length - 1;
+
+  it('pings hub-medic when a brand-new Hub bug is filed', () => {
+    const text = threadLine('', { subcategory: null, action: 'file', issue_url: issue });
+    expect(text).toContain(HUB_MEDIC);
+  });
+
+  it('a product-bug suppress PR pings nobody (the endpoint owner reviews it instead)', () => {
+    const text = threadLine('', {
+      subcategory: null,
+      action: 'report-only',
+      known_issue: true,
+      known_issue_url: issue,
+      suppress_pr_url: pr,
+    });
+    expect(pings(text)).toBe(0);
+    expect(text).not.toContain(HUB_MEDIC);
+    expect(text).not.toContain(TA_MEDIC);
+    // the suppress PR is still shown on the line, just not pinged
+    expect(text).toContain(pr);
+  });
+
+  it('a freshly-filed bug that also has a suppress PR pings hub-medic exactly once', () => {
+    const text = threadLine('', {
+      subcategory: null,
+      action: 'file',
+      issue_url: issue,
+      suppress_pr_url: pr,
+    });
+    expect(pings(text)).toBe(1);
+    expect(text).toContain(HUB_MEDIC);
+    expect(text).not.toContain(TA_MEDIC);
+  });
+
+  it('a fresh fix PR still pings a medic', () => {
+    const text = threadLine('', {
+      subcategory: 'test-generation',
+      action: 'fix-pr',
+      fix_pr_url: pr,
+    });
+    expect(pings(text)).toBeGreaterThan(0);
+  });
+
+  it('an unclassifiable failure still pings a medic', () => {
+    const text = threadLine('', {
+      subcategory: null,
+      category: 'infrastructure',
+      confidence: 'low',
+    });
+    expect(pings(text)).toBeGreaterThan(0);
+  });
+
+  it('an already-known recurrence with no PR pings nobody', () => {
+    const text = threadLine('', {
+      subcategory: null,
+      action: 'report-only',
+      known_issue: true,
+      known_issue_url: issue,
+    });
+    expect(pings(text)).toBe(0);
+  });
+});
