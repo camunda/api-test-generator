@@ -46,6 +46,21 @@ if [ -n "$hub_label" ]; then
   gh label create "$hub_label" --color 1D76DB --description "Hub-related" 2>/dev/null || true
 fi
 
+# Hub bump PR: request the @camunda/hub team's review explicitly, so review
+# ownership does not depend on a CODEOWNERS file (this repo has none yet). The
+# upstream op-surface drift alert no longer pings the channel, so the reviewer
+# request is how the Hub team is brought to a new-domain bump. Best-effort and
+# hub-leg only ($1 = PR number or branch): a team that lacks repo access just
+# logs a warning, never fails the run; oca's pin routes to its own team.
+request_hub_review() {
+  [ "${IS_PRIVATE:-}" = "true" ] || return 0
+  if gh pr edit "$1" --add-reviewer camunda/hub >/dev/null 2>&1; then
+    echo "Requested @camunda/hub review on the bump PR."
+  else
+    echo "::warning::Could not request @camunda/hub review on the bump PR (the team may lack ${GITHUB_REPOSITORY:-this repo} access)."
+  fi
+}
+
 # If a bump PR is already open, leave it alone — it may carry reviewer edits
 # (e.g. invariant updates), and force-pushing the rolling branch would clobber
 # them. It's still a valid "adopt the bump" PR even if upstream has moved a bit
@@ -61,6 +76,7 @@ if [ -n "$existing" ]; then
   # issue-close is the actual point of this path).
   gh pr edit "$existing" --add-label "$DRIFT_LABEL" --add-label auto-generated >/dev/null || true
   if [ -n "$hub_label" ]; then gh pr edit "$existing" --add-label "$hub_label" >/dev/null || true; fi
+  request_hub_review "$existing"
   issue="$(find_rolling_issue)"
   if [ -n "$issue" ]; then
     gh issue close "$issue" --comment "Superseded by the open auto-bump PR #${existing}. Closing." >/dev/null
@@ -143,6 +159,7 @@ echo "Opening bump PR."
 gh pr create --draft --base main --head "$branch" --title "$title" --body-file "$body_file" \
   --label "$DRIFT_LABEL" --label auto-generated >/dev/null
 if [ -n "$hub_label" ]; then gh pr edit "$branch" --add-label "$hub_label" >/dev/null || true; fi
+request_hub_review "$branch"
 
 # Clean up the tracking issue if one is open — the PR supersedes it.
 issue="$(find_rolling_issue)"
