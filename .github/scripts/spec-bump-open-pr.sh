@@ -46,6 +46,36 @@ if [ -n "$hub_label" ]; then
   gh label create "$hub_label" --color 1D76DB --description "Hub-related" 2>/dev/null || true
 fi
 
+# Hub bump PR: request the @camunda/hub team's review explicitly, so review
+# ownership does not depend on a CODEOWNERS file (this repo has none yet). The
+# upstream op-surface drift alert no longer pings the channel, so the reviewer
+# request is how the Hub team is brought to a new-domain bump. Best-effort and
+# hub-leg only ($1 = PR number or branch): a team that lacks repo access just
+# logs a warning, never fails the run; oca's pin routes to its own team.
+#
+# Request it ONCE over the life of the rolling bump PR. The existing-PR path runs
+# every day, and re-adding a reviewer who has already reviewed re-opens their
+# completed review and re-notifies them — so a marker label makes the request
+# idempotent across runs. The label is only set after a successful request, so a
+# request that failed (team without access yet) is retried on the next run.
+HUB_REVIEW_MARKER="hub-review-requested"
+request_hub_review() {
+  [ "${IS_PRIVATE:-}" = "true" ] || return 0
+  if gh pr view "$1" --json labels --jq '.labels[].name' 2>/dev/null \
+      | grep -qx "$HUB_REVIEW_MARKER"; then
+    echo "@camunda/hub review already requested on the bump PR (marker present) — not re-requesting."
+    return 0
+  fi
+  gh label create "$HUB_REVIEW_MARKER" --color 0e8a16 \
+    --description "spec-bump bump PR: @camunda/hub review already requested" 2>/dev/null || true
+  if gh pr edit "$1" --add-reviewer camunda/hub >/dev/null 2>&1; then
+    gh pr edit "$1" --add-label "$HUB_REVIEW_MARKER" >/dev/null 2>&1 || true
+    echo "Requested @camunda/hub review on the bump PR."
+  else
+    echo "::warning::Could not request @camunda/hub review on the bump PR (the team may lack ${GITHUB_REPOSITORY:-this repo} access) — will retry next run."
+  fi
+}
+
 # If a bump PR is already open, leave it alone — it may carry reviewer edits
 # (e.g. invariant updates), and force-pushing the rolling branch would clobber
 # them. It's still a valid "adopt the bump" PR even if upstream has moved a bit
@@ -61,6 +91,7 @@ if [ -n "$existing" ]; then
   # issue-close is the actual point of this path).
   gh pr edit "$existing" --add-label "$DRIFT_LABEL" --add-label auto-generated >/dev/null || true
   if [ -n "$hub_label" ]; then gh pr edit "$existing" --add-label "$hub_label" >/dev/null || true; fi
+  request_hub_review "$existing"
   issue="$(find_rolling_issue)"
   if [ -n "$issue" ]; then
     gh issue close "$issue" --comment "Superseded by the open auto-bump PR #${existing}. Closing." >/dev/null
@@ -143,6 +174,7 @@ echo "Opening bump PR."
 gh pr create --draft --base main --head "$branch" --title "$title" --body-file "$body_file" \
   --label "$DRIFT_LABEL" --label auto-generated >/dev/null
 if [ -n "$hub_label" ]; then gh pr edit "$branch" --add-label "$hub_label" >/dev/null || true; fi
+request_hub_review "$branch"
 
 # Clean up the tracking issue if one is open — the PR supersedes it.
 issue="$(find_rolling_issue)"
