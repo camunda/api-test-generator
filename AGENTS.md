@@ -871,8 +871,24 @@ grant spec-bump-check.yml's bump-PR token already uses on this repo, so no new
 App permission is needed). Before opening ANY PR, a deterministic step fetches
 every open `nightly-api-fix`-labelled PR's actual diff (not a self-reported tag)
 so the agent can skip an operation already being fixed/suppressed elsewhere,
-rather than opening a duplicate. A PR the agent opens is **not** run
-automatically against a live Hub:
+rather than opening a duplicate. After the agent opens a **test-generation or
+unmapped-operation fix PR**, a deterministic step assigns it to the endpoint's
+**last author in camunda-hub** and requests their review — git-blaming the
+operation's spec line to its commit's GitHub login
+([`.github/scripts/hub-endpoint-author.sh`](.github/scripts/hub-endpoint-author.sh)),
+so "a generator gap belongs end-to-end to whoever added the endpoint" (handover
+decision). It is best-effort and additive: a bot/unresolved author, or a
+contributor without access to this repo, falls back to an explicit
+`@camunda/hub` team review request (this repo has no CODEOWNERS of its own
+yet, so the step requests the team itself rather than relying on one), so it
+can never make a run worse. A **product-bug suppress PR** gets the endpoint
+owner as **reviewer only** (no assignee) with the same team fallback — they
+sanity-check that suppressing their endpoint's test is right, but the Hub bug
+itself (tracked in the filed issue) is not theirs, and blame would mis-attribute
+it. The triage Slack digest **does not ping** for a suppress PR (its reviewer
+handles it); a **freshly-filed** Hub bug still pings on its own line, while an
+already-known one stays silent. A PR the agent
+opens is **not** run automatically against a live Hub:
 [hub-pr-live-check.yml](.github/workflows/hub-pr-live-check.yml) fires on every
 same-repo `pull_request` targeting `main` whose diff doesn't touch `.github/**`,
 and runs the PR's own code with Hub access the moment it opens, so its guard

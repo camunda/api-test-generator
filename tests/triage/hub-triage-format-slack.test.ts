@@ -182,12 +182,20 @@ describe('triage Slack thread: who is pinged', () => {
     expect(pings(text)).toBe(1);
   });
 
-  it('pings hub-medic, and only once, for a fix PR or a suppress PR', () => {
+  it('pings hub-medic once for a fresh fix PR', () => {
     expect(pings(threadLine('', { action: 'fix-pr', fix_pr_url: pr }))).toBe(1);
-    expect(
-      pings(threadLine('', { action: 'report-only', known_issue: true, suppress_pr_url: pr })),
-    ).toBe(1);
-    // filed and suppressed on the same finding: still one mention
+  });
+
+  it('a suppress PR pings nobody — the endpoint owner reviews it instead', () => {
+    const text = threadLine('', { action: 'report-only', known_issue: true, suppress_pr_url: pr });
+    expect(pings(text)).toBe(0);
+    expect(text).not.toContain(':rotating_light:');
+    // the suppress PR is still shown on the line, just not pinged
+    expect(text).toContain(pr);
+  });
+
+  it('a freshly-filed bug that also has a suppress PR pings hub-medic exactly once', () => {
+    // the file trigger pings; the suppress PR adds no second mention
     expect(pings(threadLine('', { action: 'file', issue_url: issue, suppress_pr_url: pr }))).toBe(
       1,
     );
