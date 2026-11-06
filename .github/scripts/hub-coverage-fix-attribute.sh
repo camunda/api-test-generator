@@ -40,9 +40,14 @@ jq empty "$out" 2>/dev/null || {
   echo "::warning::verifier output is not JSON — skipping coverage-fix attribution"
   exit 0
 }
+# The camunda-hub checkout is OPTIONAL: without it (minting or cloning the private repo
+# failed) we cannot resolve individual authors, but we still request the @camunda/hub team
+# for every PR so a verified PR never ends up with no reviewer. Requesting the team needs
+# only GH_TOKEN (api-test-generator), not camunda-hub access.
+have_hub=1
 if [ ! -d "${hub}/.git" ]; then
-  echo "::warning::camunda-hub checkout not found at ${hub} — skipping coverage-fix attribution"
-  exit 0
+  echo "::warning::camunda-hub checkout not available at ${hub} — requesting ${hub_team} for every PR instead."
+  have_hub=0
 fi
 
 # Request $hub_team as the fallback reviewer on PR #$1; $2 is a context phrase.
@@ -64,7 +69,8 @@ jq -r '
 ' "$out" | while IFS="$TAB" read -r num op; do
   [ -n "$num" ] || continue
   login=""
-  [ -n "$op" ] && login=$(GH_TOKEN="$HUB_TOKEN" bash "$resolver" "$op" "$hub" || true)
+  [ "$have_hub" = 1 ] && [ -n "$op" ] &&
+    login=$(GH_TOKEN="$HUB_TOKEN" bash "$resolver" "$op" "$hub" || true)
   if [ -n "$login" ]; then
     if "$GH" pr edit "$num" --repo "$repo" --add-reviewer "$login" 2>/tmp/hub-cov-attr.err; then
       echo "Requested review from ${login} (owns ${op}) on PR #${num}"

@@ -762,26 +762,33 @@ jobs:
           vault-jwt-audience: ${{ secrets.VAULT_JWT_AUDIENCE }}
 
       - name: Request the endpoint author's review on each verified PR
-        if: ${{ always() && steps.verify.outcome == 'success' && env.DRY_RUN != 'true' && steps.hub-token-attr.outputs.token != '' }}
+        if: ${{ always() && steps.verify.outcome == 'success' && env.DRY_RUN != 'true' }}
         continue-on-error: true
         env:
           # PR write on api-test-generator (request the reviewer) — the same token the linking step uses.
           GH_TOKEN: ${{ github.token }}
           # Contents:Read on camunda-hub — the resolver's commit -> login lookup and the blobless clone's
-          # on-demand blob fetch during blame.
+          # on-demand blob fetch during blame. May be empty if minting failed; the script then requests the
+          # team for every PR using GH_TOKEN alone.
           HUB_TOKEN: ${{ steps.hub-token-attr.outputs.token }}
         run: |
           set -uo pipefail
           hub_dir="${RUNNER_TEMP}/camunda-hub"
-          # A global, token-bearing insteadOf rewrite so both the clone and blame's on-demand blob fetch
-          # authenticate. The runner is ephemeral and this job runs no agent, so it is torn down with the runner.
-          git config --global \
-            url."https://x-access-token:${HUB_TOKEN}@github.com/camunda/camunda-hub".insteadOf \
-            "https://github.com/camunda/camunda-hub"
-          # Full history (no --depth, so blame is correct), blobless to keep the clone light.
-          if ! git clone --filter=blob:none https://github.com/camunda/camunda-hub.git "$hub_dir" 2>/dev/null; then
-            echo "::warning::could not clone camunda-hub for attribution — leaving the team as the reviewer."
-            exit 0
+          # Best-effort clone so the resolver can name the endpoint author. If the token is missing or the
+          # clone fails, the attribution script still requests the @camunda/hub team for every PR
+          # (GH_TOKEN needs no camunda-hub access), so a verified PR always ends with a reviewer — never
+          # left with none.
+          if [ -n "${HUB_TOKEN}" ]; then
+            # A global, token-bearing insteadOf rewrite so both the clone and blame's on-demand blob fetch
+            # authenticate. The runner is ephemeral and this job runs no agent, so it is torn down with it.
+            git config --global \
+              url."https://x-access-token:${HUB_TOKEN}@github.com/camunda/camunda-hub".insteadOf \
+              "https://github.com/camunda/camunda-hub"
+            # Full history (no --depth, so blame is correct), blobless to keep the clone light.
+            git clone --filter=blob:none https://github.com/camunda/camunda-hub.git "$hub_dir" 2>/dev/null \
+              || echo "::warning::could not clone camunda-hub — the team will be requested for every PR."
+          else
+            echo "::warning::no camunda-hub token — the team will be requested for every PR."
           fi
           bash .github/scripts/hub-coverage-fix-attribute.sh "${RUNNER_TEMP}/verify-out.json" "$hub_dir"
 

@@ -136,13 +136,26 @@ describe('hub-coverage-fix-attribute.sh', () => {
     expect(stdout).toContain('not JSON');
   });
 
-  it('skips when the camunda-hub checkout is missing', () => {
-    const { log, stdout } = runAttr(
-      { authors: [{ number: 11, operationId: 'getFile' }] },
+  it('requests the team for every PR when the camunda-hub checkout is unavailable', () => {
+    // Minting or cloning the private repo failed → no individual authors can be resolved, but every
+    // verified PR must still end with a reviewer, so the team is requested for all of them.
+    const { log } = runAttr(
+      {
+        authors: [
+          { number: 11, operationId: 'getFile' },
+          { number: 12, operationId: 'getZ' },
+        ],
+      },
       { authors: { getFile: 'alice' }, hubGit: false },
     );
-    expect(log).toHaveLength(0);
-    expect(stdout).toContain('camunda-hub checkout not found');
+    expect(log).toContain(
+      'pr edit 11 --repo camunda/api-test-generator --add-reviewer camunda/hub',
+    );
+    expect(log).toContain(
+      'pr edit 12 --repo camunda/api-test-generator --add-reviewer camunda/hub',
+    );
+    // no clone to resolve from, so no individual author is requested
+    expect(count(log, '--add-reviewer alice')).toBe(0);
   });
 
   it('does nothing when there are no authors to attribute', () => {
