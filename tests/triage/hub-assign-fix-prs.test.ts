@@ -1,5 +1,12 @@
 import { execFileSync } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -38,7 +45,10 @@ interface Opts {
   ghTokenHub?: string;
 }
 
-function runAssign(triage: unknown, opts: Opts = {}): { log: string[]; stdout: string } {
+function runAssign(
+  triage: unknown,
+  opts: Opts = {},
+): { log: string[]; stdout: string; unrouted: string } {
   const dir = mkdtempSync(join(tmpdir(), 'assign-'));
   const triageFile = join(dir, 'triage.json');
   writeFileSync(triageFile, JSON.stringify(triage));
@@ -65,6 +75,7 @@ function runAssign(triage: unknown, opts: Opts = {}): { log: string[]; stdout: s
   mkdirSync(hub);
   if (opts.hubGit !== false) mkdirSync(join(hub, '.git'));
 
+  const unroutedFile = join(dir, 'unrouted.txt');
   let stdout = '';
   try {
     stdout = execFileSync('bash', [script, triageFile, hub], {
@@ -80,13 +91,15 @@ function runAssign(triage: unknown, opts: Opts = {}): { log: string[]; stdout: s
         GH_TOKEN_HUB: opts.ghTokenHub ?? 'x',
         HUB_TOKEN: 'x',
         HUB_TEAM: 'camunda/hub',
+        UNROUTED_FILE: unroutedFile,
       },
     });
   } catch (err) {
     stdout = String(err);
   }
   const log = readFileSync(ghLog, 'utf8').trim().split('\n').filter(Boolean);
-  return { log, stdout };
+  const unrouted = existsSync(unroutedFile) ? readFileSync(unroutedFile, 'utf8') : '';
+  return { log, stdout, unrouted };
 }
 
 const count = (log: string[], needle: string) => log.filter((l) => l.includes(needle)).length;
@@ -375,5 +388,51 @@ describe('hub-assign-fix-prs.sh: fresh bug issue', () => {
       true,
     );
     expect(count(log, 'ISSUE7 --add-assignee')).toBe(0);
+  });
+});
+
+describe('hub-assign-fix-prs.sh: unrouted fail-safe', () => {
+  it('records a fix PR as unrouted when the @camunda/hub team fallback also fails', () => {
+    // No author resolves → team-review fallback → that request also fails, so the
+    // PR has no owner. It must be recorded so the digest can page hub-medic.
+    const { unrouted } = runAssign(
+      {
+        failures: [
+          {
+            subcategory: 'test-generation',
+            action: 'fix-pr',
+            fix_pr_url: 'PRX',
+            operationId: 'op',
+          },
+        ],
+      },
+      { authors: {}, failPatterns: ['--add-reviewer camunda/hub'] },
+    );
+    expect(unrouted).toContain('PRX');
+  });
+
+  it('records a filed bug as unrouted when the @camunda/hub mention also fails', () => {
+    const { unrouted } = runAssign(
+      { failures: [{ action: 'file', issue_url: 'ISSUEX', operationId: 'op' }] },
+      { authors: {}, failPatterns: ['issue comment ISSUEX'] },
+    );
+    expect(unrouted).toContain('ISSUEX');
+  });
+
+  it('records nothing when a finding is routed to an owner', () => {
+    const { unrouted } = runAssign(
+      {
+        failures: [
+          {
+            subcategory: 'test-generation',
+            action: 'fix-pr',
+            fix_pr_url: 'PRY',
+            operationId: 'getFile',
+          },
+        ],
+      },
+      { authors: { getFile: 'alice' } },
+    );
+    expect(unrouted.trim()).toBe('');
   });
 });

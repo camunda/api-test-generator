@@ -109,12 +109,20 @@ cut -f1,3 "$pairs_file" | sort -u > "$prs_file"
 # issue_url, unique.
 cut -f1 "$issue_pairs_file" | sort -u > "$issues_file"
 
+# Fail-safe: a finding that cannot be routed to ANY owner (no individual, and the
+# @camunda/hub team fallback below also failed) is recorded here so the caller can
+# page hub-medic for it — otherwise it would sit in the digest owned by no one.
+# UNROUTED_FILE is optional (the workflow sets it); start it empty when set.
+[ -n "${UNROUTED_FILE:-}" ] && : > "$UNROUTED_FILE"
+record_unrouted() { [ -n "${UNROUTED_FILE:-}" ] && printf '%s\n' "$1" >> "$UNROUTED_FILE"; return 0; }
+
 # Request $hub_team as reviewer; $1 is a context phrase for the log line.
 request_team() {
   if GH_TOKEN="$GH_TOKEN_GENERATOR" "$GH" pr edit "$pr" --add-reviewer "$hub_team" 2>/tmp/hub-assign.err; then
     echo "  ${1} — requested ${hub_team} team review."
   else
     echo "::warning::could not request ${hub_team} review on ${pr} (the team may lack ${repo_label} access): $(cat /tmp/hub-assign.err 2>/dev/null)"
+    record_unrouted "$pr"
   fi
 }
 
@@ -128,6 +136,7 @@ mention_team_on_issue() {
     echo "  ${1} — mentioned @${hub_team} on the issue."
   else
     echo "::warning::could not mention @${hub_team} on ${issue}: $(cat /tmp/hub-assign.err 2>/dev/null)"
+    record_unrouted "$issue"
   fi
 }
 
