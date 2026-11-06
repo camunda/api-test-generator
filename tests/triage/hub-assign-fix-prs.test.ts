@@ -11,10 +11,12 @@ const script = join(
 );
 
 // Stubs keep the orchestration test off git and the network: `gh` records each
-// `pr edit` it's asked to make (and fails calls whose args match a pattern), and
-// the author resolver maps an operationId to a login from a table. So the test
+// call it's asked to make — `pr edit` for PRs, `issue edit` / `issue comment`
+// for the fresh-bug issue (and fails calls whose args match a pattern) — and the
+// author resolver maps an operationId to a login from a table. So the test
 // exercises the script's JSON filtering, suppress-PR exclusion, PR grouping,
-// dedup, assignment and the team-review fallback — not the real resolver/gh.
+// dedup, assignment, the team-review fallback and the issue assignment +
+// @camunda/hub mention fallback — not the real resolver/gh.
 const GH_BODY = `#!/usr/bin/env bash
 echo "$*" >> "$GH_LOG"
 if [ -s "$GH_FAIL" ]; then
@@ -33,6 +35,7 @@ interface Opts {
   authors?: Record<string, string>;
   failPatterns?: string[];
   hubGit?: boolean;
+  ghTokenHub?: string;
 }
 
 function runAssign(triage: unknown, opts: Opts = {}): { log: string[]; stdout: string } {
@@ -74,6 +77,7 @@ function runAssign(triage: unknown, opts: Opts = {}): { log: string[]; stdout: s
         GH_FAIL: ghFail,
         RESOLVER_MAP: resolverMap,
         GH_TOKEN_GENERATOR: 'x',
+        GH_TOKEN_HUB: opts.ghTokenHub ?? 'x',
         HUB_TOKEN: 'x',
         HUB_TEAM: 'camunda/hub',
       },
@@ -114,8 +118,7 @@ describe('hub-assign-fix-prs.sh', () => {
         failures: [
           {
             subcategory: null,
-            action: 'file',
-            issue_url: 'url',
+            action: 'report-only',
             suppress_pr_url: 'PR_SUP2',
             operationId: 'opY',
           },
@@ -253,7 +256,7 @@ describe('hub-assign-fix-prs.sh', () => {
     expect(out).toContain('not JSON');
   });
 
-  it('does nothing when there are no fix or suppress PRs', () => {
+  it('does nothing when there are no fix/suppress PRs or fresh bug issues', () => {
     const { log, stdout } = runAssign({
       failures: [
         { subcategory: null, action: 'skip', category: 'infrastructure', operationId: 'q' },
@@ -261,7 +264,7 @@ describe('hub-assign-fix-prs.sh', () => {
       unmapped_operations: [],
     });
     expect(log).toHaveLength(0);
-    expect(stdout).toContain('No fix or suppress PRs to attribute');
+    expect(stdout).toContain('No fix/suppress PRs or fresh bug issues to attribute');
   });
 
   it('skips when the camunda-hub checkout is missing', () => {
@@ -280,5 +283,77 @@ describe('hub-assign-fix-prs.sh', () => {
     );
     expect(log).toHaveLength(0);
     expect(stdout).toContain('camunda-hub checkout not found');
+  });
+});
+
+describe('hub-assign-fix-prs.sh: fresh bug issue', () => {
+  it('assigns the endpoint author to a freshly filed Hub bug', () => {
+    const { log } = runAssign(
+      {
+        failures: [{ action: 'file', issue_url: 'ISSUE1', operationId: 'getFile' }],
+        unmapped_operations: [],
+      },
+      { authors: { getFile: 'alice' } },
+    );
+    expect(log).toContain('issue edit ISSUE1 --add-assignee alice');
+    // author resolved and assigned, so no @camunda/hub mention fallback
+    expect(count(log, 'issue comment ISSUE1')).toBe(0);
+  });
+
+  it('mentions @camunda/hub on the issue when no author resolves', () => {
+    const { log } = runAssign(
+      { failures: [{ action: 'file', issue_url: 'ISSUE2', operationId: 'getZ' }] },
+      { authors: {} },
+    );
+    expect(log.some((l) => l.includes('issue comment ISSUE2') && l.includes('@camunda/hub'))).toBe(
+      true,
+    );
+    // no author, so nothing is assigned
+    expect(count(log, 'ISSUE2 --add-assignee')).toBe(0);
+  });
+
+  it('mentions @camunda/hub when the individual assignment fails', () => {
+    const { log } = runAssign(
+      { failures: [{ action: 'file', issue_url: 'ISSUE3', operationId: 'getFile' }] },
+      { authors: { getFile: 'alice' }, failPatterns: ['issue edit ISSUE3 --add-assignee alice'] },
+    );
+    expect(log).toContain('issue edit ISSUE3 --add-assignee alice'); // attempted (and failed)
+    expect(log.some((l) => l.includes('issue comment ISSUE3') && l.includes('@camunda/hub'))).toBe(
+      true,
+    );
+  });
+
+  it('skips issue assignment when GH_TOKEN_HUB is empty', () => {
+    const { log, stdout } = runAssign(
+      { failures: [{ action: 'file', issue_url: 'ISSUE4', operationId: 'getFile' }] },
+      { authors: { getFile: 'alice' }, ghTokenHub: '' },
+    );
+    expect(count(log, 'ISSUE4')).toBe(0);
+    expect(stdout).toContain('GH_TOKEN_HUB is empty');
+  });
+
+  it('does not touch an already-known recurrence (no file action)', () => {
+    const { log } = runAssign(
+      {
+        failures: [
+          { action: 'report-only', known_issue: true, issue_url: 'ISSUE5', operationId: 'getFile' },
+        ],
+      },
+      { authors: { getFile: 'alice' } },
+    );
+    expect(count(log, 'ISSUE5')).toBe(0);
+  });
+
+  it('dedups multiple operations on one issue to a single assignee', () => {
+    const { log } = runAssign(
+      {
+        failures: [
+          { action: 'file', issue_url: 'ISSUE6', operationId: 'getA' },
+          { action: 'file', issue_url: 'ISSUE6', operationId: 'getB' },
+        ],
+      },
+      { authors: { getA: 'alice', getB: 'alice' } },
+    );
+    expect(count(log, 'issue edit ISSUE6 --add-assignee alice')).toBe(1);
   });
 });

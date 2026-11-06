@@ -86,9 +86,15 @@ The Hub team:
 
 **Who gets pinged — not every post is a page.** The on-call group is `hub-medic`, but most posts name a
 specific owner first and fall back to `hub-medic` only when none can be named, so several posts deliberately
-page nobody. `hub-medic` is pinged outright only for a newly filed Hub issue (a product bug the nightly
-triage found), a fix or suppress PR that needs review, and the missing-post alert. The rest are conditional:
+page nobody. `hub-medic` is pinged outright only for the missing-post alert and a nightly-triage failure
+that could not be classified (both below). Everything else is conditional:
 
+- **The nightly triage digest** routes each failure to an owner on GitHub rather than paging: a freshly
+  filed Hub bug is **assigned to the endpoint's author**, a fix / unmapped-op PR is assigned to **and**
+  reviewed by them, and a suppress PR gets them as **reviewer** (each falling back to `@camunda/hub` when no
+  author resolves — a team review on a PR, an `@camunda/hub` mention on the bug issue). So those post their
+  line with **no ping**. The one exception is a failure the agent **could not classify** (infra + low
+  confidence): it has no PR, issue, or author to route to, so it pings `hub-medic` for a human to decide.
 - **A failing camunda-hub PR check** is not a page by default. A normal failing run posts **no Slack**; it
   leaves a comment on the camunda-hub PR that @-tags its author, whose change it is. `hub-medic` is pinged
   only as a **fallback** — a bot PR with no author to tag, or a run whose verdict comment could not be

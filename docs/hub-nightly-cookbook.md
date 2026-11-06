@@ -45,7 +45,7 @@ So a night with no spec-bump or re-enable post is normal. A night with no nightl
 | The line shows | What happened | PR opened automatically? | What you do |
 |---|---|---|---|
 | 🎫 known issue | Hub already has an issue for it | **Sometimes**: the agent opens a suppress PR for every confirmed product bug, known or not, so a ⛔ link can appear on the same line | The linked issue is the work. If the line also has a ⛔ link, review that suppress PR like the one in the next row |
-| 📦 product, with 📝 and ⛔ links | Hub is wrong. The agent filed a **new** Hub issue (`hub-medic` was pinged) and opened a **suppress PR** that switches the test off until Hub fixes it | **Yes**, a suppress PR | Open the Hub issue and take it, or hand it to the owning team. Review the suppress PR: merge it only if the linked Hub issue is real **and** the suite is green on its branch. Agent PRs get no automatic live check, so run it yourself (see "Run it by hand"). Review it within 3 days or add `do-not-close`: a daily job closes a `nightly-api-fix` PR with no activity for 3 days |
+| 📦 product, with 📝 and ⛔ links | Hub is wrong. The agent filed a **new** Hub issue (assigned to the endpoint's author) and opened a **suppress PR** that switches the test off until Hub fixes it | **Yes**, a suppress PR | Open the Hub issue and take it, or hand it to the owning team. Review the suppress PR: merge it only if the linked Hub issue is real **and** the suite is green on its branch. Agent PRs get no automatic live check, so run it yourself (see "Run it by hand"). Review it within 3 days or add `do-not-close`: a daily job closes a `nightly-api-fix` PR with no activity for 3 days |
 | 📦 product, with a 📝 link, **no** ⛔ link | A Hub issue was filed, but no suppress PR: the test was already suppressed, an open PR already covers it, or opening it failed (the line shows ⚠️) | **No** | Open the Hub issue and take it. If the line shows ⚠️, add the suppress entry yourself |
 | 📦 product, **no link** | Hub is probably wrong, but no issue was filed and **nobody was pinged** | **No** | Open the triage run and read the finding. Then file the Hub issue yourself |
 | 🧪 test-generation, with a 🛠️ link | The generated test is wrong; the agent opened a **fix PR** | **Yes**, a fix PR | Open the PR, read the diff, and run the suite on its branch (see "Run it by hand"; agent PRs get no automatic live check). Merge it if it is right and the run is green. Review it within 3 days or add `do-not-close` |
@@ -64,9 +64,11 @@ A line in the thread looks like this (an example):
 
 > • 📦 product — `getWorkspace` — expected 200, got 500
 > &nbsp;&nbsp;&nbsp;&nbsp;📝 *link to the new Hub issue*
-> &nbsp;&nbsp;&nbsp;&nbsp;🚨 @hub-medic
 
-The first line says what failed. The next line holds the links, and the last line is the ping.
+The first line says what failed; the next line holds the links. Most lines carry **no** `🚨` ping — the
+new Hub issue is **assigned to the endpoint's author** (a fix or suppress PR gets them as reviewer), and
+that assignment is the notification. The only line that still pings `hub-medic` is a failure the agent
+**could not classify** (it has no issue, PR, or author to route to), which adds a final `🚨 @hub-medic`.
 
 The spec-bump and re-enable posts are explained in their own sections below.
 
@@ -130,8 +132,10 @@ The **thread** under the digest has one line per failure: the category icon, the
 and link means, and what to do, is in the table under "What to do with a failure" above. Fix PRs and suppress PRs from the agent carry the
 labels `nightly-api-fix`, `auto-generated` and `hub`.
 
-**Pings.** `hub-medic` is pinged for a newly filed Hub issue, a fix or suppress PR that needs review, and a failure the triage
-could not classify. `test-automation-medic` is not pinged by the digest.
+**Pings.** The digest pings `hub-medic` for only one thing: a failure the triage **could not classify** (infra + low
+confidence). A freshly filed Hub bug is **assigned to the endpoint's author** instead, and a fix / unmapped-op / suppress
+PR gets that author as assignee or reviewer — so each of those posts its line with no ping. `test-automation-medic` is not
+pinged by the digest.
 
 Three warnings replace the normal digest. Treat each as "do not trust a green night":
 
