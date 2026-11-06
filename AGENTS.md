@@ -707,7 +707,7 @@ A failure with no evidence of what failed (no readable report, nothing failing, 
 operations; `observed=false` from `hub-pr-evidence.ts`) cannot be told apart from the previous
 push's, so it shares one quiet reply per PR per day and pings nobody until it has happened 3 times
 that day (the reply carries a hidden `seen:N` counter), when one extra reply pings
-test-automation-medic. This mirrors AlwaysGreen's rule that one failure is not a page.
+hub-medic and test-automation-medic. This mirrors AlwaysGreen's rule that one failure is not a page.
 Racing PRs that each create the day's parent converge on the earliest one (the
 loser deletes its own); the reply lookup is paginated and fails closed.
 Any threading failure (unresolvable channel name, missing Slack history scope) falls
@@ -774,8 +774,10 @@ stays in Slack pinging `test-automation-medic`. (A `startup` failure still gets 
 comment — a bad PR image is the author's to look at.)
 
 Slack otherwise fires only as a **fallback for a PR with no author to @-tag**. The
-Slack-chain steps' `if:` gates fire when `pr_author == ''` **or** the failure is
-presuite (`suites_ran != 'true' && hub_start_failed != 'true'`). The ping is routed
+Slack-chain steps' `if:` gates fire when `pr_author == ''`, **or** the failure is
+presuite (`suites_ran != 'true' && hub_start_failed != 'true'`), **or** the verdict
+comment did not post (`steps.verdict-comment.outcome != 'success'` — no status token,
+or the App lacks comment-write, so the author was not reached on the PR). The ping is routed
 to match: a presuite failure pings `test-automation-medic`; every other (bot-PR)
 case pings `hub-medic` — it is a camunda-hub PR nobody can be @-tagged on, so the
 Hub on-call owns it. A bot (e.g. `renovate[bot]`, whose `[bot]` login fails the
@@ -869,23 +871,28 @@ grant spec-bump-check.yml's bump-PR token already uses on this repo, so no new
 App permission is needed). Before opening ANY PR, a deterministic step fetches
 every open `nightly-api-fix`-labelled PR's actual diff (not a self-reported tag)
 so the agent can skip an operation already being fixed/suppressed elsewhere,
-rather than opening a duplicate. After the agent opens a **test-generation or
-unmapped-operation fix PR**, a deterministic step assigns it to the endpoint's
-**last author in camunda-hub** and requests their review — git-blaming the
-operation's spec line to its commit's GitHub login
+rather than opening a duplicate. A deterministic step
+([`.github/scripts/hub-assign-fix-prs.sh`](.github/scripts/hub-assign-fix-prs.sh))
+then routes every finding to the endpoint's **last author in camunda-hub** —
+git-blaming the operation's spec line to its commit's GitHub login
 ([`.github/scripts/hub-endpoint-author.sh`](.github/scripts/hub-endpoint-author.sh)),
 so "a generator gap belongs end-to-end to whoever added the endpoint" (handover
-decision). It is best-effort and additive: a bot/unresolved author, or a
-contributor without access to this repo, falls back to an explicit
-`@camunda/hub` team review request (this repo has no CODEOWNERS of its own
-yet, so the step requests the team itself rather than relying on one), so it
-can never make a run worse. A **product-bug suppress PR** gets the endpoint
-owner as **reviewer only** (no assignee) with the same team fallback — they
-sanity-check that suppressing their endpoint's test is right, but the Hub bug
-itself (tracked in the filed issue) is not theirs, and blame would mis-attribute
-it. The triage Slack digest **does not ping** for a suppress PR (its reviewer
-handles it); a **freshly-filed** Hub bug still pings on its own line, while an
-already-known one stays silent. A PR the agent
+decision): a **test-generation / unmapped-op fix PR** gets that author as
+**assignee + reviewer**; a **product-bug suppress PR** gets them as **reviewer
+only** (they sanity-check that suppressing their endpoint's test is right); and a
+**freshly filed Hub bug** gets them as the **camunda-hub issue's assignee** — it
+is theirs to drive. It is best-effort and additive: a bot/unresolved author, or a
+contributor without access, falls back to `@camunda/hub` — a team review request
+on a PR, and (since a team cannot be assigned to an issue) an `@camunda/hub`
+mention comment on the bug issue — so every finding ends with an owner and a miss
+can never make a run worse (this repo has no CODEOWNERS of its own yet, so the
+fallback is requested explicitly rather than relying on one). PR writes use
+`GH_TOKEN_GENERATOR`; the Hub-issue write uses `GH_TOKEN_HUB` (issues-only).
+Because each finding is routed to a named owner this way, the **triage Slack
+digest pings `hub-medic` for only one thing: a failure the agent could not
+classify** (`category: "infrastructure"` AND `confidence: "low"`), which has no
+PR, issue, or author to route to; a fix PR, a suppress PR, a freshly filed bug,
+and an already-known recurrence each post their line with no ping. A PR the agent
 opens is **not** run automatically against a live Hub:
 [hub-pr-live-check.yml](.github/workflows/hub-pr-live-check.yml) fires on every
 same-repo `pull_request` targeting `main` whose diff doesn't touch `.github/**`,
@@ -943,7 +950,7 @@ The **nightly post check** ([hub-nightly-post-check.yml](.github/workflows/hub-n
 `scripts/triage/hub-nightly-post-check.ts`) runs daily at 04:30 UTC, after the nightly (02:00) and its triage have
 finished. A failed Slack step already turns a run red, but a run that never starts or hangs posts nothing and is not
 red, so this looks at today's runs (UTC) of `nightly-camunda-hub.yml` and `triage-camunda-hub-nightly.yml` and posts one
-alert to `#top-hub-nightly-test-results`, pinging `hub-medic`, when the scheduled nightly did not start (a manual run does not
+alert to `#top-hub-nightly-test-results`, pinging `test-automation-medic` (a broken/missing scheduled run is CI machinery, not a Hub finding — same principle as the PR-check presuite rule), when the scheduled nightly did not start (a manual run does not
 stand in for it), is still running, or ended as anything but success or failure (a nightly with failing tests is red but still posts), or when the triage run for that
 nightly (its title, set by `run-name` in the triage workflow, names the nightly's run id) did not run, is still running, or ended as anything but success (`skipped` and `neutral` mean no digest;
 neither a manual triage run nor the triage of a manual nightly stands in for it). Silent when both ran. A manual run is a dry run
@@ -963,8 +970,10 @@ clean — opens a **draft** PR (branch `chore/hub-unskip-<issue-number>`, label
 `nightly-api-fix`) plus a Slack heads-up to
 `#top-hub-nightly-test-results`. Both name the person who landed the hub fix
 (the blocker's `closed_by`, else its first assignee; bots/app actors skipped):
-the PR assigns them (best-effort — dropped if they lack repo access) so the
-re-enabled test lands back on them to verify. If the local guard fails (the
+the PR requests their review (best-effort; when no fixer resolves, or the request
+fails, it falls back to requesting the `@camunda/hub` team) so they sanity-check
+the re-enabled test against their own fix — never an assignee, since the unskip is
+a generator-side change the Hub team owns reviewing. If the local guard fails (the
 upstream fix was partial, or a hardcoded invariant still expects the op
 suppressed), it reverts and reports instead of opening a broken PR — and the
 "needs manual investigation" Slack alert cc-s that same fix author, since a
@@ -974,6 +983,11 @@ the author's Slack profile carries their GitHub link
 resolves GitHub login → Slack id via `users.list` + the custom GitHub profile
 field); without that mapping — or until the Slack app is granted `users:read` /
 `users.profile:read` — it falls back to naming the author by GitHub-profile link.
+`hub-medic` is pinged on the message only as a **fallback** — whenever **any** reported
+item lacks a resolved `<@>`-mention (a suite-wide closure, or an author only named by a
+GitHub link) — so an item whose owner is mentioned is not double-paged, but no item is
+left without a notified owner. An `already_in_flight` item is exempt: its unskip PR is
+already open (owned by its reviewer), so it never re-pages while that PR stays open.
 Entirely deterministic —
 no agent involved, unlike the triage flow above; detecting a closed issue and
 removing a JSON entry are pure mechanics. Same two-App-token split as the
@@ -1092,7 +1106,10 @@ For **camunda-hub** only, when the *operation* surface changed (an operationId
 added/removed, not just a field), it also posts a Slack alert to
 `#top-hub-nightly-test-results` (Slack bot token via the same Vault JWT auth)
 linking the bump PR / tracking issue it just created — so the hub team sees a
-new upstream domain in their channel, not only as a GitHub issue (#435). The
+new upstream domain in their channel, not only as a GitHub issue (#435). This
+drift alert **pings nobody** — a new domain reaches the Hub team through the bump
+PR's reviewer instead; only a failed-run alert pages `test-automation-medic` (a
+broken scheduled run is CI machinery, not a Hub finding). The
 op-surface diff is already computed for the routing above, so the Slack step
 only formats + links; it does not recompute.
 

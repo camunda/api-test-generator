@@ -10,13 +10,15 @@ const openPr = readFileSync(join(dir, '../../.github/scripts/spec-bump-open-pr.s
 describe('spec-bump-check Slack pings', () => {
   const line = workflow.split('\n').find((l) => l.includes('Spec-bump check failed for')) ?? '';
 
-  it('pings hub-medic when a step of the Hub check itself failed', () => {
+  it('pings test-automation-medic when a step of the Hub check itself failed', () => {
+    // A broken scheduled run is CI machinery (test-automation owns it), not a Hub
+    // finding — never hub-medic.
     expect(line).toContain(
-      "matrix.private && ' · :rotating_light: <!subteam^S014VK4482H|hub-medic>'",
+      "matrix.private && ' · :rotating_light: <!subteam^S09UF0EV0HG|test-automation-medic>'",
     );
   });
 
-  it('does not page hub-medic for the camunda-oca leg, which the test automation team owns', () => {
+  it('does not page anyone for the camunda-oca leg', () => {
     expect(line).toContain("|| '')");
   });
 
@@ -24,10 +26,11 @@ describe('spec-bump-check Slack pings', () => {
     expect(line).not.toContain('\\n');
   });
 
-  it('references hub-medic exactly once — the failure alert, never the drift alert', () => {
+  it('never pings hub-medic from spec-bump — drift pings nobody, a broken run pings test-automation', () => {
     // The op-surface / coverage-drift alert deliberately pings nobody (its bump
-    // PR carries a reviewer instead); only the failed-run alert pages hub-medic.
-    expect(workflow.split('S014VK4482H').length - 1).toBe(1);
+    // PR carries a reviewer instead); the failed-run alert pages test-automation-medic.
+    expect(workflow.split('S014VK4482H').length - 1).toBe(0);
+    expect(workflow.split('S09UF0EV0HG').length - 1).toBe(1);
   });
 });
 
