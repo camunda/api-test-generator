@@ -5,6 +5,7 @@ import {
   parsePreRun,
   parseRunPrs,
   parseSelection,
+  prAuthorTargets,
   prIssueLinks,
   type RunPr,
   reportedPrUrls,
@@ -445,6 +446,36 @@ describe('prIssueLinks', () => {
     expect(prIssueLinks([old], withIssue, RUN, 5)).toEqual([]);
     const stray = pr(9, { headRefName: 'feature/not-this-run' });
     expect(prIssueLinks([stray], withIssue, RUN, 0)).toEqual([]);
+  });
+});
+
+describe('prAuthorTargets', () => {
+  it('uses the create operation for a lifecycle gap', () => {
+    // default pr() branch is fix/coverage-project-snapshot-RUN → the ProjectSnapshot lifecycle candidate.
+    expect(prAuthorTargets([pr(1)], selection, RUN, 0)).toEqual([
+      { number: 1, operationId: 'createProjectSnapshot' },
+    ]);
+  });
+
+  it('uses the operation itself for a status gap', () => {
+    const p = pr(1, { headRefName: `fix/coverage-remove-member-403-${RUN}` });
+    expect(prAuthorTargets([p], selection, RUN, 0)).toEqual([
+      { number: 1, operationId: 'removeMember' },
+    ]);
+  });
+
+  it('emits a target even when the candidate has no tracking issue (unlike prIssueLinks)', () => {
+    // selection carries no issues; prIssueLinks skips, but every run PR still needs an author target.
+    expect(prIssueLinks([pr(1)], selection, RUN, 0)).toEqual([]);
+    expect(prAuthorTargets([pr(1)], selection, RUN, 0)).toEqual([
+      { number: 1, operationId: 'createProjectSnapshot' },
+    ]);
+  });
+
+  it('ignores PRs at or below the baseline and non-run branches', () => {
+    expect(prAuthorTargets([pr(5)], selection, RUN, 5)).toEqual([]);
+    const stray = pr(9, { headRefName: 'feature/not-this-run' });
+    expect(prAuthorTargets([stray], selection, RUN, 0)).toEqual([]);
   });
 });
 

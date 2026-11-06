@@ -744,6 +744,47 @@ jobs:
         run: |
           bash .github/scripts/hub-coverage-fix-link-issues.sh "${RUNNER_TEMP}/verify-out.json"
 
+      # Attribute each verified coverage-fix PR to its endpoint author (handover: a gap in an endpoint's
+      # coverage belongs to whoever added the endpoint) — request their review, falling back to the
+      # @camunda/hub team. The git-blame resolver needs a camunda-hub clone WITH history, so this clones
+      # blobless (--filter=blob:none: full history, blobs on demand), NOT the shallow clone-hub-sibling whose
+      # depth-1 blame would mis-attribute to the tip commit. Gated on verification passing, like the linking
+      # step; best-effort and never fails the run.
+      - name: Mint camunda-hub clone token (attribution)
+        id: hub-token-attr
+        if: ${{ always() && steps.verify.outcome == 'success' && env.DRY_RUN != 'true' }}
+        continue-on-error: true
+        uses: ./.github/actions/hub-clone-token
+        with:
+          vault-url: ${{ secrets.VAULT_ADDR }}
+          vault-jwt-path: ${{ secrets.VAULT_JWT_PATH }}
+          vault-jwt-role: ${{ secrets.VAULT_JWT_ROLE }}
+          vault-jwt-audience: ${{ secrets.VAULT_JWT_AUDIENCE }}
+
+      - name: Request the endpoint author's review on each verified PR
+        if: ${{ always() && steps.verify.outcome == 'success' && env.DRY_RUN != 'true' && steps.hub-token-attr.outputs.token != '' }}
+        continue-on-error: true
+        env:
+          # PR write on api-test-generator (request the reviewer) — the same token the linking step uses.
+          GH_TOKEN: ${{ github.token }}
+          # Contents:Read on camunda-hub — the resolver's commit -> login lookup and the blobless clone's
+          # on-demand blob fetch during blame.
+          HUB_TOKEN: ${{ steps.hub-token-attr.outputs.token }}
+        run: |
+          set -uo pipefail
+          hub_dir="${RUNNER_TEMP}/camunda-hub"
+          # A global, token-bearing insteadOf rewrite so both the clone and blame's on-demand blob fetch
+          # authenticate. The runner is ephemeral and this job runs no agent, so it is torn down with the runner.
+          git config --global \
+            url."https://x-access-token:${HUB_TOKEN}@github.com/camunda/camunda-hub".insteadOf \
+            "https://github.com/camunda/camunda-hub"
+          # Full history (no --depth, so blame is correct), blobless to keep the clone light.
+          if ! git clone --filter=blob:none https://github.com/camunda/camunda-hub.git "$hub_dir" 2>/dev/null; then
+            echo "::warning::could not clone camunda-hub for attribution — leaving the team as the reviewer."
+            exit 0
+          fi
+          bash .github/scripts/hub-coverage-fix-attribute.sh "${RUNNER_TEMP}/verify-out.json" "$hub_dir"
+
       # What the run found, for people: one comment per run on the weekly tracking issue (the full record) and one
       # reply in the weekly Slack message's thread (a line per gap). The agent's text in them is untrusted and is
       # cleaned by the script; the PR links come from GitHub. Only real runs post, and only when there is something to
