@@ -23,6 +23,8 @@ POSITIVE_SUPPRESS=configs/camunda-hub/positive-suppress.json
 REQUEST_VALIDATION=configs/camunda-hub/request-validation.json
 HUB_REPO=camunda/camunda-hub
 GEN_REPO=camunda/api-test-generator
+# Team requested as the fallback reviewer when no individual fixer resolves.
+HUB_TEAM="${HUB_TEAM:-camunda/hub}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 SUMMARY_FILE="${SUMMARY_FILE:-/tmp/hub-reenable-summary.json}"
@@ -269,11 +271,10 @@ operation(s) get their tests back: ${ops}." >/dev/null
 
   # Request the fix author's review so the person who closed the blocker
   # sanity-checks the re-enabled test (never an assignee — the unskip is a
-  # generator-side change the @camunda/hub team owns reviewing via CODEOWNERS;
-  # the fixer only vouches that their Hub fix makes the test pass again).
-  # Best-effort: if they lack access to this repo the request fails — warn, drop
-  # them from the summary (so Slack doesn't claim a reviewer that didn't stick),
-  # and leave the PR otherwise intact (CODEOWNERS still requests @camunda/hub).
+  # generator-side change the Hub team owns reviewing; the fixer only vouches
+  # that their Hub fix makes the test pass again). When no fixer resolves, or the
+  # request fails, fall back to the @camunda/hub team so the PR always ends with a
+  # reviewer — mirroring hub-assign-fix-prs.sh. Best-effort throughout.
   if [ -n "$fixer" ]; then
     if GH_TOKEN="$GH_TOKEN_GENERATOR" gh pr edit "$pr_url" --add-reviewer "$fixer" \
       >/dev/null 2>/tmp/hub-reenable-review.err; then
@@ -281,6 +282,18 @@ operation(s) get their tests back: ${ops}." >/dev/null
     else
       echo "::warning::Could not request review from ${fixer} on the unskip PR (${pr_url}) — they may lack access to ${GEN_REPO}: $(cat /tmp/hub-reenable-review.err 2>/dev/null)"
       fixer=""
+    fi
+  fi
+  # Fallback: no individual reviewer → request the @camunda/hub team explicitly,
+  # so the unskip PR has a reviewer immediately (a draft only triggers CODEOWNERS
+  # once it is marked ready). Best-effort; the summary keeps fixer="" so Slack
+  # still pages hub-medic for an item with no resolved individual owner.
+  if [ -z "$fixer" ]; then
+    if GH_TOKEN="$GH_TOKEN_GENERATOR" gh pr edit "$pr_url" --add-reviewer "$HUB_TEAM" \
+      >/dev/null 2>/tmp/hub-reenable-review.err; then
+      echo "No individual fixer — requested ${HUB_TEAM} team review on ${pr_url}"
+    else
+      echo "::warning::Could not request ${HUB_TEAM} review on the unskip PR (${pr_url}): $(cat /tmp/hub-reenable-review.err 2>/dev/null)"
     fi
   fi
 

@@ -970,10 +970,10 @@ clean — opens a **draft** PR (branch `chore/hub-unskip-<issue-number>`, label
 `nightly-api-fix`) plus a Slack heads-up to
 `#top-hub-nightly-test-results`. Both name the person who landed the hub fix
 (the blocker's `closed_by`, else its first assignee; bots/app actors skipped):
-the PR requests their review (best-effort — dropped if they lack repo access,
-and `@camunda/hub` is still requested via CODEOWNERS) so they sanity-check the
-re-enabled test against their own fix — never an assignee, since the unskip is a
-generator-side change the Hub team owns reviewing. If the local guard fails (the
+the PR requests their review (best-effort; when no fixer resolves, or the request
+fails, it falls back to requesting the `@camunda/hub` team) so they sanity-check
+the re-enabled test against their own fix — never an assignee, since the unskip is
+a generator-side change the Hub team owns reviewing. If the local guard fails (the
 upstream fix was partial, or a hardcoded invariant still expects the op
 suppressed), it reverts and reports instead of opening a broken PR — and the
 "needs manual investigation" Slack alert cc-s that same fix author, since a

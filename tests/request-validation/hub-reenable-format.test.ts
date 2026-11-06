@@ -258,7 +258,7 @@ describe('re-enable check: op-scoped fix-author resolution and review request (e
     apiFails?: boolean;
     guardPasses: boolean;
     reviewFails?: boolean;
-  }): SummaryItem[] {
+  }): { items: SummaryItem[]; stdout: string } {
     const dir = mkdtempSync(join(tmpdir(), 'reenable-op-'));
     cpSync(join(repoRoot, '.github'), join(dir, '.github'), { recursive: true });
     mkdirSync(join(dir, 'configs/camunda-hub'), { recursive: true });
@@ -328,7 +328,7 @@ describe('re-enable check: op-scoped fix-author resolution and review request (e
     for (const b of ['gh', 'git', 'npm', 'npx']) chmodSync(join(dir, `bin/${b}`), 0o755);
 
     const summaryFile = join(dir, 'summary.json');
-    execFileSync('bash', [join(dir, '.github/scripts/hub-reenable-check.sh')], {
+    const stdout = execFileSync('bash', [join(dir, '.github/scripts/hub-reenable-check.sh')], {
       cwd: dir,
       env: {
         ...process.env,
@@ -337,34 +337,36 @@ describe('re-enable check: op-scoped fix-author resolution and review request (e
         GH_TOKEN_GENERATOR: 'x',
         SUMMARY_FILE: summaryFile,
       },
-      stdio: 'ignore',
+      encoding: 'utf8',
     });
-    return JSON.parse(readFileSync(summaryFile, 'utf8'));
+    return { items: JSON.parse(readFileSync(summaryFile, 'utf8')), stdout };
   }
 
   it('resolves the fix author from closed_by when it is a real user', () => {
-    const item = runOpScoped({ closedBy: 'alice', assignee: 'bob', guardPasses: false }).find(
+    const item = runOpScoped({ closedBy: 'alice', assignee: 'bob', guardPasses: false }).items.find(
       (i) => i.type === 'aborted_broke_checks',
     );
     expect(item?.fixer).toBe('alice');
   });
 
   it('falls back to the first assignee when closed_by is a bot', () => {
-    const item = runOpScoped({ closedBy: 'ci[bot]', assignee: 'bob', guardPasses: false }).find(
-      (i) => i.type === 'aborted_broke_checks',
-    );
+    const item = runOpScoped({
+      closedBy: 'ci[bot]',
+      assignee: 'bob',
+      guardPasses: false,
+    }).items.find((i) => i.type === 'aborted_broke_checks');
     expect(item?.fixer).toBe('bob');
   });
 
   it('tags no one when the closer is a bot and there is no assignee', () => {
-    const item = runOpScoped({ closedBy: 'ci[bot]', assignee: '', guardPasses: false }).find(
+    const item = runOpScoped({ closedBy: 'ci[bot]', assignee: '', guardPasses: false }).items.find(
       (i) => i.type === 'aborted_broke_checks',
     );
     expect(item?.fixer).toBe('');
   });
 
   it('tags no one when the author lookup fails', () => {
-    const item = runOpScoped({ apiFails: true, guardPasses: false }).find(
+    const item = runOpScoped({ apiFails: true, guardPasses: false }).items.find(
       (i) => i.type === 'aborted_broke_checks',
     );
     expect(item?.fixer).toBe('');
@@ -373,25 +375,46 @@ describe('re-enable check: op-scoped fix-author resolution and review request (e
   it('rejects a non-login candidate so arbitrary API text never becomes the fixer', () => {
     // Defensive: even if gh/jq returned something that is not a GitHub login (e.g. an error
     // phrase), the charset guard drops it rather than letting it reach the summary / Slack link.
-    const item = runOpScoped({ closedBy: 'Not Found', assignee: '', guardPasses: false }).find(
-      (i) => i.type === 'aborted_broke_checks',
-    );
+    const item = runOpScoped({
+      closedBy: 'Not Found',
+      assignee: '',
+      guardPasses: false,
+    }).items.find((i) => i.type === 'aborted_broke_checks');
     expect(item?.fixer).toBe('');
   });
 
   it('requests the fix author review on the opened unskip PR', () => {
-    const item = runOpScoped({ closedBy: 'alice', guardPasses: true, reviewFails: false }).find(
-      (i) => i.type === 'opened',
-    );
+    const item = runOpScoped({
+      closedBy: 'alice',
+      guardPasses: true,
+      reviewFails: false,
+    }).items.find((i) => i.type === 'opened');
     expect(item?.pr_url).toContain('/pull/');
     expect(item?.fixer).toBe('alice');
   });
 
   it('clears fixer when the review request fails, so Slack cannot claim it stuck', () => {
-    const item = runOpScoped({ closedBy: 'alice', guardPasses: true, reviewFails: true }).find(
-      (i) => i.type === 'opened',
-    );
+    const item = runOpScoped({
+      closedBy: 'alice',
+      guardPasses: true,
+      reviewFails: true,
+    }).items.find((i) => i.type === 'opened');
     expect(item?.pr_url).toContain('/pull/'); // the PR still opened
     expect(item?.fixer).toBe(''); // but no reviewer is claimed in the summary
+  });
+
+  it('falls back to the @camunda/hub team review when no fix author resolves', () => {
+    // A bot closer with no assignee → no individual fixer → the unskip PR still
+    // gets a reviewer (the team), and the summary keeps fixer="" so Slack pages
+    // hub-medic for the unowned item.
+    const { items, stdout } = runOpScoped({
+      closedBy: 'ci[bot]',
+      assignee: '',
+      guardPasses: true,
+      reviewFails: false,
+    });
+    const item = items.find((i) => i.type === 'opened');
+    expect(item?.fixer).toBe('');
+    expect(stdout).toContain('requested camunda/hub team review');
   });
 });
