@@ -54,6 +54,12 @@ jq -r '
   if length == 0 then "" else
     ":gear: *camunda-hub known-issue re-enable check*\n" + (map(line(.)) | join("\n"))
     + ([(if $run != "" then "<" + $run + "|Open the workflow run>" else empty end), (if $book != "" then "<" + $book + "|📖 Cookbook>" else empty end)] | if length > 0 then "\n" + join(" · ") else "" end)
-    + (if all(.[]; (.fixerMention // "") != "") then "" else "\n:rotating_light: " + $medic end)
+    # hub-medic is the per-item fallback: it fires unless EVERY reported item is
+    # already owned. An item is "owned" if it carries a resolved <@> fixer
+    # mention, OR it is already_in_flight — its unskip PR is already open (with a
+    # reviewer from the night it was opened), so re-paging for it every night
+    # until that PR merges would page for an already-owned PR.
+    + (if all(.[]; (.fixerMention // "") != "" or (.type // "") == "already_in_flight")
+       then "" else "\n:rotating_light: " + $medic end)
   end
 ' --arg run "${RUN_URL:-}" --arg book "${COOKBOOK_URL:-}" --arg medic '<!subteam^S014VK4482H|hub-medic>' "$FILE"

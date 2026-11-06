@@ -217,6 +217,13 @@ describe('re-enable check Slack message: hub-medic is a fallback', () => {
     fixer: 'octocat',
     fixerMention,
   });
+  const inFlightItem = () => ({
+    type: 'already_in_flight',
+    url: 'https://github.com/camunda/camunda-hub/issues/40002',
+    title: 'getFolder',
+    operations: 'getFolder',
+    pr_url: 'https://github.com/camunda/api-test-generator/pull/2',
+  });
 
   it('pings hub-medic only as a fallback — when no fix author is @-mentioned', () => {
     // suite-wide closure has no fix author to mention → medic is the fallback
@@ -233,6 +240,15 @@ describe('re-enable check Slack message: hub-medic is a fallback', () => {
     // A resolved fixer owns only their item; a suite-wide closure in the same message has no
     // mention, so the medic fallback must still fire (otherwise that item has no notified owner).
     expect(format([openedItem('<@U123>'), suiteWide('COMPLETED')])).toContain(HUB);
+  });
+
+  it('does NOT ping hub-medic for an already-in-flight item (its unskip PR is already open)', () => {
+    // Re-paging nightly for a PR that is already open (owned by its reviewer from
+    // the night it was opened) is the bug this guards: already_in_flight counts
+    // as owned, so it never forces a page.
+    expect(format([inFlightItem()])).not.toContain(HUB);
+    // nor alongside another already-owned (mentioned) item
+    expect(format([openedItem('<@U123>'), inFlightItem()])).not.toContain(HUB);
   });
 
   it('stays silent when there is nothing to report', () => {

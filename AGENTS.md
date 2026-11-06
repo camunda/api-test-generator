@@ -986,7 +986,8 @@ field); without that mapping — or until the Slack app is granted `users:read` 
 `hub-medic` is pinged on the message only as a **fallback** — whenever **any** reported
 item lacks a resolved `<@>`-mention (a suite-wide closure, or an author only named by a
 GitHub link) — so an item whose owner is mentioned is not double-paged, but no item is
-left without a notified owner.
+left without a notified owner. An `already_in_flight` item is exempt: its unskip PR is
+already open (owned by its reviewer), so it never re-pages while that PR stays open.
 Entirely deterministic —
 no agent involved, unlike the triage flow above; detecting a closed issue and
 removing a JSON entry are pure mechanics. Same two-App-token split as the
