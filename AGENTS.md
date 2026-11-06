@@ -950,7 +950,7 @@ The **nightly post check** ([hub-nightly-post-check.yml](.github/workflows/hub-n
 `scripts/triage/hub-nightly-post-check.ts`) runs daily at 04:30 UTC, after the nightly (02:00) and its triage have
 finished. A failed Slack step already turns a run red, but a run that never starts or hangs posts nothing and is not
 red, so this looks at today's runs (UTC) of `nightly-camunda-hub.yml` and `triage-camunda-hub-nightly.yml` and posts one
-alert to `#top-hub-nightly-test-results`, pinging `hub-medic`, when the scheduled nightly did not start (a manual run does not
+alert to `#top-hub-nightly-test-results`, pinging `test-automation-medic` (a broken/missing scheduled run is CI machinery, not a Hub finding — same principle as the PR-check presuite rule), when the scheduled nightly did not start (a manual run does not
 stand in for it), is still running, or ended as anything but success or failure (a nightly with failing tests is red but still posts), or when the triage run for that
 nightly (its title, set by `run-name` in the triage workflow, names the nightly's run id) did not run, is still running, or ended as anything but success (`skipped` and `neutral` mean no digest;
 neither a manual triage run nor the triage of a manual nightly stands in for it). Silent when both ran. A manual run is a dry run
@@ -1105,7 +1105,8 @@ added/removed, not just a field), it also posts a Slack alert to
 linking the bump PR / tracking issue it just created — so the hub team sees a
 new upstream domain in their channel, not only as a GitHub issue (#435). This
 drift alert **pings nobody** — a new domain reaches the Hub team through the bump
-PR's reviewer instead; only a failed-run alert pages `hub-medic`. The
+PR's reviewer instead; only a failed-run alert pages `test-automation-medic` (a
+broken scheduled run is CI machinery, not a Hub finding). The
 op-surface diff is already computed for the routing above, so the Slack step
 only formats + links; it does not recompute.
 

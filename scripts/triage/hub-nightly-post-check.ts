@@ -93,7 +93,10 @@ export function evaluate(nightly: Run[], triage: Run[], now: Date): Problem[] {
   return triageProblem ? [triageProblem] : [];
 }
 
-const HUB_MEDIC = '<!subteam^S014VK4482H|hub-medic>';
+// A missing/stuck/broken scheduled run is CI machinery, not a Hub finding, so it
+// pings test-automation-medic (who own the pipeline), never hub-medic — mirroring
+// the PR-check presuite rule.
+const TA_MEDIC = '<!subteam^S09UF0EV0HG|test-automation-medic>';
 const COOKBOOK_URL =
   'https://github.com/camunda/api-test-generator/blob/main/docs/hub-nightly-cookbook.md';
 
@@ -107,7 +110,7 @@ export function buildAlert(problems: Problem[], runUrl = ''): string {
     ...(runUrl ? [`<${runUrl}|📊 View check run>`] : []),
     `<${COOKBOOK_URL}|📖 What to check>`,
   ];
-  lines.push(`${links.join(' · ')} ${HUB_MEDIC}`);
+  lines.push(`${links.join(' · ')} ${TA_MEDIC}`);
   return lines.join('\n');
 }
 

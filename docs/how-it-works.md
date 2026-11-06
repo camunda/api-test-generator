@@ -79,15 +79,17 @@ carry on-call or maintenance duties for it. The one exception is the `camunda-oc
 
 The Hub team:
 
-- reads and acts on every alert on this page, and is the on-call group (`hub-medic`), including for generator and pipeline problems;
+- reads and acts on every alert on this page, and is the on-call group (`hub-medic`) for Hub findings — product bugs, generator gaps, coverage. A **broken scheduled run** (the shared CI machinery itself failing) pages the test automation team instead, which owns the pipeline;
 - reviews and merges coverage-fix PRs, and fixes the Hub bugs the tests find;
 - keeps the Hub settings in `configs/camunda-hub/`. Most coverage gaps are fixed there, and the coverage-fix agent handles many of them;
 - changes the generator when a gap needs new behaviour. The agent only reports those, and a person opens the change. The code is in `request-validation/`, `path-analyser/` and `materializer/`, and [AGENTS.md](../AGENTS.md) lists the rules a change must follow.
 
 **Who gets pinged — not every post is a page.** The on-call group is `hub-medic`, but most posts name a
-specific owner first and fall back to `hub-medic` only when none can be named, so several posts deliberately
-page nobody. `hub-medic` is pinged outright only for the missing-post alert and a nightly-triage failure
-that could not be classified (both below). Everything else is conditional:
+specific owner first, so several posts deliberately page nobody. `hub-medic` is pinged outright only for a
+nightly-triage failure the agent **could not classify** (below). A **broken scheduled run** — the shared CI
+machinery failing, not a test or a Hub finding — pages `test-automation-medic` instead (the spec-bump "check
+failed" alert and the missing-post alert), the same principle as the PR-check presuite rule. Everything else
+is conditional:
 
 - **The nightly triage digest** routes each failure to an owner on GitHub rather than paging: a freshly
   filed Hub bug is **assigned to the endpoint's author**, a fix / unmapped-op PR is assigned to **and**
@@ -102,9 +104,11 @@ that could not be classified (both below). Everything else is conditional:
   problem such as a clone token or registry login — shared pipeline, not Hub-owned). A failure with no test
   evidence is posted without a ping; if the same PR fails 3 times in a day, the escalation pings
   `test-automation-medic` alone for presuite, or both groups for other no-evidence failures.
-- **The spec-bump alert** pages `hub-medic` **only when the check itself failed** and cannot tell whether
-  the spec drifted. An ordinary spec-drift post (a new or changed upstream operation) **pings nobody**: the
-  bump PR it opens carries an `@camunda/hub` reviewer, and that review is the notification.
+- **The spec-bump alert** pages `test-automation-medic` **only when the check itself failed** (a broken run —
+  CI machinery). An ordinary spec-drift post (a new or changed upstream operation) **pings nobody**: the bump
+  PR it opens carries an `@camunda/hub` reviewer, and that review is the notification.
+- **The missing-post alert** (the nightly or its triage didn't start, hung, or errored) pages
+  `test-automation-medic` — a broken scheduled run is CI machinery, not a Hub finding.
 - **The re-enable check** names **the person who landed the Hub fix** — it assigns them the unskip PR, or, if
   re-enabling breaks locally (a partial fix), cc-s them on the "needs manual investigation" alert, so
   finishing it is theirs. `hub-medic` is pinged only as a **per-item fallback** — when a reported item has no

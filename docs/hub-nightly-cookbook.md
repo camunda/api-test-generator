@@ -14,11 +14,12 @@ A set of automatic jobs then post what they found. Most nights the posts are gre
 without the one assertion Hub cannot meet yet. So any number above 0 is news.
 
 **Who acts.** The Hub team acts on everything in this channel — but not every post pages the person on call, so read
-every post, not only the ones that mention you. The **missing-post alert** always pings `hub-medic`. The rest are
-conditional: the **spec-bump alert** pings `hub-medic` only when the check itself failed — an ordinary spec-drift post
-pings nobody and reaches the team through its bump PR's `@camunda/hub` reviewer; the **weekly report** mentions
-`hub-medic` only when coverage regressed since the previous week; and the **re-enable check** pings `hub-medic` only
-when a reported item has no named fixer (otherwise it names the person who landed the Hub fix). See "Who gets pinged" in
+every post, not only the ones that mention you. A **broken scheduled run** pings `test-automation-medic` (they own the
+CI machinery, not the Hub team): the **missing-post alert** (the nightly or its triage did not run), and the
+**spec-bump check** when a step of the check itself failed. The Hub-finding alerts are conditional: an ordinary
+**spec-drift** post pings nobody (it reaches the team through its bump PR's `@camunda/hub` reviewer); the **weekly
+report** mentions `hub-medic` only when coverage regressed since the previous week; and the **re-enable check** pings
+`hub-medic` only when a reported item has no named fixer (otherwise it names the person who landed the Hub fix). See "Who gets pinged" in
 [how-it-works.md](how-it-works.md). A PR labelled `nightly-api-fix` (a suppress, fix or unskip PR) is closed after 3
 days without activity unless it carries `do-not-close`.
 
@@ -30,7 +31,7 @@ days without activity unless it carries `do-not-close`.
 | After the run | Posted every night. **Triage digest**, with "No failures tonight" when green, and links to the nightly run and the triage run. When there are failures, a thread under it has one line per failure | Only if the digest lists failures | [triage-camunda-hub-nightly](https://github.com/camunda/api-test-generator/actions/workflows/triage-camunda-hub-nightly.yml) |
 | 03:00 | **Spec-bump alert**, only when the spec changed (the pinned spec is behind Hub's latest), or when the check itself failed and cannot tell | Yes | [spec-bump-check](https://github.com/camunda/api-test-generator/actions/workflows/spec-bump-check.yml) |
 | 04:00 | **Re-enable check**, only when a watched Hub bug closed: a skipped test can come back, or a skip that cannot come back (closed as not planned) needs a decision | Yes | [hub-known-issue-reenable-check](https://github.com/camunda/api-test-generator/actions/workflows/hub-known-issue-reenable-check.yml) |
-| 04:30 | **Missing-post alert**, only when the scheduled nightly or its triage did not start, is stuck, or ended without finishing (it pings `hub-medic`) | Yes: open the run it links, then "When a post is missing" | [hub-nightly-post-check](https://github.com/camunda/api-test-generator/actions/workflows/hub-nightly-post-check.yml) |
+| 04:30 | **Missing-post alert**, only when the scheduled nightly or its triage did not start, is stuck, or ended without finishing (it pings `test-automation-medic` — a broken run is CI machinery) | Yes: open the run it links, then "When a post is missing" | [hub-nightly-post-check](https://github.com/camunda/api-test-generator/actions/workflows/hub-nightly-post-check.yml) |
 | Monday 05:00 | Posted every week. **Weekly coverage report** | Yes | [hub-response-coverage](https://github.com/camunda/api-test-generator/actions/workflows/hub-response-coverage.yml) (Run workflow starts a dry run) |
 
 The times are when each job **starts**, not when its post arrives. The spec-bump post comes about 2 minutes later. The nightly posts come after the run finishes, usually 20 to 25 minutes later (the job's limit is 25 minutes). The triage digest is a separate job that starts after the nightly finishes, so it comes later still (its limit is 45 minutes).
@@ -75,7 +76,7 @@ The spec-bump and re-enable posts are explained in their own sections below.
 ## When a post is missing
 
 If a morning has no nightly post, the problem is the run or the posting, not Hub: a failing Hub still produces a post.
-A check at 04:30 UTC (`hub-nightly-post-check`) posts an alert here, pinging `hub-medic`, when the scheduled nightly or its triage did not start, is stuck, or ended without finishing, and links the run. It cannot see a Slack failure when the run itself succeeded, so a quiet channel with no alert still means: check the run.
+A check at 04:30 UTC (`hub-nightly-post-check`) posts an alert here, pinging `test-automation-medic` (a broken scheduled run is CI machinery, not a Hub finding), when the scheduled nightly or its triage did not start, is stuck, or ended without finishing, and links the run. It cannot see a Slack failure when the run itself succeeded, so a quiet channel with no alert still means: check the run.
 Open [nightly-camunda-hub](https://github.com/camunda/api-test-generator/actions/workflows/nightly-camunda-hub.yml) and check, in this order:
 
 1. **No run around 02:00 UTC.** The schedule did not fire. Start one with "Run workflow".
@@ -159,7 +160,7 @@ The last line says what to do:
 - **➡️ Adopt via bump PR #N** (PR opened automatically: **yes**): the new spec is safe, and the bot has already opened the bump PR for you. The generator owner reviews and merges it, which moves the pin. While it stays open, later checks update the same PR; once it is merged, the next change gets a new one.
 - **📋 Blocked — see tracking issue #N** (PR opened automatically: **no**, only an issue): the new spec breaks something, or needs a test the generator does not have. Read
   the issue. The pin does not move until it is fixed.
-- **⚠️ Spec-bump check failed for X** (PR opened automatically: **no**): a step of the job itself failed, so the drift result may be missing. `hub-medic` is pinged. Open the run
+- **⚠️ Spec-bump check failed for X** (PR opened automatically: **no**): a step of the job itself failed, so the drift result may be missing. `test-automation-medic` is pinged (a broken run is CI machinery, not a Hub finding). Open the run
   before trusting that there is no drift.
 
 Nightlies are **not** blocked by a pending bump: they run against Hub's latest spec regardless. The pin only affects the
@@ -201,6 +202,7 @@ How to read the message, how to close a gap, and what the agent does and never d
 ## Who to ask
 
 - An alert about Hub or the generator (a failure, a wrong test, a skip): `hub-medic`.
+- A **broken scheduled run** — a missing nightly/triage post, or a failed spec-bump check (the CI machinery itself): `test-automation-medic`.
 - Anything in this channel you cannot place: write in the channel.
 - Any question or help request, such as how the generator works or a Slack or Vault outage you cannot fix: ask in `#ask-qa` and tag `@test-automation-medic`.
 - Adding a generator PR next to a Hub change (labels, feature flags): see [Adding or changing an endpoint in Hub](hub-pr-check-cookbook.md#adding-or-changing-an-endpoint-in-hub-do-you-need-a-generator-pr).
