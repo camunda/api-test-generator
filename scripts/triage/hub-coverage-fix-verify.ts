@@ -234,6 +234,39 @@ export function prIssueLinks(
   return links;
 }
 
+export interface PrAuthorTarget {
+  number: number;
+  operationId: string;
+}
+
+// For each of this run's opened PRs, the operationId whose camunda-hub author should be
+// requested to review it — "a gap in an endpoint's coverage belongs to whoever added the
+// endpoint". A status gap names the operation directly (candidate.resource); a lifecycle
+// gap uses the resource's create operation (candidate.createOp). Deterministic: it reuses
+// the same branch -> candidate mapping verify() uses, so the attribution step never
+// re-derives the kebab/area logic in shell. Unlike prIssueLinks this is not filtered by
+// whether the area had a tracking issue — every run PR gets an author target.
+export function prAuthorTargets(
+  allPrs: RunPr[],
+  selection: Selection,
+  runId: string,
+  baseline: number,
+): PrAuthorTarget[] {
+  const candidateByKebab = new Map(selection.candidates.map((c) => [branchKey(c), c]));
+  const targets: PrAuthorTarget[] = [];
+  for (const p of allPrs) {
+    if (p.number <= baseline) continue;
+    const key = runResource(p.headRefName, runId);
+    if (key === null) continue;
+    const c = candidateByKebab.get(key);
+    if (!c) continue;
+    const operationId = c.kind === 'status' ? c.resource : c.createOp;
+    if (!operationId) continue;
+    targets.push({ number: p.number, operationId });
+  }
+  return targets;
+}
+
 export function verify(
   allPrs: RunPr[],
   selection: Selection,
@@ -399,10 +432,12 @@ if (process.argv[1] && import.meta.filename === process.argv[1]) {
       changes,
       provisioned,
     );
-    // The links are emitted whatever the verdict; the workflow only acts on them when this run passed (exit 0).
+    // Links and author targets are emitted whatever the verdict; the workflow only acts on them when this run
+    // passed (exit 0).
     const links = prIssueLinks(prs, selection, runId, baseline);
+    const authors = prAuthorTargets(prs, selection, runId, baseline);
     for (const v of violations) console.error(`::error::${v}`);
-    process.stdout.write(`${JSON.stringify({ violations, links }, null, 2)}\n`);
+    process.stdout.write(`${JSON.stringify({ violations, links, authors }, null, 2)}\n`);
     process.exit(violations.length === 0 ? 0 : 1);
   } catch (e) {
     console.error(`::error::${e instanceof Error ? e.message : String(e)}`);

@@ -1040,7 +1040,13 @@ Each verified PR is linked to its area's tracking issue: the weekly report write
 (`area-issues.json`) alongside the per-area issues, the selector attaches that `issue` to each candidate, and after
 verification passes a step appends `relates to #<issue>` to the PR body (`.github/scripts/hub-coverage-fix-link-issues.sh`) so
 the PR and the issue cross-reference each other on GitHub — `relates to`, not `closes`, because one PR fixes one endpoint of
-an area issue that usually lists several. The per-run report (`.github/scripts/hub-coverage-fix-report.sh`, in the Slack thread
+an area issue that usually lists several. After verification a step also **requests the endpoint author's review** on each PR
+(`.github/scripts/hub-coverage-fix-attribute.sh`) — "a gap in an endpoint's coverage belongs to whoever added the endpoint",
+the same attribution the nightly fix PRs use: the verifier emits the operation per PR (`authors: [{number, operationId}]` —
+a status gap's own operation, a lifecycle gap's `create<Resource>`), and the resolver git-blames its spec line to a login,
+falling back to the `@camunda/hub` team. Because the git-blame resolver needs history, the `verify` job clones camunda-hub
+**blobless** (`--filter=blob:none`, full history), NOT the shallow `clone-hub-sibling` whose depth-1 blame would
+mis-attribute to the tip commit. The per-run report (`.github/scripts/hub-coverage-fix-report.sh`, in the Slack thread
 reply and the tracking-issue comment) also names the gaps the agent did **not** attempt this run (the selector's `skipped`
 list, each with a reason: its area already has an open PR, another open PR covers it, it is known and tracked), so every
 eligible gap each week lands in exactly one bucket — opened, left for a person, or not attempted — and none drops silently.
