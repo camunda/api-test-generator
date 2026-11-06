@@ -111,9 +111,9 @@ while IFS= read -r group; do
     continue
   fi
 
-  # Who landed the fix for this now-closed blocker. We assign them the unskip
-  # PR (so they verify the re-enabled test passes against their own fix) and,
-  # if re-enabling breaks locally, name them on the "needs manual
+  # Who landed the fix for this now-closed blocker. We request their review on
+  # the unskip PR (so they sanity-check the re-enabled test against their own
+  # fix) and, if re-enabling breaks locally, name them on the "needs manual
   # investigation" Slack alert — a partial fix is theirs to finish. Best-effort
   # and never fatal: `closed_by` is the camunda-hub user who closed the issue
   # (normally whoever merged the fix), falling back to the first assignee. A
@@ -267,16 +267,19 @@ operation(s) get their tests back: ${ops}." >/dev/null
 
   echo "Opened unskip PR: ${pr_url}"
 
-  # Assign the fix author so the re-enabled test lands back on the person who
-  # closed the blocker. Best-effort: if they lack access to this repo the
-  # assign fails — warn, drop them from the summary (so Slack doesn't claim an
-  # assignee that didn't stick), and leave the PR otherwise intact.
+  # Request the fix author's review so the person who closed the blocker
+  # sanity-checks the re-enabled test (never an assignee — the unskip is a
+  # generator-side change the @camunda/hub team owns reviewing via CODEOWNERS;
+  # the fixer only vouches that their Hub fix makes the test pass again).
+  # Best-effort: if they lack access to this repo the request fails — warn, drop
+  # them from the summary (so Slack doesn't claim a reviewer that didn't stick),
+  # and leave the PR otherwise intact (CODEOWNERS still requests @camunda/hub).
   if [ -n "$fixer" ]; then
-    if GH_TOKEN="$GH_TOKEN_GENERATOR" gh pr edit "$pr_url" --add-assignee "$fixer" \
-      >/dev/null 2>/tmp/hub-reenable-assign.err; then
-      echo "Assigned ${fixer} (closed camunda-hub#${issue_num}) to ${pr_url}"
+    if GH_TOKEN="$GH_TOKEN_GENERATOR" gh pr edit "$pr_url" --add-reviewer "$fixer" \
+      >/dev/null 2>/tmp/hub-reenable-review.err; then
+      echo "Requested review from ${fixer} (closed camunda-hub#${issue_num}) on ${pr_url}"
     else
-      echo "::warning::Could not assign ${fixer} to the unskip PR (${pr_url}) — they may lack access to ${GEN_REPO}: $(cat /tmp/hub-reenable-assign.err 2>/dev/null)"
+      echo "::warning::Could not request review from ${fixer} on the unskip PR (${pr_url}) — they may lack access to ${GEN_REPO}: $(cat /tmp/hub-reenable-review.err 2>/dev/null)"
       fixer=""
     fi
   fi

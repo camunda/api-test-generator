@@ -28,7 +28,7 @@ jq -r '
     (if $fixermention != "" then $fixermention else $fixerlink end) as $fixertag |
     if item.type == "opened" then
       "🎉 <" + $url + "|camunda-hub#" + ($url | split("/") | last) + "> (_" + $title + "_) is closed — re-enabled: `" + $ops + "` → <" + item.pr_url + "|draft PR> (pending live-Hub validation)"
-      + (if $fixer != "" then " — assigned " + $fixertag + " (landed the fix)" else "" end)
+      + (if $fixer != "" then " — review requested from " + $fixertag + " (landed the fix)" else "" end)
     elif item.type == "already_in_flight" then
       "🎉 <" + $url + "|camunda-hub#" + ($url | split("/") | last) + "> is closed — `" + $ops + "` already has an open unskip PR: <" + item.pr_url + ">"
     elif item.type == "aborted_broke_checks" then

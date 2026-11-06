@@ -18,8 +18,10 @@ describe('the spec-bump "check failed" post', () => {
     );
   });
 
-  it('pings hub-medic for the Hub config only', () => {
-    expect(post).toMatch(/matrix\.private && ' · :rotating_light: .*hub-medic/);
+  it('pings test-automation-medic for the Hub config only — a broken run is CI machinery', () => {
+    expect(post).toMatch(/matrix\.private && ' · :rotating_light: .*test-automation-medic/);
+    // never hub-medic: a broken scheduled run is not a Hub finding
+    expect(post).not.toContain('hub-medic');
   });
 
   it('links the Hub cookbook for the Hub config only', () => {

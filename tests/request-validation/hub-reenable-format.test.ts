@@ -93,17 +93,19 @@ describe('re-enable check Slack message: naming the fix author', () => {
     ...(fixer === undefined ? {} : { fixer }),
   });
 
-  it('names the fix author as the PR assignee when one was resolved', () => {
+  it('names the fix author as the PR reviewer when one was resolved', () => {
     const text = format([opened('octocat')]);
-    expect(text).toContain('assigned <https://github.com/octocat|@octocat> (landed the fix)');
+    expect(text).toContain(
+      'review requested from <https://github.com/octocat|@octocat> (landed the fix)',
+    );
   });
 
-  it('omits the assignee note when no fix author was resolved', () => {
+  it('omits the reviewer note when no fix author was resolved', () => {
     const text = format([opened('')]);
     expect(text).toContain('draft PR');
-    expect(text).not.toContain('assigned');
+    expect(text).not.toContain('review requested from');
     // An older summary with no `fixer` field at all behaves the same.
-    expect(format([opened()])).not.toContain('assigned');
+    expect(format([opened()])).not.toContain('review requested from');
   });
 
   it('cc-s the fix author on a partial-fix (needs-manual-investigation) alert', () => {
@@ -122,7 +124,7 @@ describe('re-enable check Slack message: naming the fix author', () => {
   it('prefers a real Slack @-mention over the GitHub link when fixerMention is set', () => {
     // fixerMention is the <@id> the slack-github-map resolver adds in the workflow.
     const openedText = format([{ ...opened('octocat'), fixerMention: '<@U123>' }]);
-    expect(openedText).toContain('assigned <@U123> (landed the fix)');
+    expect(openedText).toContain('review requested from <@U123> (landed the fix)');
     expect(openedText).not.toContain('https://github.com/octocat');
 
     const brokeText = format([{ ...broke('octocat'), fixerMention: '<@U123>' }]);
@@ -131,7 +133,7 @@ describe('re-enable check Slack message: naming the fix author', () => {
 
   it('falls back to the GitHub link when fixerMention is empty (unresolved)', () => {
     const text = format([{ ...opened('octocat'), fixerMention: '' }]);
-    expect(text).toContain('assigned <https://github.com/octocat|@octocat>');
+    expect(text).toContain('review requested from <https://github.com/octocat|@octocat>');
   });
 });
 
@@ -238,7 +240,7 @@ describe('re-enable check Slack message: hub-medic is a fallback', () => {
   });
 });
 
-describe('re-enable check: op-scoped fix-author resolution and assignment (end-to-end script)', () => {
+describe('re-enable check: op-scoped fix-author resolution and review request (end-to-end script)', () => {
   type SummaryItem = { type: string; fixer?: string; pr_url?: string; operations?: string };
 
   /**
@@ -247,15 +249,15 @@ describe('re-enable check: op-scoped fix-author resolution and assignment (end-t
    *   - `gh issue view` → CLOSED; `gh api .../issues/N` → the closed_by/assignee pair (or a failure);
    *   - `npm` (generate) always succeeds; `npx` (the local guard) succeeds iff `guardPasses`,
    *     so guardPasses=false drives the `aborted_broke_checks` path and true drives `opened`;
-   *   - `git push`/`remote` are no-ops; `gh pr create` returns a URL; `gh pr edit --add-assignee`
-   *     succeeds unless `assignFails`.
+   *   - `git push`/`remote` are no-ops; `gh pr create` returns a URL; `gh pr edit --add-reviewer`
+   *     succeeds unless `reviewFails`.
    */
   function runOpScoped(opts: {
     closedBy?: string;
     assignee?: string;
     apiFails?: boolean;
     guardPasses: boolean;
-    assignFails?: boolean;
+    reviewFails?: boolean;
   }): SummaryItem[] {
     const dir = mkdtempSync(join(tmpdir(), 'reenable-op-'));
     cpSync(join(repoRoot, '.github'), join(dir, '.github'), { recursive: true });
@@ -298,7 +300,7 @@ describe('re-enable check: op-scoped fix-author resolution and assignment (end-t
     const apiLine = opts.apiFails
       ? 'exit 1'
       : `printf '%s\\t%s' '${opts.closedBy ?? ''}' '${opts.assignee ?? ''}'`;
-    const editLine = opts.assignFails ? 'echo "no access" >&2; exit 1' : 'exit 0';
+    const editLine = opts.reviewFails ? 'echo "no access" >&2; exit 1' : 'exit 0';
     writeFileSync(
       join(dir, 'bin/gh'),
       [
@@ -377,19 +379,19 @@ describe('re-enable check: op-scoped fix-author resolution and assignment (end-t
     expect(item?.fixer).toBe('');
   });
 
-  it('assigns the fix author on the opened unskip PR', () => {
-    const item = runOpScoped({ closedBy: 'alice', guardPasses: true, assignFails: false }).find(
+  it('requests the fix author review on the opened unskip PR', () => {
+    const item = runOpScoped({ closedBy: 'alice', guardPasses: true, reviewFails: false }).find(
       (i) => i.type === 'opened',
     );
     expect(item?.pr_url).toContain('/pull/');
     expect(item?.fixer).toBe('alice');
   });
 
-  it('clears fixer when the assignment fails, so Slack cannot claim it stuck', () => {
-    const item = runOpScoped({ closedBy: 'alice', guardPasses: true, assignFails: true }).find(
+  it('clears fixer when the review request fails, so Slack cannot claim it stuck', () => {
+    const item = runOpScoped({ closedBy: 'alice', guardPasses: true, reviewFails: true }).find(
       (i) => i.type === 'opened',
     );
     expect(item?.pr_url).toContain('/pull/'); // the PR still opened
-    expect(item?.fixer).toBe(''); // but no assignee is claimed in the summary
+    expect(item?.fixer).toBe(''); // but no reviewer is claimed in the summary
   });
 });

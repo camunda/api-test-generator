@@ -109,8 +109,8 @@ is conditional:
   PR it opens carries an `@camunda/hub` reviewer, and that review is the notification.
 - **The missing-post alert** (the nightly or its triage didn't start, hung, or errored) pages
   `test-automation-medic` — a broken scheduled run is CI machinery, not a Hub finding.
-- **The re-enable check** names **the person who landed the Hub fix** — it assigns them the unskip PR, or, if
-  re-enabling breaks locally (a partial fix), cc-s them on the "needs manual investigation" alert, so
+- **The re-enable check** names **the person who landed the Hub fix** — it requests their review on the unskip
+  PR, or, if re-enabling breaks locally (a partial fix), cc-s them on the "needs manual investigation" alert, so
   finishing it is theirs. `hub-medic` is pinged only as a **per-item fallback** — when a reported item has no
   resolved fixer mention (a suite-wide closure, or an author reachable only by a GitHub link) — so an item
   whose owner is already named is not double-paged and none is left unowned.
