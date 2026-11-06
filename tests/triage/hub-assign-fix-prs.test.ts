@@ -246,6 +246,15 @@ describe('hub-assign-fix-prs.sh', () => {
     expect(log).toContain('pr edit PR5 --add-reviewer camunda/hub'); // backstop
   });
 
+  it('falls back to the team for a fix PR with no operationId (never dropped)', () => {
+    const { log } = runAssign(
+      { failures: [{ subcategory: 'test-generation', action: 'fix-pr', fix_pr_url: 'PR7' }] },
+      { authors: {} },
+    );
+    expect(log).toContain('pr edit PR7 --add-reviewer camunda/hub');
+    expect(count(log, 'PR7 --add-assignee')).toBe(0);
+  });
+
   it('does nothing for a non-JSON triage result', () => {
     const dir = mkdtempSync(join(tmpdir(), 'assign-bad-'));
     const triageFile = join(dir, 'triage.json');
@@ -355,5 +364,16 @@ describe('hub-assign-fix-prs.sh: fresh bug issue', () => {
       { authors: { getA: 'alice', getB: 'alice' } },
     );
     expect(count(log, 'issue edit ISSUE6 --add-assignee alice')).toBe(1);
+  });
+
+  it('keeps a filed bug with no operationId and mentions @camunda/hub (never dropped)', () => {
+    const { log } = runAssign(
+      { failures: [{ action: 'file', issue_url: 'ISSUE7' }] },
+      { authors: { getFile: 'alice' } },
+    );
+    expect(log.some((l) => l.includes('issue comment ISSUE7') && l.includes('@camunda/hub'))).toBe(
+      true,
+    );
+    expect(count(log, 'ISSUE7 --add-assignee')).toBe(0);
   });
 });

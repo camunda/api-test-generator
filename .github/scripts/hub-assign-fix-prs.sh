@@ -68,34 +68,35 @@ trap 'rm -f "$pairs_file" "$prs_file" "$issue_pairs_file" "$issues_file"' EXIT
 
 # (pr_url <TAB> operationId <TAB> kind): "fix" for a test-generation / unmapped-op
 # fix PR (fix_pr_url), "suppress" for a product-bug suppress PR (suppress_pr_url).
+# operationId may be empty — a PR with no resolvable op still reaches the
+# @camunda/hub team-review fallback rather than being dropped, so every PR ends
+# with a reviewer.
 jq -r '
   ( [ (.failures // [])[]
       | select((.subcategory // "") == "test-generation"
                and (.action // "") == "fix-pr"
-               and ((.fix_pr_url // "") != "")
-               and ((.operationId // "") != ""))
-      | {pr: .fix_pr_url, op: .operationId, kind: "fix"} ]
+               and ((.fix_pr_url // "") != ""))
+      | {pr: .fix_pr_url, op: (.operationId // ""), kind: "fix"} ]
   + [ (.unmapped_operations // [])[]
       | select((.action // "") == "fix-pr"
-               and ((.fix_pr_url // "") != "")
-               and ((.operationId // "") != ""))
-      | {pr: .fix_pr_url, op: .operationId, kind: "fix"} ]
+               and ((.fix_pr_url // "") != ""))
+      | {pr: .fix_pr_url, op: (.operationId // ""), kind: "fix"} ]
   + [ (.failures // [])[]
-      | select(((.suppress_pr_url // "") != "")
-               and ((.operationId // "") != ""))
-      | {pr: .suppress_pr_url, op: .operationId, kind: "suppress"} ] )
+      | select(((.suppress_pr_url // "") != ""))
+      | {pr: .suppress_pr_url, op: (.operationId // ""), kind: "suppress"} ] )
   | .[] | "\(.pr)\t\(.op)\t\(.kind)"
 ' "$f" | sort -u > "$pairs_file"
 
 # (issue_url <TAB> operationId): a FRESHLY filed Hub bug (action "file" with an
 # issue_url). An already-known recurrence (report-only/skip) carries no "file"
-# action, so it is never re-assigned.
+# action, so it is never re-assigned. operationId may be empty — a bug with no
+# resolvable op still gets the @camunda/hub mention fallback (below) rather than
+# being dropped, since the digest no longer pings for a filed bug.
 jq -r '
   [ (.failures // [])[]
     | select((.action // "") == "file"
-             and ((.issue_url // "") != "")
-             and ((.operationId // "") != ""))
-    | {issue: .issue_url, op: .operationId} ]
+             and ((.issue_url // "") != ""))
+    | {issue: .issue_url, op: (.operationId // "")} ]
   | .[] | "\(.issue)\t\(.op)"
 ' "$f" | sort -u > "$issue_pairs_file"
 
@@ -138,6 +139,7 @@ while IFS="$TAB" read -r pr kind; do
   logins=""
   while IFS="$TAB" read -r p op _; do
     [ "$p" = "$pr" ] || continue
+    [ -n "$op" ] || continue  # missing op → no author to resolve → team fallback
     login=$(GH_TOKEN="$HUB_TOKEN" bash "$resolver" "$op" "$hub" || true)
     [ -n "$login" ] || continue
     case " ${logins} " in *" ${login} "*) : ;; *) logins="${logins:+${logins} }${login}" ;; esac
@@ -185,6 +187,7 @@ if [ -s "$issues_file" ]; then
       logins=""
       while IFS="$TAB" read -r i op; do
         [ "$i" = "$issue" ] || continue
+        [ -n "$op" ] || continue  # missing op → no author → @camunda/hub mention
         login=$(GH_TOKEN="$HUB_TOKEN" bash "$resolver" "$op" "$hub" || true)
         [ -n "$login" ] || continue
         case " ${logins} " in *" ${login} "*) : ;; *) logins="${logins:+${logins} }${login}" ;; esac
