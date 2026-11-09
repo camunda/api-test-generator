@@ -1,17 +1,39 @@
-# The Hub team owns this repo. A PR requests their review automatically
-# (a draft PR requests it when it is marked ready).
-*  @camunda/hub
+# Default owner: the test automation team owns the generator engine, the shared
+# tooling, and the camunda-oca config. (Narrowed from the repo-wide @camunda/hub
+# default that #718 set — Hub review is now requested only on the Hub-facing
+# surface below, so an engine/tooling-internal PR no longer pages the Hub team.)
+*  @camunda/test-automation-team
 
-# The engine and the camunda-oca config also build OCA's tests, and the test automation team stays
-# responsible for OCA. A PR touching them requests both teams; either one can review.
-/semantic-graph-extractor/  @camunda/hub @camunda/test-automation-team
-/path-analyser/             @camunda/hub @camunda/test-automation-team
-/materializer/              @camunda/hub @camunda/test-automation-team
-/request-validation/        @camunda/hub @camunda/test-automation-team
-/emitter-sdk/               @camunda/hub @camunda/test-automation-team
-/configs/camunda-oca/       @camunda/hub @camunda/test-automation-team
-
-# The camunda-oca spec-pin bump (the chore/spec-bump-camunda-oca PR) is OCA's own concern, so it goes
-# to the test automation team only — not the Hub team. More specific than the rule above, so it
-# wins (CODEOWNERS is last-match-wins).
-/configs/camunda-oca/spec-pin.json  @camunda/test-automation-team
+# Hub-facing surface — what gets tested for camunda-hub, and how the Hub team is
+# notified / assigned / routed onto their board — is the Hub team's to review.
+# Test automation stays a co-owner of the shared CI plumbing, so either team can
+# review. CODEOWNERS is last-match-wins, so these override the `*` default above.
+/configs/camunda-hub/                               @camunda/hub @camunda/test-automation-team
+/docs/hub-*.md                                      @camunda/hub @camunda/test-automation-team
+/docs/how-it-works.md                               @camunda/hub @camunda/test-automation-team
+# The Hub suite's own composite actions (clone the camunda-hub sibling, mint its clone
+# token, wait for Hub, summarise the Hub run) are Hub-facing. slack-token and
+# fail-if-slack-failed are deliberately NOT co-owned here: they mint the Slack token and
+# guard the Slack alert for the OCA leg of spec-bump-check too, so they are shared and
+# stay on the test-automation default.
+/.github/actions/clone-hub-sibling/                 @camunda/hub @camunda/test-automation-team
+/.github/actions/hub-clone-token/                   @camunda/hub @camunda/test-automation-team
+/.github/actions/hub-run-summary/                   @camunda/hub @camunda/test-automation-team
+/.github/actions/wait-for-hub/                      @camunda/hub @camunda/test-automation-team
+/.github/scripts/hub-*                              @camunda/hub @camunda/test-automation-team
+/.github/scripts/request-hub-author-review.sh       @camunda/hub @camunda/test-automation-team
+/.github/scripts/spec-bump-open-pr.sh               @camunda/hub @camunda/test-automation-team
+/scripts/triage/hub-*                               @camunda/hub @camunda/test-automation-team
+/scripts/triage/slack-*                             @camunda/hub @camunda/test-automation-team
+/scripts/e2e/hub_*.py                               @camunda/hub @camunda/test-automation-team
+/scripts/e2e/run-hub.sh                             @camunda/hub @camunda/test-automation-team
+/scripts/e2e/verify-negative-failures.py            @camunda/hub @camunda/test-automation-team
+/docker/start-hub.sh                                @camunda/hub @camunda/test-automation-team
+/docker/docker-compose.hub.yml                      @camunda/hub @camunda/test-automation-team
+/.github/workflows/hub-*.yml                        @camunda/hub @camunda/test-automation-team
+/.github/workflows/nightly-camunda-hub.yml          @camunda/hub @camunda/test-automation-team
+/.github/workflows/triage-camunda-hub-nightly.yml   @camunda/hub @camunda/test-automation-team
+/.github/workflows/spec-bump-check.yml              @camunda/hub @camunda/test-automation-team
+/.github/workflows/_hub-suite-run.yml               @camunda/hub @camunda/test-automation-team
+/.github/workflows/close-stale-nightly-api-fix-prs.yml  @camunda/hub @camunda/test-automation-team
+/resources/workspace-templates/camunda-hub-*/       @camunda/hub @camunda/test-automation-team
