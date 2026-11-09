@@ -155,14 +155,16 @@ describe('buildAlert', () => {
     expect(buildAlert([])).toBe('');
   });
 
-  it('names each problem, links the run and pings hub-medic', () => {
+  it('names each problem, links the run and pings test-automation-medic', () => {
     const text = buildAlert([
       { what: 'the triage digest', why: 'ended as failure', url: 'https://example.test/run/9' },
     ]);
     expect(text).toContain('No nightly post this morning');
     expect(text).toContain('the triage digest: ended as failure');
     expect(text).toContain('<https://example.test/run/9|run>');
-    expect(text).toContain('<!subteam^S014VK4482H|hub-medic>');
+    // A broken/missing scheduled run is CI machinery → test-automation-medic, not hub-medic.
+    expect(text).toContain('<!subteam^S09UF0EV0HG|test-automation-medic>');
+    expect(text).not.toContain('hub-medic');
     expect(text).toContain('docs/hub-nightly-cookbook.md|');
     expect(text).not.toContain('#when-a-post-is-missing');
   });
@@ -271,11 +273,11 @@ describe('collectRuns', () => {
 
 describe('buildAlert run link', () => {
   const problems = [{ what: 'the nightly', why: 'did not start', url: '' }];
-  it('links this check run before the cookbook and pings hub-medic last', () => {
+  it('links this check run before the cookbook and pings test-automation-medic last', () => {
     const run = 'https://github.com/camunda/api-test-generator/actions/runs/7';
     const lines = buildAlert(problems, run).split('\n');
     expect(lines.at(-1)).toMatch(
-      /^<https:\/\/github\.com\/camunda\/api-test-generator\/actions\/runs\/7\|📊 View check run> · <.+\|📖 What to check> <!subteam\^S014VK4482H\|hub-medic>$/,
+      /^<https:\/\/github\.com\/camunda\/api-test-generator\/actions\/runs\/7\|📊 View check run> · <.+\|📖 What to check> <!subteam\^S09UF0EV0HG\|test-automation-medic>$/,
     );
   });
 

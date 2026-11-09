@@ -464,6 +464,8 @@ const baseSummary = (over: Record<string, unknown> = {}) => ({
 });
 
 describe('weekly Slack message', () => {
+  // Note: the weekly report pings hub-medic ONLY on a week-over-week regression — that behaviour
+  // is covered by the 'weekly Slack message pings only on a regression' describe block below.
   it('leads with the documented main question — endpoints tested for every status code', () => {
     const text = slackText(baseSummary(), null);
     expect(text).toContain('*8 of 10 endpoints are tested for every status code they can return*');

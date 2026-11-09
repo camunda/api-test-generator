@@ -172,72 +172,101 @@ describe('triage Slack summary: recent-change counter', () => {
 });
 
 describe('triage Slack thread: who is pinged', () => {
-  // Subteam ids, asserted medic-agnostically where #718 will re-route the
-  // fix-PR / unclassifiable pings from test-automation-medic to hub-medic; the
-  // suppress-PR assertions are exact because that is what this change guards.
-  const HUB_MEDIC = 'S014VK4482H';
-  const TA_MEDIC = 'S09UF0EV0HG';
+  const HUB_MEDIC = '<!subteam^S014VK4482H|hub-medic>';
   const issue = `${HUB}/issues/1`;
   const pr = 'https://github.com/camunda/api-test-generator/pull/1';
-  const pings = (t: string) => t.split(':rotating_light:').length - 1;
+  const pings = (text: string) => text.split(HUB_MEDIC).length - 1;
 
-  it('pings hub-medic when a brand-new Hub bug is filed', () => {
-    const text = threadLine('', { subcategory: null, action: 'file', issue_url: issue });
-    expect(text).toContain(HUB_MEDIC);
+  // The digest pings hub-medic for EXACTLY ONE case: a failure the agent could
+  // not classify. Everything else (a filed Hub bug, a fix / unmapped-op PR, a
+  // suppress PR) is routed to an owner on GitHub by hub-assign-fix-prs.sh, so
+  // the digest shows the issue/PR link for context but does not page.
+
+  it('pings hub-medic when the agent could not classify the failure', () => {
+    const text = threadLine('', { category: 'infrastructure', confidence: 'low' });
+    expect(pings(text)).toBe(1);
   });
 
-  it('a product-bug suppress PR pings nobody (the endpoint owner reviews it instead)', () => {
-    const text = threadLine('', {
-      subcategory: null,
-      action: 'report-only',
-      known_issue: true,
-      known_issue_url: issue,
-      suppress_pr_url: pr,
-    });
+  it('does not ping for a freshly filed Hub bug (assigned to the author instead)', () => {
+    const text = threadLine('', { action: 'file', issue_url: issue });
     expect(pings(text)).toBe(0);
-    expect(text).not.toContain(HUB_MEDIC);
-    expect(text).not.toContain(TA_MEDIC);
-    // the suppress PR is still shown on the line, just not pinged
+    expect(text).not.toContain(':rotating_light:');
+    // the issue link is still shown on the line for context
+    expect(text).toContain(issue);
+  });
+
+  it('does not ping for a fix PR (assigned to + reviewed by the author instead)', () => {
+    const text = threadLine('', { action: 'fix-pr', fix_pr_url: pr });
+    expect(pings(text)).toBe(0);
     expect(text).toContain(pr);
   });
 
-  it('a freshly-filed bug that also has a suppress PR pings hub-medic exactly once', () => {
-    const text = threadLine('', {
-      subcategory: null,
-      action: 'file',
-      issue_url: issue,
-      suppress_pr_url: pr,
-    });
-    expect(pings(text)).toBe(1);
-    expect(text).toContain(HUB_MEDIC);
-    expect(text).not.toContain(TA_MEDIC);
-  });
-
-  it('a fresh fix PR still pings a medic', () => {
-    const text = threadLine('', {
-      subcategory: 'test-generation',
-      action: 'fix-pr',
-      fix_pr_url: pr,
-    });
-    expect(pings(text)).toBeGreaterThan(0);
-  });
-
-  it('an unclassifiable failure still pings a medic', () => {
-    const text = threadLine('', {
-      subcategory: null,
-      category: 'infrastructure',
-      confidence: 'low',
-    });
-    expect(pings(text)).toBeGreaterThan(0);
-  });
-
-  it('an already-known recurrence with no PR pings nobody', () => {
-    const text = threadLine('', {
-      subcategory: null,
-      action: 'report-only',
-      known_issue: true,
-      known_issue_url: issue,
-    });
+  it('does not ping for a suppress PR (the endpoint owner reviews it instead)', () => {
+    const text = threadLine('', { action: 'report-only', known_issue: true, suppress_pr_url: pr });
     expect(pings(text)).toBe(0);
+    expect(text).toContain(pr);
+  });
+
+  it('does not ping for an already-known recurrence with no PR', () => {
+    expect(pings(threadLine('', { action: 'report-only', known_issue: true }))).toBe(0);
+  });
+
+  it('never mentions test-automation-medic', () => {
+    for (const extra of [
+      { action: 'file', issue_url: issue },
+      { action: 'fix-pr', fix_pr_url: pr },
+      { action: 'report-only', suppress_pr_url: pr },
+      { category: 'infrastructure', confidence: 'low' },
+    ]) {
+      const text = threadLine('', extra);
+      expect(text).not.toContain('S09UF0EV0HG');
+      expect(text).not.toContain('test-automation-medic');
+    }
+  });
+});
+
+describe('triage Slack thread: unmapped operations', () => {
+  const HUB_MEDIC = '<!subteam^S014VK4482H|hub-medic>';
+  const pr = 'https://github.com/camunda/api-test-generator/pull/1';
+  const pings = (text: string) => text.split(HUB_MEDIC).length - 1;
+
+  function unmappedLine(u: Record<string, unknown>): string {
+    const dir = mkdtempSync(join(tmpdir(), 'triage-unmapped-'));
+    const file = join(dir, 'hub-triage.json');
+    writeFileSync(
+      file,
+      JSON.stringify({ failures: [], unmapped_operations: [{ operationId: 'getThing', ...u }] }),
+    );
+    return execFileSync('bash', [script, file, 'thread'], { encoding: 'utf8' });
+  }
+
+  it('renders the unmapped bullet and the operationId', () => {
+    const text = unmappedLine({ action: 'report-only' });
+    expect(text).toContain('unmapped — `getThing` — no generated test');
+  });
+
+  it('shows the fix-PR link but does not ping (the PR is assigned to the author)', () => {
+    const text = unmappedLine({ action: 'fix-pr', fix_pr_url: pr });
+    expect(pings(text)).toBe(0);
+    expect(text).not.toContain(':rotating_light:');
+    expect(text).toContain(`:hammer_and_wrench: <${pr}>`);
+  });
+
+  it('shows the recycle link when an existing PR already covers the gap (skip), no ping', () => {
+    const text = unmappedLine({ action: 'skip', fix_pr_url: pr });
+    expect(pings(text)).toBe(0);
+    expect(text).toContain(`:recycle: <${pr}>`);
+  });
+
+  it('never pings and never pages test-automation-medic, whatever the action', () => {
+    for (const u of [
+      { action: 'report-only' },
+      { action: 'fix-pr', fix_pr_url: '' },
+      { action: 'fix-pr', fix_pr_url: pr },
+    ]) {
+      const text = unmappedLine(u);
+      expect(pings(text)).toBe(0);
+      expect(text).not.toContain('test-automation-medic');
+    }
   });
 });

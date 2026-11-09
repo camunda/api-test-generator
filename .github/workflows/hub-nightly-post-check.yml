@@ -1,7 +1,8 @@
 # Morning check that last night's nightly run and its triage run happened. A failed Slack step already
 # turns its run red, but a run that never starts (a disabled schedule, an outage) or hangs posts nothing
 # and is not red, so a missing post would go unnoticed. Posts one alert to
-# #top-hub-nightly-test-results, pinging hub-medic, when the nightly or the triage is missing, stuck
+# #top-hub-nightly-test-results, pinging test-automation-medic (a broken scheduled run is CI
+# machinery, not a Hub finding), when the nightly or the triage is missing, stuck
 # or ended without finishing. Silent when both ran. Deterministic: no agent.
 name: Hub nightly post check
 

@@ -79,17 +79,52 @@ carry on-call or maintenance duties for it. The one exception is the `camunda-oc
 
 The Hub team:
 
-- reads and acts on every alert on this page, and is the on-call group (`hub-medic`), including for generator and pipeline problems;
+- reads and acts on every alert on this page, and is the on-call group (`hub-medic`) for Hub findings — product bugs, generator gaps, coverage. A **broken scheduled run** (the shared CI machinery itself failing) pages the test automation team instead, which owns the pipeline;
 - reviews and merges coverage-fix PRs, and fixes the Hub bugs the tests find;
 - keeps the Hub settings in `configs/camunda-hub/`. Most coverage gaps are fixed there, and the coverage-fix agent handles many of them;
-- puts the `hub` label on every PR for Hub work (the automation does it for its own PRs and issues);
 - changes the generator when a gap needs new behaviour. The agent only reports those, and a person opens the change. The code is in `request-validation/`, `path-analyser/` and `materializer/`, and [AGENTS.md](../AGENTS.md) lists the rules a change must follow.
 
-**Pings are not switched yet.** Some generator alerts still go to `test-automation-medic` instead of `hub-medic`, and three
-posts ping nobody (the spec-bump alert, the re-enable check, the weekly report). The change is tracked in
-[#712](https://github.com/camunda/api-test-generator/issues/712). Until then, whoever is on call as `hub-medic` reads both Slack
-channels each morning: PR-check alerts and the gap digest are in `#camunda-hub-pr-e2e-results`, everything else is in
-`#top-hub-nightly-test-results`.
+**Who gets pinged — not every post is a page.** The on-call group is `hub-medic`, but most posts name a
+specific owner first, so several posts deliberately page nobody. `hub-medic` is pinged outright only for a
+nightly-triage failure the agent **could not classify** (below). A **broken scheduled run** — the shared CI
+machinery failing, not a test or a Hub finding — pages `test-automation-medic` instead (the spec-bump "check
+failed" alert and the missing-post alert), the same principle as the PR-check presuite rule. Everything else
+is conditional:
+
+- **The nightly triage digest** routes each failure to an owner on GitHub rather than paging: a freshly
+  filed Hub bug is **assigned to the endpoint's author**, a fix / unmapped-op PR is assigned to **and**
+  reviewed by them, and a suppress PR gets them as **reviewer** (each falling back to `@camunda/hub` when no
+  author resolves — a team review on a PR, an `@camunda/hub` mention on the bug issue). So those post their
+  line with **no ping**. The one exception is a failure the agent **could not classify** (infra + low
+  confidence): it has no PR, issue, or author to route to, so it pings `hub-medic` for a human to decide.
+- **A failing camunda-hub PR check** is not a page by default. A normal failing run posts **no Slack**; it
+  leaves a comment on the camunda-hub PR that @-tags its author, whose change it is. `hub-medic` is pinged
+  only as a **fallback** — a bot PR with no author to tag, or a run whose verdict comment could not be
+  posted. `test-automation-medic` alone is pinged when a PR check fails *before* the tests start (a setup
+  problem such as a clone token or registry login — shared pipeline, not Hub-owned). A failure with no test
+  evidence is posted without a ping; if the same PR fails 3 times in a day, the escalation pings
+  `test-automation-medic` alone for presuite, or both groups for other no-evidence failures.
+- **The spec-bump alert** pages `test-automation-medic` **only when the check itself failed** (a broken run —
+  CI machinery). An ordinary spec-drift post (a new or changed upstream operation) **pings nobody**: the bump
+  PR it opens carries an `@camunda/hub` reviewer, and that review is the notification.
+- **The missing-post alert** (the nightly or its triage didn't start, hung, or errored) pages
+  `test-automation-medic` — a broken scheduled run is CI machinery, not a Hub finding.
+- **The re-enable check** names **the person who landed the Hub fix** — it requests their review on the unskip
+  PR, or, if re-enabling breaks locally (a partial fix), cc-s them on the "needs manual investigation" alert, so
+  finishing it is theirs. `hub-medic` is pinged only as a **per-item fallback** — when a reported item has no
+  resolved fixer mention (a suite-wide closure, or an author reachable only by a GitHub link) — so an item
+  whose owner is already named is not double-paged and none is left unowned.
+- **The weekly coverage report** @-mentions `hub-medic` **only when coverage regressed** since the previous
+  week; a flat or improving week posts with no mention, so the report never becomes a page people learn to
+  ignore.
+
+When Slack threading works, each distinct PR-check failure is one reply under the day's message, keyed on the
+PR and a fingerprint of what failed: a re-run with the same fingerprint edits that reply in place rather than
+posting again, and only a changed failure adds a new reply. While the Slack bot lacks that permission, it
+falls back to a separate message per run. Every PR to this repo requests a review from `@camunda/hub` (see
+`.github/CODEOWNERS`). The daily gap digest and the coverage-fix agent's thread reply ping nobody by name, so
+whoever is on call as `hub-medic` reads both Slack channels each morning: PR-check alerts and the gap digest
+are in `#camunda-hub-pr-e2e-results`, everything else is in `#top-hub-nightly-test-results`.
 
 **Questions or help:** ask in `#ask-qa` and tag `@test-automation-medic`. The enablement team always replies there.
 
@@ -111,5 +146,6 @@ channels each morning: PR-check alerts and the gap digest are in `#camunda-hub-p
 - **Classifier:** the automated step that reads a failed PR check and picks a verdict. It is an AI agent and can be wrong; it is told to answer "unknown" rather than guess.
 - **Ontology:** the config files in `configs/camunda-hub/ontology/` that tell the generator how each resource is created, read, deleted and linked.
 - **Live check:** running the generated suite against a real Hub. `hub-pr-live-check` does it on PRs to this repo and `hub-ondemand-test` does it by hand.
+- **Fingerprint:** the failing tests plus the endpoints with no test. The same fingerprint edits one Slack message instead of posting a new one.
 
 Want to change how the generator works? See the [README](../README.md) and [AGENTS.md](../AGENTS.md).

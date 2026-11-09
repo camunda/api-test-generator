@@ -196,41 +196,38 @@ case "$MODE" in
       def opLabel(f):
         (f.operationId // "") as $o
         | if ($o | type) == "string" and ($o | length) > 0 then $o else s(f.spec; "?") end;
-      # Owner→medic Slack subteam mentions — pings the actual on-call group,
-      # not plain text (same mechanism as the camunda/camunda AlwaysGreen
-      # feedback.mjs / alwaysgreen-streak-detector.yml). Fires on:
-      #   - hub_medic: action == "file" AND a non-empty issue_url — a FRESH
-      #     hub issue was actually filed this run. Requiring the URL guards
-      #     against paging on a schema-violating/incomplete agent-authored
-      #     entry that claims action "file" without one.
-      #   - test_automation_medic: action == "fix-pr" with a non-empty
-      #     fix_pr_url (a fresh generator-side fix PR) OR its own
-      #     could-not-classify signal (category: "infrastructure" AND
-      #     confidence: "low", the exact fallback combination the
-      #     classification guidance defines — NOT any low-confidence finding,
-      #     an unrelated future use of confidence should not page anyone)
-      #     — deduped to exactly one mention even if both are true.
+      # Medic Slack subteam mention — pings the actual on-call group, not plain
+      # text (same mechanism as the camunda/camunda AlwaysGreen feedback.mjs /
+      # alwaysgreen-streak-detector.yml).
       #
-      # A product-bug SUPPRESS PR (suppress_pr_url) pings NOBODY here: its
-      # endpoint owner is already requested as reviewer by hub-assign-fix-prs.sh,
-      # and the Hub bug is surfaced on its own — a FRESH bug pings hub_medic via
-      # action=="file" below, and an already-known one is, by design, not
-      # re-paged. So a suppress PR, new or known, stays quiet in Slack.
+      # The digest pings hub-medic for EXACTLY ONE thing: a finding the agent
+      # could not classify (undecided() below — category "infrastructure" AND
+      # confidence "low", the exact fallback combination the classification
+      # guidance defines, NOT any low-confidence finding). That is the only case
+      # with no PR, no filed issue, and no endpoint owner to route to, so a
+      # human has to decide what it even is.
       #
-      # hub_medic never fires on an already-known recurrence (action ==
-      # "report-only"/"skip") — otherwise it gets paged nightly for something
-      # already tracked and unfixed.
+      # Everything else is routed to an OWNER on GitHub by hub-assign-fix-prs.sh,
+      # never paged here:
+      #   - a freshly filed Hub bug (action == "file") is ASSIGNED to the
+      #     endpoint author (git-blame), @camunda/hub as the fallback;
+      #   - a test-generation / unmapped-op fix PR is assigned to + reviewed by
+      #     that author;
+      #   - a product-bug suppress PR gets that author as reviewer only.
+      # So none of those ping here — the assignee/reviewer is the notification,
+      # and the digest line still shows the issue/PR link for context. An
+      # already-known recurrence (action == "report-only"/"skip") also stays
+      # quiet.
       #
       # One mention per finding, inline in the thread reply only (never the
       # top-level summary message) so it stays precise, not a blanket ping.
       def hub_medic: "<!subteam^S014VK4482H|hub-medic>";
-      def test_automation_medic: "<!subteam^S09UF0EV0HG|test-automation-medic>";
       # An admission from the agent that it could not confidently pick a
       # category — never silently folded into an ordinary infrastructure
-      # finding. Called out with its own line AND routed to the
-      # test-automation medic so a human makes the call, rather than the
-      # low confidence going unnoticed under a category label that reads
-      # as a settled decision.
+      # finding. Called out with its own line AND routed to the hub medic
+      # (the Hub team owns the generator) so a human makes the call, rather
+      # than the low confidence going unnoticed under a category label that
+      # reads as a settled decision.
       def undecided(f): (f.category // "") == "infrastructure" and (f.confidence // "") == "low";
       # related_commit carries a sha/url per the guidance (proof of the
       # "explained by recent intentional change" skip decision) — render it
@@ -272,8 +269,7 @@ case "$MODE" in
       # reasoning, response bodies, etc.) lives in the linked issue, PR, or
       # nightly run, not repeated here — this is a pointer, not the evidence.
       def line(f):
-        (((f.action // "") == "fix-pr" and has_url(f.fix_pr_url)) or undecided(f)) as $needs_ta_medic
-        | ([
+        ([
             (if (f.known_issue // false) then compactLink(f.known_issue_url; ":ticket:") else "" end),
             relatedCommitNote(f.related_commit; f),
             compactLink(f.issue_url; ":memo:"),
@@ -284,9 +280,7 @@ case "$MODE" in
         + "` — expected " + leadNum(f.expected; "?") + ", got " + leadNum(f.actual; "?")
         + (if undecided(f) then "\n    :grey_question: *could not confidently classify — needs human triage*" else "" end)
         + (if ($links_line | length) > 0 then "\n    " + $links_line else "" end)
-        + (if (f.action // "") == "file" and has_url(f.issue_url)
-           then "\n    :rotating_light: " + hub_medic else "" end)
-        + (if $needs_ta_medic then "\n    :rotating_light: " + test_automation_medic else "" end)
+        + (if undecided(f) then "\n    :rotating_light: " + hub_medic else "" end)
         + (if (f.action // "") == "report-only" and ((f.file_error // "") != "") then
              (if (f.subcategory // "") == "test-generation"
               then "\n    :warning: could not open fix PR: "
@@ -296,11 +290,9 @@ case "$MODE" in
              "\n    :warning: could not suppress: " + s(f.suppress_error; "")
            else "" end);
       def uline(u):
-        ((u.action // "") == "fix-pr" and has_url(u.fix_pr_url)) as $needs_ta_medic
-        | (compactLink(u.fix_pr_url; if (u.action // "") == "skip" then ":recycle:" else ":hammer_and_wrench:" end)) as $link
+        (compactLink(u.fix_pr_url; if (u.action // "") == "skip" then ":recycle:" else ":hammer_and_wrench:" end)) as $link
         | "• :no_entry_sign: unmapped — `" + s(u.operationId; "?") + "` — no generated test"
         + (if ($link | length) > 0 then "\n    " + $link else "" end)
-        + (if $needs_ta_medic then "\n    :rotating_light: " + test_automation_medic else "" end)
         + (if (u.action // "") == "report-only" and ((u.file_error // "") != "") then "\n    :warning: could not open fix PR: " + s(u.file_error; "") else "" end);
       # Guard against the schema being violated (e.g. failures/unmapped_operations
       # written as an object or string instead of an array) — arr() coerces

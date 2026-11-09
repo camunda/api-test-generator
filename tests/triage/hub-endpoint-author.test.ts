@@ -120,6 +120,15 @@ describe('hub-endpoint-author.sh', () => {
     expect(run('get;whoami', dir, map)).toBe('');
   });
 
+  it('rejects an empty operationId instead of resolving an unrelated owner', () => {
+    // Concern-2 lock-in: a missing/empty op must never fall through to the first
+    // operationId in the spec. The resolver treats a missing op as a usage error
+    // (exit 2) before any blame or owner lookup, so it can never silently select
+    // an unrelated endpoint owner — it throws rather than returning 'octocat'.
+    const { dir, sha } = makeHubRepo([{ file: 'files.yaml', op: 'getFile' }]);
+    expect(() => run('', dir, { [sha.getFile]: 'octocat' })).toThrow();
+  });
+
   it('returns nothing when the spec directory is absent', () => {
     const dir = mkdtempSync(join(tmpdir(), 'hub-nospec-'));
     execFileSync('git', ['-C', dir, 'init', '-q'], { stdio: 'pipe' });
