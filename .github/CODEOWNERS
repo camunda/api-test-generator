@@ -11,10 +11,15 @@
 /configs/camunda-hub/                               @camunda/hub @camunda/test-automation-team
 /docs/hub-*.md                                      @camunda/hub @camunda/test-automation-team
 /docs/how-it-works.md                               @camunda/hub @camunda/test-automation-team
-# Every composite action here serves the Hub suite (clone/token/wait/summary) or its
-# Slack alerts; none is used by the OCA workflows. A future OCA-only action should add
-# its own more-specific override below.
-/.github/actions/                                   @camunda/hub @camunda/test-automation-team
+# The Hub suite's own composite actions (clone the camunda-hub sibling, mint its clone
+# token, wait for Hub, summarise the Hub run) are Hub-facing. slack-token and
+# fail-if-slack-failed are deliberately NOT co-owned here: they mint the Slack token and
+# guard the Slack alert for the OCA leg of spec-bump-check too, so they are shared and
+# stay on the test-automation default.
+/.github/actions/clone-hub-sibling/                 @camunda/hub @camunda/test-automation-team
+/.github/actions/hub-clone-token/                   @camunda/hub @camunda/test-automation-team
+/.github/actions/hub-run-summary/                   @camunda/hub @camunda/test-automation-team
+/.github/actions/wait-for-hub/                      @camunda/hub @camunda/test-automation-team
 /.github/scripts/hub-*                              @camunda/hub @camunda/test-automation-team
 /.github/scripts/request-hub-author-review.sh       @camunda/hub @camunda/test-automation-team
 /.github/scripts/spec-bump-open-pr.sh               @camunda/hub @camunda/test-automation-team
