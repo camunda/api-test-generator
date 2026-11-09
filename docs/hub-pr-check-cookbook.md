@@ -30,7 +30,7 @@ does not yet understand a new endpoint, or that the test run itself had a proble
 - PRs that target a `self-managed/*` branch;
 - PRs that change **only** frontend, e2e, docs, `.claude` or `.agents` files. Such a PR cannot affect the API. If it changes even one file elsewhere (backend, the API spec), the check runs.
 
-**When it comments on your PR.** On almost every red run it leaves a comment that **@-tags you** with the verdict — a PR-check failure is yours to look at on your own PR, so **no Slack message is posted when you can be tagged**. The wording follows the verdict: a **likely regression in Hub** says the fix is in your own Hub code; a **generator/coverage gap** says api-test-generator needs a follow-up (which lands after your PR merges and the pin is bumped — the check never blocks merging); an **infra / flaky** result is a heads-up that it looks unrelated to your change, so no action is needed unless it keeps happening; a **could-not-confirm** or **Hub-did-not-start** result is a heads-up to **open the run and check before merging**, because your change could be the cause (a change that stops Hub booting lands here too). Every failing push **posts a fresh comment** (removing the previous one), so you are notified each time — a silent edit would send no notification and could be missed. When a later push goes green, the comment is marked as resolved. **Two cases skip the comment and go to Slack instead:** a **setup-step failure before the tests ran** (`presuite`) — shared pipeline, not your change — pings `test-automation-medic`; and a **bot PR with no author to tag** (e.g. a Renovate dependency bump) pings `hub-medic` (the comment still posts there, without a mention). A pass says nothing.
+**When it comments on your PR.** On almost every red run it leaves a comment that **@-tags you** with the verdict — a PR-check failure is yours to look at on your own PR, so **no Slack message is posted when you can be tagged**. The wording follows the verdict: a **likely regression in Hub** says the fix is in your own Hub code; a **generator/coverage gap** says api-test-generator needs a follow-up (which lands after your PR merges and the pin is bumped — the check never blocks merging); an **infra / flaky** result is a heads-up that it looks unrelated to your change, so no action is needed unless it keeps happening; a **could-not-confirm** or **Hub-did-not-start** result is a heads-up to **open the run and check before merging**, because your change could be the cause (a change that stops Hub booting lands here too). Every failing push **posts a fresh comment** (removing the previous one), so you are notified each time — a silent edit would send no notification and could be missed. When a later push goes green, the comment is marked as resolved. A **bot PR** (e.g. a Renovate dependency bump) has no one to @-tag, so the comment posts without a mention — and it is still **comment-only, no Slack**: a Renovate PR's dependency maintainer looks at it anyway (2026-10-28 handover). **Two cases go to Slack instead of (or as well as) the comment:** a **setup-step failure before the tests ran** (`presuite`) — shared pipeline, not your change — gets no comment and pings `test-automation-medic`; and, as a last-resort fallback, a run whose **verdict comment could not be posted at all** (no status token, or the App lacks comment-write) pings `hub-medic`, so a failure is never fully silent. A pass says nothing.
 
 **Does it open a fix PR?** No. The check only reads and reports, and opens issues: `Generator gap on camunda-hub#N` (assigned
 to you when your spec change caused it) and `[hub-pr-check] Coverage gap on camunda-hub#N` when an endpoint has no generated
@@ -39,7 +39,7 @@ nightly triage agent when the fix is small and safe.
 
 **How long it takes.** The check starts after Hub's image for your PR is built, and a run usually takes about 5 minutes. The status and the Slack alert appear when it finishes, not when it starts. The run, its result and its reports are on the [hub-pr-check](https://github.com/camunda/api-test-generator/actions/workflows/hub-pr-check.yml) page.
 
-**If it is red, read the verdict line in the PR comment (or, for a bot PR, the Slack alert; or the run summary). It says which case you are in:**
+**If it is red, read the verdict line in the PR comment (for a bot PR it posts without a mention; or read the run summary). It says which case you are in:**
 
 | The verdict says | Whose problem | What to do |
 |---|---|---|
@@ -51,7 +51,7 @@ nightly triage agent when the fix is small and safe.
 | "Could not confirm" | Unknown | Open the failing test in the run's report (see [Finding the cause of a red check](#finding-the-cause-of-a-red-check)) |
 | Every test of **one new endpoint** fails with 404, and you added it behind a feature flag | Nobody's bug: the test Hub is not started with your flag on | Add the flag to `docker/docker-compose.hub.yml` **in the api-test-generator repo** (a PR there, then re-run the check), or suppress the endpoint with a reason and an issue. Details under "Common failure patterns" |
 
-Still stuck? Ask in `#ask-qa` (tag `@test-automation-medic`) and include the run link. The PR comment (and, for a bot PR, the Slack alert) carries the links you need.
+Still stuck? Ask in `#ask-qa` (tag `@test-automation-medic`) and include the run link. The PR comment carries the links you need.
 
 ## Adding or changing an endpoint in Hub: do you need a generator PR?
 
@@ -180,8 +180,8 @@ Do not call `npx playwright` directly: it skips the `POS_FIXTURE_*` settings tha
 - *Green despite a coverage gap:* intentional. A missing test is not a failing test, and the fix is in the generator, not
   your Hub PR. The gap stays visible in the status description, the `Coverage gap` issue and Slack (yellow). The repo-wide
   view is the weekly report: [hub-response-coverage-report.md](hub-response-coverage-report.md).
-- **A Slack alert at all:** Slack now fires only for a PR with **no author to tag** (a bot PR, e.g. a Renovate dependency bump). A PR with an author gets the sticky comment instead. When Slack does fire and the PR fails the same way again (same failing tests), its message is edited in place and nobody is pinged again — a new message is posted only when the failure changes.
-- **The classifier said `unknown`:** it is told to prefer that over guessing `product`, because for a bot PR (the only one that still reaches Slack) `product` at high confidence pages hub-medic.
+- **A Slack alert at all:** Slack now fires only for a **presuite** setup failure (→ `test-automation-medic`) or when the verdict **comment could not be posted at all** (→ `hub-medic`, a last-resort fallback). Every ordinary failing PR — including a **bot PR** whose comment posts without a mention — is comment-only, no Slack. When Slack does fire and the PR fails the same way again (same failing tests), its message is edited in place and nobody is pinged again — a new message is posted only when the failure changes.
+- **The classifier said `unknown`:** it is told to prefer that over guessing `product`, because the verdict drives the wording of the comment the author reads — a false "likely regression in your Hub code" is worse than an honest "could not confirm, open the run before merging".
 
 ## Keeping track of pending generator fixes
 

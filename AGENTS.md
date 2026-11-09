@@ -773,17 +773,19 @@ test-automation's responsibility, not the PR author's, so it gets **no comment**
 stays in Slack pinging `test-automation-medic`. (A `startup` failure still gets a
 comment — a bad PR image is the author's to look at.)
 
-Slack otherwise fires only as a **fallback for a PR with no author to @-tag**. The
-Slack-chain steps' `if:` gates fire when `pr_author == ''`, **or** the failure is
-presuite (`suites_ran != 'true' && hub_start_failed != 'true'`), **or** the verdict
-comment did not post (`steps.verdict-comment.outcome != 'success'` — no status token,
-or the App lacks comment-write, so the author was not reached on the PR). The ping is routed
-to match: a presuite failure pings `test-automation-medic`; every other (bot-PR)
-case pings `hub-medic` — it is a camunda-hub PR nobody can be @-tagged on, so the
-Hub on-call owns it. A bot (e.g. `renovate[bot]`, whose `[bot]` login fails the
-charset check in `validate`) is the usual no-author case; its comment still posts
-without a mention. Whenever there IS an author and the failure is not presuite, the
-comment covers it and no Slack is posted. The gates are guarded by
+Slack otherwise fires only in two cases, **neither of which is an ordinary PR failure**.
+The Slack-chain steps' `if:` gates fire when the failure is presuite
+(`suites_ran != 'true' && hub_start_failed != 'true'`), **or** the verdict comment did not
+post (`steps.verdict-comment.outcome != 'success'` — no status token, or the App lacks
+comment-write, so the author was not reached on the PR at all). The ping is routed to match:
+a presuite failure pings `test-automation-medic`; the undelivered-comment case pings
+`hub-medic`. A **bot PR** (e.g. `renovate[bot]`, whose `[bot]` login fails the charset check
+in `validate`) has no author to @-tag, but it is **comment-only** like every other PR — the
+comment posts without a mention and **no Slack is sent** — because the 2026-10-28 handover
+(Jan + Wolfgang) was explicit that a Renovate PR's dependency maintainer / reviewer looks at
+it anyway, so an in-flight PR failure must never page a medic (`pr_author == ''` is therefore
+**not** a Slack trigger). Whenever the verdict comment posts, no Slack is sent, author or not.
+The gates are guarded by
 `tests/request-validation/slack-failure-marks-run-failed.test.ts`. The comment
 needs Issues or Pull requests: write for the qa-processes App on camunda-hub;
 without it the step only warns. The tracking issues are unchanged — the
