@@ -21,7 +21,7 @@ There are four things. The weekly report and the agent PRs need you every week; 
 
 | What | Where you see it | When | Is it yours? | Guide |
 |---|---|---|---|---|
-| **PR check** | A status on your camunda-hub pull request, plus — on almost every red run — a **comment that @-tags you** with the verdict (no Slack). Slack (`#camunda-hub-pr-e2e-results`) is the fallback for a bot PR with nobody to tag (→ `hub-medic`) and for a setup-step failure before the tests ran (→ `test-automation-medic`) | Every Hub PR, except drafts, forks, PRs into `self-managed/*` and changes that cannot affect the API (details in the PR check guide) | Only when red. The comment says whose problem it is. The check never blocks merging | [PR check guide](hub-pr-check-cookbook.md) |
+| **PR check** | A status on your camunda-hub pull request, plus — on almost every red run — a **comment that @-tags you** with the verdict (no Slack). A bot PR (e.g. Renovate) with nobody to tag gets the comment without a mention and **no Slack** — its dependency maintainer looks at it anyway. Slack (`#camunda-hub-pr-e2e-results`) fires only for a setup-step failure before the tests ran (→ `test-automation-medic`) or when the verdict comment could not be posted at all (→ `hub-medic`) | Every Hub PR, except drafts, forks, PRs into `self-managed/*` and changes that cannot affect the API (details in the PR check guide) | Only when red. The comment says whose problem it is. The check never blocks merging | [PR check guide](hub-pr-check-cookbook.md) |
 | **Nightly run** | Posts in `#top-hub-nightly-test-results` | Every night, 02:00 UTC | Only when something failed. A normal night has 0 failures | [Nightly guide](hub-nightly-cookbook.md) |
 | **Weekly coverage report** | A post in the same channel | Monday, 05:00 UTC | Yes: it lists the API cases still not tested | [Coverage report guide](hub-response-coverage-report.md) |
 | **Coverage-fix PRs** | Small draft pull requests in this repo, opened by an AI agent | After the Monday report | Yes: you review them. A person always decides to merge | [Coverage report guide](hub-response-coverage-report.md) |
@@ -98,9 +98,11 @@ is conditional:
   line with **no ping**. The one exception is a failure the agent **could not classify** (infra + low
   confidence): it has no PR, issue, or author to route to, so it pings `hub-medic` for a human to decide.
 - **A failing camunda-hub PR check** is not a page by default. A normal failing run posts **no Slack**; it
-  leaves a comment on the camunda-hub PR that @-tags its author, whose change it is. `hub-medic` is pinged
-  only as a **fallback** — a bot PR with no author to tag, or a run whose verdict comment could not be
-  posted. `test-automation-medic` alone is pinged when a PR check fails *before* the tests start (a setup
+  leaves a comment on the camunda-hub PR that @-tags its author, whose change it is. A **bot PR** (e.g.
+  Renovate) with no author to tag gets the same comment without a mention and still **no Slack** — the
+  dependency maintainer / reviewer looks at it anyway (2026-10-28 handover). `hub-medic` is pinged only as a
+  **fallback** when the verdict comment could not be posted at all, so the author was never reached.
+  `test-automation-medic` alone is pinged when a PR check fails *before* the tests start (a setup
   problem such as a clone token or registry login — shared pipeline, not Hub-owned). A failure with no test
   evidence is posted without a ping; if the same PR fails 3 times in a day, the escalation pings
   `test-automation-medic` alone for presuite, or both groups for other no-evidence failures.

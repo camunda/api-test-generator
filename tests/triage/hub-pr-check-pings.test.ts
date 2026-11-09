@@ -59,7 +59,7 @@ describe('hub-pr-check Slack pings', () => {
     expect(elseBranch).not.toContain(TA);
   });
 
-  it('pings hub-medic for every other (bot-PR fallback) category', () => {
+  it('pings hub-medic for the non-presuite (undelivered-comment) fallback', () => {
     const [, elseBranch] = pingOverride().split('else');
     expect(elseBranch).toContain(HUB);
   });

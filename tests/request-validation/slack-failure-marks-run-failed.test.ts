@@ -237,12 +237,15 @@ describe('the verdict comment on a failing camunda-hub PR', () => {
   });
 });
 
-describe('hub-pr-check: a failing PR is comment-only, except bot PRs and presuite failures', () => {
-  // 2026-10-28 handover decision: a PR-check failure is the PR author's to look at on their own PR,
-  // so the sticky verdict comment @-tags the author and the Slack chain is suppressed whenever there
-  // is an author to reach. Slack fires in exactly two cases: pr_author is empty — a bot (renovate[bot])
-  // or a lookup failure — where nobody can be @-tagged (fallback → hub-medic); OR a presuite failure
-  // (setup step before the suites ran), which is automation's and gets no comment (→ test-automation-medic).
+describe('hub-pr-check: a failing PR is comment-only, including bot/Renovate PRs', () => {
+  // 2026-10-28 handover decision (Jan + Wolfgang): a PR-check failure is the PR author's to look at on
+  // their own PR, so the sticky verdict comment @-tags the author and the Slack chain is suppressed. A
+  // bot PR (renovate[bot], no author to @-tag) is comment-only too — "for Renovate PRs you have the
+  // dependency maintainer who would look into that anyway" — so an empty pr_author must NOT page a medic.
+  // Slack fires in exactly two cases: a presuite failure (setup step before the suites ran, which is
+  // automation's and gets no comment → test-automation-medic), OR the verdict comment did not deliver
+  // (the author was not reached on the PR at all → hub-medic fallback). A bot PR whose comment posts
+  // fine reaches neither, so it never pings.
   const NO_AUTHOR = "needs.validate.outputs.pr_author == ''";
   const PRESUITE =
     "needs.run.outputs.suites_ran != 'true' && needs.run.outputs.hub_start_failed != 'true'";
@@ -265,17 +268,20 @@ describe('hub-pr-check: a failing PR is comment-only, except bot PRs and presuit
     expect(comment?.id).toBe('verdict-comment');
   });
 
-  it('fires every Slack step for a bot PR, a presuite failure, or an undelivered comment', () => {
+  it('fires every Slack step for a presuite failure or an undelivered comment — never for a bot PR alone', () => {
     for (const s of slackSteps) {
       const gate = (s.if ?? '').replace(/\s+/g, ' ');
-      expect(gate, `Slack step "${s.name}" must fire when pr_author is empty`).toContain(NO_AUTHOR);
-      expect(gate, `Slack step "${s.name}" must also fire for a presuite failure`).toContain(
-        PRESUITE,
-      );
+      expect(gate, `Slack step "${s.name}" must fire for a presuite failure`).toContain(PRESUITE);
       expect(
         gate,
         `Slack step "${s.name}" must fall back when the verdict comment did not deliver`,
       ).toContain(COMMENT_FAILED);
+      // The fix: a bot/Renovate PR whose comment posts is comment-only, so an empty pr_author must not
+      // be a Slack trigger on its own (it would page hub-medic for exactly the noise the handover cut).
+      expect(
+        gate,
+        `Slack step "${s.name}" must NOT page for a bot PR whose comment posted (comment-only)`,
+      ).not.toContain(NO_AUTHOR);
     }
   });
 });

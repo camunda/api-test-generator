@@ -1094,10 +1094,12 @@ jobs:
           echo "Reported '${state}' (${description}) on camunda-hub@${SHA:0:12}"
 
       # Every failing (non-draft) camunda-hub PR gets one sticky comment on the PR itself, @-tagging
-      # the author, instead of a Slack alert to hub-medic (the Slack chain below now fires only when
-      # there is NO author to tag — a bot such as renovate[bot]). This is the handover decision from
-      # the 2026-10-28 meeting: a PR-check failure is the PR author's to look at on their own PR, not
-      # the medic's to be paged over — the medic owns the nightly, not an in-flight PR. The comment's
+      # the author, instead of a Slack alert to hub-medic. A bot PR (e.g. renovate[bot]) has no author
+      # to @-tag, but it is comment-only too — the comment posts without a mention and the Slack chain
+      # below does NOT fire for it. This is the handover decision from the 2026-10-28 meeting: a PR-check
+      # failure is the PR author's to look at on their own PR, not the medic's to be paged over — the
+      # medic owns the nightly, not an in-flight PR, and a Renovate PR's dependency maintainer looks at
+      # it anyway (Jan + Wolfgang). The comment's
       # wording follows the classify verdict: a real regression is "yours" to fix here; a
       # test-generator gap is on the api-test-generator side (follow-up lands AFTER this PR merges and
       # the pin is bumped — merge order: Hub PR -> pin bump -> generator PR; the check does not block
@@ -1341,24 +1343,26 @@ jobs:
       # excludes drafts (#519) — a WIP push isn't something to page a human
       # over; the commit status (unconditional, see "Report status..."
       # above) still gives the author passive pass/fail feedback.
-      # Most failing PRs are comment-only now (the 2026-10-28 handover decision): the sticky comment
-      # above @-tags the author on their own PR for any category it covers, so Slack is suppressed
-      # when there is an author to reach. This alert fires in exactly three cases:
-      #   - pr_author is empty — a bot (e.g. renovate[bot], whose "[bot]" login fails the charset
-      #     check in validate) or any lookup failure — where there is nobody to @-tag; the comment
-      #     body still posts without a mention, and the alert pings hub-medic (routed below);
+      # Every failing PR is comment-only now (the 2026-10-28 handover decision): the sticky comment
+      # above @-tags the author on their own PR for any category it covers. A bot PR (e.g. renovate[bot],
+      # whose "[bot]" login fails the charset check in validate) has no one to @-tag, but the comment
+      # still posts without a mention and that is enough — a Renovate PR's dependency maintainer /
+      # reviewer looks at it anyway, so a bot PR failure does NOT page a medic (Jan + Wolfgang,
+      # 2026-10-28: "for Renovate PRs you have the dependency maintainer who would look into that
+      # anyway"). This alert fires in exactly two cases:
       #   - a presuite failure (setup step before the suites ran) — shared-pipeline, test-automation's
       #     responsibility, which gets NO comment and pings test-automation-medic here instead;
       #   - the verdict-comment step did not succeed (steps.verdict-comment.outcome != 'success') — it
       #     was skipped (no status token) or its POST was rejected (the App lacks comment-write), so the
-      #     author was NOT reached on the PR. Slack is the fallback so the failure is never fully silent.
+      #     author was NOT reached on the PR at all. Slack is the fallback so the failure is never fully
+      #     silent, pinging hub-medic (routed below).
       # The nightly, not this PR check, is what pages the medic for failures on main.
       - name: Build Slack alert text
         id: msg
         if: >-
           always() && needs.run.result == 'failure' &&
           needs.validate.outputs.is_draft != 'true' &&
-          (needs.validate.outputs.pr_author == '' || (needs.run.outputs.suites_ran != 'true' && needs.run.outputs.hub_start_failed != 'true') || steps.verdict-comment.outcome != 'success')
+          ((needs.run.outputs.suites_ran != 'true' && needs.run.outputs.hub_start_failed != 'true') || steps.verdict-comment.outcome != 'success')
         env:
           # Validated (digits-only) by the `validate` job — empty if the
           # dispatch payload's pr_number was missing/malformed.
@@ -1460,13 +1464,15 @@ jobs:
           esac
 
           # This Slack alert fires only in two cases (see the step's `if:`): a presuite failure
-          # (any author) or a bot PR with no author to @-tag. The per-category `case` above sets only
-          # the verdict text; the ping is the single value routed here, by the two cases that reach Slack:
+          # (any author) or a verdict comment that did not deliver. The per-category `case` above sets
+          # only the verdict text; the ping is the single value routed here, by the two cases that reach
+          # Slack:
           #   - presuite -> test-automation-medic: shared-pipeline setup (clone token, registry login)
           #     the Hub team cannot fix. (presuite uses streak mode below, so the escalation, not this
           #     line, is what actually pings — but keep them consistent.)
-          #   - every other case is the bot-PR fallback (a Renovate dep bump and the like) -> hub-medic:
-          #     it is a camunda-hub PR nobody can be @-tagged on, so the Hub team's on-call owns it.
+          #   - every other case is the undelivered-comment fallback -> hub-medic: the author could not be
+          #     reached on the PR at all, so the Hub team's on-call owns it. (A bot/Renovate PR whose
+          #     comment posts fine never reaches Slack — comment-only, per the 2026-10-28 handover.)
           if [ "$CATEGORY" = "presuite" ]; then
             ping="${ta_medic}"
           else
@@ -1588,7 +1594,7 @@ jobs:
         if: >-
           always() && needs.run.result == 'failure' &&
           needs.validate.outputs.is_draft != 'true' &&
-          (needs.validate.outputs.pr_author == '' || (needs.run.outputs.suites_ran != 'true' && needs.run.outputs.hub_start_failed != 'true') || steps.verdict-comment.outcome != 'success')
+          ((needs.run.outputs.suites_ran != 'true' && needs.run.outputs.hub_start_failed != 'true') || steps.verdict-comment.outcome != 'success')
         continue-on-error: true
         uses: ./.github/actions/slack-token
         with:
@@ -1602,7 +1608,7 @@ jobs:
           always() && needs.run.result == 'failure' &&
           needs.validate.outputs.is_draft != 'true' &&
           steps.slack-secrets.outputs.SLACK_BOT_TOKEN != '' &&
-          (needs.validate.outputs.pr_author == '' || (needs.run.outputs.suites_ran != 'true' && needs.run.outputs.hub_start_failed != 'true') || steps.verdict-comment.outcome != 'success')
+          ((needs.run.outputs.suites_ran != 'true' && needs.run.outputs.hub_start_failed != 'true') || steps.verdict-comment.outcome != 'success')
         continue-on-error: true
         uses: actions/setup-node@v6
         with:
@@ -1619,7 +1625,7 @@ jobs:
           always() && needs.run.result == 'failure' &&
           needs.validate.outputs.is_draft != 'true' &&
           steps.slack-secrets.outputs.SLACK_BOT_TOKEN != '' &&
-          (needs.validate.outputs.pr_author == '' || (needs.run.outputs.suites_ran != 'true' && needs.run.outputs.hub_start_failed != 'true') || steps.verdict-comment.outcome != 'success')
+          ((needs.run.outputs.suites_ran != 'true' && needs.run.outputs.hub_start_failed != 'true') || steps.verdict-comment.outcome != 'success')
         continue-on-error: true
         env:
           SLACK_TOKEN: ${{ steps.slack-secrets.outputs.SLACK_BOT_TOKEN }}
