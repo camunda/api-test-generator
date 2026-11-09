@@ -194,6 +194,13 @@ function runIssueScript(
     join(bin, 'gh'),
     `#!/usr/bin/env bash
 echo "gh $*" >> "$GH_LOG"
+# GH_FAIL: '|'-separated substrings; a gh call whose args contain one exits 1 (lets a test
+# simulate a rejected assignment or a failed comment). Empty/unset => every call succeeds.
+if [ -n "$GH_FAIL" ]; then
+  _oifs=$IFS; IFS='|'
+  for pat in $GH_FAIL; do case "$*" in *"$pat"*) IFS=$_oifs; exit 1 ;; esac; done
+  IFS=$_oifs
+fi
 if [ "$1 $2" = "issue list" ]; then
   expr=""; prev=""
   for a in "$@"; do [ "$prev" = "--jq" ] && expr="$a"; prev="$a"; done
@@ -364,6 +371,27 @@ describe('per-endpoint issue lifecycle (stub gh)', () => {
     expect(r.calls.some((c) => c.includes('--add-assignee'))).toBe(false);
     const mention = r.calls.find((c) => c.startsWith('gh issue comment 101 '));
     expect(mention).toContain('@camunda/hub');
+  });
+
+  it('falls back to the team mention when a resolved author cannot be assigned in this repo', () => {
+    // The common real case: the endpoint author resolves, but is not an assignable collaborator on this
+    // repo, so `gh issue edit --add-assignee` is rejected — the script must fall through to the @camunda/hub mention.
+    const r = runIssueScript('hub-coverage-endpoint-issues.sh', endpointFiles('newOp'), [], {
+      ...authorStub('alice'),
+      GH_FAIL: '--add-assignee',
+    });
+    expect(r.calls).toContain('gh issue edit 101 --add-assignee alice'); // attempted
+    const mention = r.calls.find((c) => c.startsWith('gh issue comment 101 '));
+    expect(mention).toContain('@camunda/hub'); // fell back to the team
+  });
+
+  it('keeps processing later endpoints when an owner mention fails', () => {
+    // A failed @camunda/hub mention on one endpoint must not abort the run — the next endpoint still gets its issue.
+    const r = runIssueScript('hub-coverage-endpoint-issues.sh', endpointFiles('opA', 'opB'), [], {
+      ...NO_HUB,
+      GH_FAIL: 'issue comment',
+    });
+    expect(r.calls.filter((c) => c.startsWith('gh issue create')).length).toBe(2);
   });
 
   it('omits an endpoint from endpoint-issues.json when its issue opens on a later run (cap reached)', () => {
