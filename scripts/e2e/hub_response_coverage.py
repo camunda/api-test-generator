@@ -42,6 +42,29 @@ BUCKETS = ('2xx', '400', '401', '403', '404', '409')
 # 500 is documented everywhere and cannot be provoked on purpose.
 IGNORED_CODES = {500}
 
+# Per-config report labels. The camunda-hub values reproduce the original literal strings so the
+# default config's output is byte-identical; a config without an entry gets a generic title and no
+# guide link. Only the human-facing matrix/slack text uses these; summary.json is unaffected.
+LABELS = {
+    'camunda-hub': {
+        'reportTitle': 'Hub API test coverage',
+        'refPrefix': 'camunda-hub',
+        'guideUrl': GUIDE_URL,
+    },
+    'camunda-oca': {
+        'reportTitle': 'Orchestration Cluster API test coverage',
+        'refPrefix': 'camunda-oca',
+        'guideUrl': None,
+    },
+}
+
+
+def labels():
+    return LABELS.get(
+        CONFIG,
+        {'reportTitle': f'{CONFIG} API test coverage', 'refPrefix': CONFIG, 'guideUrl': None},
+    )
+
 
 def scoped_kind_label(k):
     """An excludeOperations scenarioKinds entry is a kind name or a {kind, targets|constraintKinds} object."""
@@ -351,10 +374,12 @@ def build(args):
     if not any(pos_asserted.values()):
         fail('found no asserted statuses in the positive suite - generated test format changed?')
 
-    suppressed = set(pos_cov['explicitlySuppressedOpIds'])
+    suppressed = set(pos_cov.get('explicitlySuppressedOpIds', []))
     excluded = {e['operationId'] for e in rv_cfg['excludeOperations'] if not e.get('scenarioKinds')}
     tracked = suppressed | excluded  # known and tracked elsewhere; used only to annotate lists
-    supp_cfg = json.load(open(os.path.join(ROOT, 'configs', CONFIG, 'positive-suppress.json')))
+    # positive-suppress.json is a camunda-hub-only file; a config without it suppresses nothing.
+    supp_path = os.path.join(ROOT, 'configs', CONFIG, 'positive-suppress.json')
+    supp_cfg = json.load(open(supp_path)) if os.path.exists(supp_path) else {'suppress': []}
     tracked_urls = collections.defaultdict(list)
     for e in supp_cfg.get('suppress', []) + [x for x in rv_cfg['excludeOperations'] if not x.get('scenarioKinds')]:
         url = (e.get('knownIssue') or {}).get('url')
@@ -541,14 +566,14 @@ def slack(s, prev, args):
     # upper bound). Then the actionable gaps grouped by code and by area. Dimensions outside the main
     # question (lifecycle, optional fields, response-shape) get one roll-up line so they stay visible
     # without dominating. Numbers come straight from the summary; nothing new is computed here.
-    ref = f'camunda-hub@{args.spec_ref[:7]}' if args.spec_ref else 'spec ' + s['specHash'].replace('sha256:', '')[:7]
+    ref = f'{labels()["refPrefix"]}@{args.spec_ref[:7]}' if args.spec_ref else 'spec ' + s['specHash'].replace('sha256:', '')[:7]
     n = s['operations']
     pf = prev['fullyAsserted'] if prev else None
     kind_ok, kind_total = s['requestChecks']
     kind_before = prev['requestChecks'][0] if prev and 'requestChecks' in prev else None
 
     lines = [
-        f':bar_chart: *Hub API test coverage* (weekly) · {ref} · {n} endpoints',
+        f':bar_chart: *{labels()["reportTitle"]}* (weekly) · {ref} · {n} endpoints',
         '_Two angles: does each endpoint test every status code it can return, '
         'and does it reject every kind of bad request?_',
         f'*{s["fullyAsserted"]} of {n} endpoints are tested for every status code they can return*'
@@ -568,7 +593,7 @@ def slack(s, prev, args):
     if mention and regressed(s, prev):
         lines.insert(
             0,
-            f':rotating_light: {mention} — Hub API test coverage dropped since last week. Details below.')
+            f':rotating_light: {mention} — {labels()["reportTitle"]} dropped since last week. Details below.')
     code_bits = [f'{b} ({s["codeGaps"][b]})' for b in BUCKETS if s['codeGaps'].get(b)]
     lines.append(
         '• Status codes not tested yet: ' + (' · '.join(code_bits) if code_bits else 'none :tada:'))
@@ -602,7 +627,9 @@ def slack(s, prev, args):
         links.append(f'<{args.run_url}|Full table>')
     if args.tracking_url:
         links.append(f'<{args.tracking_url}|Tracking issue>')
-    links.append(f'<{GUIDE_URL}|📖 Guide>')
+    guide_url = labels()['guideUrl']
+    if guide_url:
+        links.append(f'<{guide_url}|📖 Guide>')
     lines += ['', ' · '.join(links)]
     return '\n'.join(lines) + '\n'
 
@@ -613,7 +640,7 @@ MARK = {'ok': '✅', 'gap': '❌', 'hold': '⏸️', 'na': 'n/a'}
 def matrix(s, rows):
     c = s['codes']
     out = [
-        f'## Hub API test coverage ({s["operations"]} endpoints)', '',
+        f'## {labels()["reportTitle"]} ({s["operations"]} endpoints)', '',
         f'**{s["fullyAsserted"]} of {s["operations"]} endpoints** have a test for every response the API spec lists '
         '(2xx/400/401/403/404/409; a documented 500 is not checked).', '',
         'Responses tested, out of those the spec lists: '
@@ -773,7 +800,10 @@ def history_markdown(path, last=8):
 
 
 def main():
+    global CONFIG
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument('--config', default=CONFIG,
+                    help='generator config whose suites to measure (default: camunda-hub)')
     ap.add_argument('--out', required=True)
     ap.add_argument('--previous')
     ap.add_argument('--previous-history', help='history.csv from the previous scheduled report')
@@ -784,6 +814,7 @@ def main():
                     help='Slack mention (e.g. a <!subteam^ID|name> handle) added to the message only '
                          'when coverage regressed since the previous report. Empty = never mention.')
     args = ap.parse_args()
+    CONFIG = args.config
 
     summary, rows = build(args)
     prev = None
