@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import {
   chmodSync,
   existsSync,
@@ -213,7 +213,10 @@ fi
   );
   chmodSync(join(bin, 'gh'), 0o755);
   writeFileSync(join(dir, 'log'), '');
-  execFileSync('bash', [join(scriptsDir, script)], {
+  // spawnSync (not execFileSync) so stderr is captured on success too — the lookup-cap warning is emitted
+  // on a run that still exits 0. On a non-zero exit, throw an error carrying stderr so stderrOf(err) works.
+  const res = spawnSync('bash', [join(scriptsDir, script)], {
+    encoding: 'utf8',
     env: {
       ...process.env,
       PATH: `${bin}:${process.env.PATH}`,
@@ -226,6 +229,12 @@ fi
       ...env,
     },
   });
+  if (res.error) throw res.error;
+  if (res.status !== 0) {
+    throw Object.assign(new Error(`hub-coverage script exited ${res.status}`), {
+      stderr: res.stderr,
+    });
+  }
   const read = (f: string) =>
     existsSync(join(report, f)) ? readFileSync(join(report, f), 'utf8') : '';
   return {
@@ -237,6 +246,7 @@ fi
     endpointIndex: read('endpoint-index.md').trim().split('\n').filter(Boolean),
     endpointIssues: ((raw) => (raw ? JSON.parse(raw) : undefined))(read('endpoint-issues.json')),
     rendered: read('issue.rendered.md'),
+    stderr: res.stderr,
   };
 }
 
@@ -500,6 +510,21 @@ describe('per-endpoint issue lifecycle (stub gh)', () => {
       .map((c) => c.split(' ')[3])
       .sort();
     expect(closed).toEqual(['6', '9']);
+  });
+
+  it('warns when the coverage-issue lookup hits its result cap (truncation could miss issues)', () => {
+    // Force the cap low so the lookup is provably truncated. A truncated lookup can miss an existing issue
+    // (duplicate) and skip its cleanup, so the run must surface a loud warning rather than degrade silently.
+    const r = runIssueScript(
+      'hub-coverage-endpoint-issues.sh',
+      endpointFiles('keptOp'),
+      [
+        { number: 5, title: endpointTitle('keptOp'), state: 'OPEN' },
+        { number: 6, title: endpointTitle('otherOp'), state: 'CLOSED' },
+      ],
+      { ...NO_HUB, COVERAGE_ISSUE_LOOKUP_LIMIT: '1' },
+    );
+    expect(r.stderr).toContain('hit the 1-result cap');
   });
 });
 

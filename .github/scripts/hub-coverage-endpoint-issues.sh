@@ -79,9 +79,16 @@ assign_owner() {
   fi
 }
 
-# Every existing coverage issue (any state), so duplicates resolve to one.
-existing=$(gh issue list --state all --limit 500 --search "in:title \"$prefix\"" \
+# Every existing coverage issue (any state), so duplicates resolve to one. The title search is capped at
+# $lookup_limit (GitHub's search API itself caps at 1000). Today's coverage-issue count is far below this,
+# but a truncated lookup would miss an existing issue — creating a duplicate and skipping its cleanup — so
+# warn loudly rather than degrade silently. (COVERAGE_ISSUE_LOOKUP_LIMIT lets a test force the cap.)
+lookup_limit="${COVERAGE_ISSUE_LOOKUP_LIMIT:-1000}"
+existing=$(gh issue list --state all --limit "$lookup_limit" --search "in:title \"$prefix\"" \
   --json number,title,state)
+if [ "$(jq 'length' <<< "$existing")" -ge "$lookup_limit" ]; then
+  echo "::warning::coverage-issue lookup hit the ${lookup_limit}-result cap; dedup and cleanup may be incomplete — split the search by area or state." >&2
+fi
 new=0
 current=$(mktemp)
 # operationId<TAB>issue-number, one line per endpoint that has an issue this run; folded into
