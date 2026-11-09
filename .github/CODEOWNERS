@@ -11,6 +11,10 @@
 /configs/camunda-hub/                               @camunda/hub @camunda/test-automation-team
 /docs/hub-*.md                                      @camunda/hub @camunda/test-automation-team
 /docs/how-it-works.md                               @camunda/hub @camunda/test-automation-team
+# Every composite action here serves the Hub suite (clone/token/wait/summary) or its
+# Slack alerts; none is used by the OCA workflows. A future OCA-only action should add
+# its own more-specific override below.
+/.github/actions/                                   @camunda/hub @camunda/test-automation-team
 /.github/scripts/hub-*                              @camunda/hub @camunda/test-automation-team
 /.github/scripts/request-hub-author-review.sh       @camunda/hub @camunda/test-automation-team
 /.github/scripts/spec-bump-open-pr.sh               @camunda/hub @camunda/test-automation-team
@@ -26,4 +30,5 @@
 /.github/workflows/triage-camunda-hub-nightly.yml   @camunda/hub @camunda/test-automation-team
 /.github/workflows/spec-bump-check.yml              @camunda/hub @camunda/test-automation-team
 /.github/workflows/_hub-suite-run.yml               @camunda/hub @camunda/test-automation-team
+/.github/workflows/close-stale-nightly-api-fix-prs.yml  @camunda/hub @camunda/test-automation-team
 /resources/workspace-templates/camunda-hub-*/       @camunda/hub @camunda/test-automation-team
