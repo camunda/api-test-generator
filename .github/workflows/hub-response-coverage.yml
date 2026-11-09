@@ -159,24 +159,30 @@ jobs:
             --description 'Owned by the Hub team (auto-added to the Hub board)' \
             --color 0E8A16 --force
 
-      # One issue per API area (the spec's first tag) that has a gap, same rules as the summary issue:
-      # found by exact title in any state, rewritten in place, reopened if the gap returns, closed when
-      # the area is clean. At most MAX_NEW_AREA_ISSUES brand-new issues per run so the first run cannot
-      # flood the repo; the rest follow on later Mondays (the tracking issue lists their endpoints meanwhile).
-      # Runs before the tracking issue, which links to these issues.
-      - name: Open, update or close the per-area issues
+      # One issue per uncovered endpoint, each assigned to whoever added the endpoint (git-blame of the
+      # operation's spec line in the camunda-hub sibling clone; @camunda/hub mention fallback) — the
+      # 2026-10-28 handover decision that every gap should have a DRI. Found by exact title in any state,
+      # rewritten in place, reopened if the gap returns, closed when the endpoint is covered. At most
+      # MAX_NEW_ENDPOINT_ISSUES brand-new issues per run (a flood-guard, set high enough to clear the
+      # current backlog in one run); the summary issue lists any capped endpoints meanwhile. This step
+      # also migrates (closes) the old per-area issues. Runs before the summary issue, which indexes these.
+      # GH_TOKEN (api-test-generator issues) opens/assigns here; HUB_TOKEN (camunda-hub read) is for the
+      # author resolver only.
+      - name: Open, update, assign or close the per-endpoint issues
         if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && !inputs.dry_run)
         env:
           GH_TOKEN: ${{ github.token }}
-          MAX_NEW_AREA_ISSUES: '10'
+          HUB_TOKEN: ${{ steps.hub-clone-token.outputs.token }}
+          HUB_DIR: ../camunda-hub
+          MAX_NEW_ENDPOINT_ISSUES: '40'
           REPORT_DIR: coverage-report
           REPO_URL: ${{ github.server_url }}/${{ github.repository }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: bash .github/scripts/hub-coverage-area-issues.sh
+        run: bash .github/scripts/hub-coverage-endpoint-issues.sh
 
       # Same gate as Slack: a dry run or a test trigger never touches issues. An existing open
       # issue is rewritten in place (never a second one); an empty issue.md means nothing is
-      # missing, so the open issue is closed. It is an index of the area issues above. The issue URL goes
+      # missing, so the open issue is closed. It is an index of the per-endpoint issues above. The issue URL goes
       # into the Slack message.
       - name: Open, update or close the coverage-gap issue
         if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && !inputs.dry_run)
@@ -246,8 +252,8 @@ jobs:
             if [ -s coverage-report/issue-url.txt ]; then
               text="$text"$'\n'"<$(cat coverage-report/issue-url.txt)|Tracking issue>"
             fi
-            if [ -s coverage-report/area-links.txt ]; then
-              text="$text"$'\n'"Area issues: $(paste -sd'\t' coverage-report/area-links.txt | sed 's/\t/ · /g')"
+            if [ -s coverage-report/endpoint-links.txt ]; then
+              text="$text"$'\n'"Endpoint issues: $(paste -sd'\t' coverage-report/endpoint-links.txt | sed 's/\t/ · /g')"
             fi
           else
             text=":warning: *camunda-hub response coverage* could not run this week — see ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"

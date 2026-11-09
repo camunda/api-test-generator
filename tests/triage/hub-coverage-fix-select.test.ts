@@ -8,8 +8,8 @@ import {
   type AgentPr,
   branchKey,
   kebab,
-  parseAreaIssues,
   parseCreateMissing,
+  parseEndpointIssues,
   parseKnown,
   parseOpenFixPrs,
   parsePrs,
@@ -434,23 +434,25 @@ describe('command line', () => {
   });
 });
 
-describe('area issue links', () => {
+describe('endpoint issue links', () => {
   const gaps = [{ operationId: 'removeMember', code: '404' as const }];
 
-  it('attaches the area issue number to a lifecycle candidate', () => {
-    const s = select(['ProjectSnapshot'], rows, [], now, [], [], [], { 'Project Snapshot': 42 });
+  it('attaches the endpoint issue number to a lifecycle candidate (keyed by its create op)', () => {
+    const s = select(['ProjectSnapshot'], rows, [], now, [], [], [], { createProjectSnapshot: 42 });
     expect(s.candidates).toHaveLength(1);
     expect(s.candidates[0].issue).toBe(42);
   });
 
-  it('attaches the area issue number to a status candidate', () => {
-    const s = select([], rows, [], now, [], [], gaps, { Member: 7 });
+  it('attaches the endpoint issue number to a status candidate (keyed by its operationId)', () => {
+    const s = select([], rows, [], now, [], [], gaps, { removeMember: 7 });
     expect(s.candidates).toHaveLength(1);
     expect(s.candidates[0].issue).toBe(7);
   });
 
-  it('leaves the issue off a candidate whose area has no issue this run', () => {
-    const s = select(['ProjectSnapshot', 'Version'], rows, [], now, [], [], [], { Version: 9 });
+  it('leaves the issue off a candidate whose endpoint has no issue this run', () => {
+    const s = select(['ProjectSnapshot', 'Version'], rows, [], now, [], [], [], {
+      createVersion: 9,
+    });
     const snapshot = s.candidates.find((c) => c.resource === 'ProjectSnapshot');
     const version = s.candidates.find((c) => c.resource === 'Version');
     expect(snapshot?.issue).toBeUndefined();
@@ -463,23 +465,23 @@ describe('area issue links', () => {
   });
 });
 
-describe('parseAreaIssues', () => {
-  it('reads a valid area -> issue map', () => {
-    expect(parseAreaIssues({ Version: 9, 'Project Snapshot': 42 })).toEqual({
-      Version: 9,
-      'Project Snapshot': 42,
+describe('parseEndpointIssues', () => {
+  it('reads a valid operationId -> issue map', () => {
+    expect(parseEndpointIssues({ createVersion: 9, getProjectSnapshot: 42 })).toEqual({
+      createVersion: 9,
+      getProjectSnapshot: 42,
     });
   });
 
   it('treats undefined and null as an empty map', () => {
-    expect(parseAreaIssues(undefined)).toEqual({});
-    expect(parseAreaIssues(null)).toEqual({});
+    expect(parseEndpointIssues(undefined)).toEqual({});
+    expect(parseEndpointIssues(null)).toEqual({});
   });
 
   it('rejects a non-object, a non-integer and a non-positive issue number', () => {
-    expect(() => parseAreaIssues([1, 2])).toThrow('not an object');
-    expect(() => parseAreaIssues({ Version: 1.5 })).toThrow('Version');
-    expect(() => parseAreaIssues({ Version: 0 })).toThrow('Version');
-    expect(() => parseAreaIssues({ Version: 'x' })).toThrow('Version');
+    expect(() => parseEndpointIssues([1, 2])).toThrow('not an object');
+    expect(() => parseEndpointIssues({ createVersion: 1.5 })).toThrow('createVersion');
+    expect(() => parseEndpointIssues({ createVersion: 0 })).toThrow('createVersion');
+    expect(() => parseEndpointIssues({ createVersion: 'x' })).toThrow('createVersion');
   });
 });
