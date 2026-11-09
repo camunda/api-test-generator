@@ -439,6 +439,41 @@ describe('per-endpoint issue lifecycle (stub gh)', () => {
     expect(closed).toEqual(['6', '9']);
   });
 
+  it('aborts (closing nothing) when endpoints.json is missing — a broken report is not "no gaps"', () => {
+    // No endpoints.json in the report dir: an upstream crash, not a genuine empty result. Without the
+    // guard the read yields zero endpoints and the cleanup loop closes every open issue as resolved; the
+    // script must abort instead. (A real no-gaps run is a valid `[]`, exercised elsewhere.)
+    let err: unknown;
+    try {
+      runIssueScript(
+        'hub-coverage-endpoint-issues.sh',
+        {},
+        [{ number: 6, title: endpointTitle('fixedOp'), state: 'OPEN' }],
+        NO_HUB,
+      );
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toBeDefined();
+    expect(String((err as { stderr?: Buffer }).stderr ?? '')).toContain('endpoints.json');
+  });
+
+  it('aborts (closing nothing) when endpoints.json is malformed', () => {
+    let err: unknown;
+    try {
+      runIssueScript(
+        'hub-coverage-endpoint-issues.sh',
+        { 'endpoints.json': '{not json' },
+        [{ number: 6, title: endpointTitle('fixedOp'), state: 'OPEN' }],
+        NO_HUB,
+      );
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toBeDefined();
+    expect(String((err as { stderr?: Buffer }).stderr ?? '')).toContain('endpoints.json');
+  });
+
   it('never closes a manual follow-up whose title only contains the prefix mid-string', () => {
     // `issue list --search "in:title [hub-response-coverage]"` is a substring match, so a human
     // follow-up like "Investigate [hub-response-coverage] fixedOp: ... test" comes back in $existing. It

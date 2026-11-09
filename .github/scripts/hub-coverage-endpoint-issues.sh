@@ -41,6 +41,17 @@ resolver="${AUTHOR_RESOLVER:-$(dirname "$0")/hub-endpoint-author.sh}"
 hub_dir="${HUB_DIR:-../camunda-hub}"
 hub_team="${HUB_TEAM:-camunda/hub}"
 
+# A missing or malformed endpoints.json (an upstream report step that crashed, not a real "no gaps"
+# result) would make the loop below read zero endpoints, leaving $current empty — and the cleanup loop
+# would then close EVERY open endpoint issue as resolved. A genuine no-gaps run is a valid empty array
+# `[]`, which still parses and still (correctly) closes them. So require a valid JSON array here and abort
+# otherwise, rather than mistake a broken report for resolved coverage.
+endpoints_json="$REPORT_DIR/endpoints.json"
+if [ ! -s "$endpoints_json" ] || ! jq -e 'type == "array"' "$endpoints_json" >/dev/null 2>&1; then
+  echo "::error::$endpoints_json is missing or not a JSON array; refusing to close issues (a broken report must not be read as 'no coverage gaps')." >&2
+  exit 1
+fi
+
 # Assign issue #$1 (operationId $2) to the endpoint author, or mention the team when none resolves.
 # Called only when the issue is freshly created (a new issue has no assignee). Best-effort — a miss is
 # logged and the run continues. The author is resolved by git-blaming the operation's spec line, which
