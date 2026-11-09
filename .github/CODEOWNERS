@@ -12,6 +12,7 @@
 /docs/hub-*.md                                      @camunda/hub @camunda/test-automation-team
 /docs/how-it-works.md                               @camunda/hub @camunda/test-automation-team
 /.github/scripts/hub-*                              @camunda/hub @camunda/test-automation-team
+/.github/scripts/request-hub-author-review.sh       @camunda/hub @camunda/test-automation-team
 /scripts/triage/hub-*                               @camunda/hub @camunda/test-automation-team
 /scripts/triage/slack-*                             @camunda/hub @camunda/test-automation-team
 /scripts/e2e/hub_*.py                               @camunda/hub @camunda/test-automation-team
