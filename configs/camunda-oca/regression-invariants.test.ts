@@ -18,6 +18,7 @@ import {
 } from '../../path-analyser/src/configResolver.js';
 import { loadGlobalContextSeedsAbox } from '../../path-analyser/src/ontology/loader.js';
 import { loadRequestValidationConfig } from '../../request-validation/src/config.js';
+import { assertResponseCoverageFloors } from '../../tests/support/responseCoverageFloors.js';
 
 /**
  * Bundled-spec invariants — Layer 3 of the layered test strategy (#36).
@@ -10992,4 +10993,13 @@ describeForThisConfig('bundled-spec invariants: capability-gated fields (#404)',
       );
     }
   });
+});
+
+describeForThisConfig('bundled-spec invariants: response coverage', () => {
+  it('response coverage does not regress', () =>
+    assertResponseCoverageFloors(
+      'camunda-oca',
+      join(REPO_ROOT, 'configs/camunda-oca/coverage-floors.json'),
+      REPO_ROOT,
+    ));
 });
