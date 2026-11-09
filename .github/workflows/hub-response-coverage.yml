@@ -165,8 +165,16 @@ jobs:
       # back to the @camunda/hub mention rather than assigning the wrong owner.
       - name: Deepen the camunda-hub checkout for endpoint-author attribution
         if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && !inputs.dry_run)
+        env:
+          HUB_TOKEN: ${{ steps.hub-clone-token.outputs.token }}
         run: |
-          git -C ../camunda-hub fetch --unshallow \
+          # clone-hub-sibling fetched --depth 1 with a command-scoped token rewrite that it does NOT persist
+          # to the repo config, so reuse the same authenticated rewrite here — a plain `fetch` has no
+          # credentials for the private camunda-hub remote and would fail on a fresh runner, leaving the
+          # checkout shallow (the issue step then detects .git/shallow and falls back to the @camunda/hub mention).
+          git -C ../camunda-hub \
+            -c "url.https://x-access-token:${HUB_TOKEN}@github.com/.insteadOf=https://github.com/" \
+            fetch --unshallow origin \
             || echo "::warning::could not unshallow camunda-hub; endpoint issues fall back to @camunda/hub for assignment"
 
       # One issue per uncovered endpoint, each assigned to whoever added the endpoint (git-blame of the
