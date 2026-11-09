@@ -91,7 +91,7 @@ plan against existing `tests/` layout):
 assertResponseCoverageFloors(configName: string, floorsPath: string): void
 ```
 
-It encapsulates, unchanged in behavior:
+It encapsulates, with Hub's **pass/fail outcome preserved exactly**:
 - spawn `python3 scripts/e2e/hub_response_coverage.py --config <configName> --out <tmp>`, assert exit 0;
 - parse `summary.json`, assert it and the floors are records;
 - the **floor-completeness** assertions (buckets must match the report's exactly; every
@@ -101,8 +101,21 @@ It encapsulates, unchanged in behavior:
 - the **zero-test** reconciliation (`zeroTestOperations` entries need a `reason`; actual zero-test ops
   must be listed; listed ops that now have tests must be removed).
 
+**Refinement found in planning (not a verbatim move):** Hub's invariant ends with two *hard-zero*
+assertions — `requestNoTests === []` (every endpoint has a request-validation test) and
+`shapeUnvalidated === []` (every success body is schema-validated). Those hold for Hub but **not** for
+OCA (OCA has 4 and 28 respectively at baseline), so a verbatim move would make the OCA invariant fail on
+day one. The helper instead turns both into **ceiling floors**: `summary.<x>.length <= floor`, where the
+floor is a new integer field in `coverage-floors.json`. **Hub's floor is `0`**, which is pass/fail
+identical to `=== []` (empty ⟺ length 0 ⟺ `<= 0`); only the failure-message wording differs, and only
+when failing. OCA's floors are its baseline counts, so the two gaps ratchet **down** as they close. The
+two new fields: `maxOperationsWithNoRequestTest` and `maxShapeUnvalidated`.
+
 Self-contained (its own `isRecord`/`readRequired`, or imported from a shared util — decided in the
-plan). No behavioral change to any assertion.
+plan). No behavioral change to any Hub assertion's pass/fail.
+
+Also add the two ceiling fields to **Hub's** `configs/camunda-hub/coverage-floors.json`, both `0`
+(preserving today's `=== []` behavior), so both configs' floors files carry the same keys.
 
 ### Part 3 — Hub invariant becomes a thin call
 
@@ -128,8 +141,11 @@ helper's assertions are a move, not a rewrite.
 `assertedByStatus` (the `[0]` of each `codes` pair): `2xx: 233, 400: 172, 401: 160, 403: 6, 404: 33, 409: 0`.
 Single metrics: `fullyAssertedOperations: 25`, `requestChecksCovered: 121`, `optionalFieldsSent: 57`,
 `lifecycleCreateCovered: 10`, `lifecycleRestoreCovered: 0`, `lifecycleEdgeCovered: 0`.
-`requestKindEndpoints` and `requestScenarioTypes`: copied verbatim from the OCA summary (every kind/type
-the OCA suite generates — the invariant fails if any is missing a floor). `zeroTestOperations: []`.
+`requestKindEndpoints`: copied verbatim from the OCA summary (all 27 kinds the OCA suite generates — the
+invariant fails if any is missing a floor). `requestScenarioTypes`: only the **aliased** types (keys in
+`summary.requestScenarioTypes` not also present in `requestKindEndpoints`) — for OCA that is just
+`{ "body-top-type-mismatch": 121 }`, mirroring Hub's minimal shape. Ceiling floors:
+`maxOperationsWithNoRequestTest: 4`, `maxShapeUnvalidated: 28`. `zeroTestOperations: []`.
 
 The plan will generate this file programmatically from `summary.json` rather than hand-transcribing, to
 eliminate copy errors, then the invariant run confirms every value matches.
