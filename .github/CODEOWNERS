@@ -15,6 +15,8 @@
 /scripts/triage/hub-*                               @camunda/hub @camunda/test-automation-team
 /scripts/triage/slack-*                             @camunda/hub @camunda/test-automation-team
 /scripts/e2e/hub_*.py                               @camunda/hub @camunda/test-automation-team
+/scripts/e2e/run-hub.sh                             @camunda/hub @camunda/test-automation-team
+/scripts/e2e/verify-negative-failures.py            @camunda/hub @camunda/test-automation-team
 /.github/workflows/hub-*.yml                        @camunda/hub @camunda/test-automation-team
 /.github/workflows/nightly-camunda-hub.yml          @camunda/hub @camunda/test-automation-team
 /.github/workflows/triage-camunda-hub-nightly.yml   @camunda/hub @camunda/test-automation-team
