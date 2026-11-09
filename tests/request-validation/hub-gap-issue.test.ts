@@ -353,6 +353,19 @@ describe('per-endpoint issue lifecycle (stub gh)', () => {
     expect(r.calls.some((c) => c.includes('--add-assignee'))).toBe(false);
   });
 
+  it('skips the blame on a shallow checkout and mentions the team (blame would mis-attribute)', () => {
+    // A shallow clone (clone-hub-sibling fetches --depth 1) carries .git/shallow; git blame there
+    // attributes every line to the fetched tip, so the script must NOT blame — it falls back to the team
+    // rather than assign the wrong owner. The workflow deepens the checkout first; this guards the case
+    // where that unshallow fetch failed.
+    const stub = authorStub('alice');
+    writeFileSync(join(stub.HUB_DIR, '.git', 'shallow'), 'deadbeef\n');
+    const r = runIssueScript('hub-coverage-endpoint-issues.sh', endpointFiles('newOp'), [], stub);
+    expect(r.calls.some((c) => c.includes('--add-assignee'))).toBe(false);
+    const mention = r.calls.find((c) => c.startsWith('gh issue comment 101 '));
+    expect(mention).toContain('@camunda/hub');
+  });
+
   it('omits an endpoint from endpoint-issues.json when its issue opens on a later run (cap reached)', () => {
     const r = runIssueScript('hub-coverage-endpoint-issues.sh', endpointFiles('a', 'b', 'c'), [], {
       MAX_NEW_ENDPOINT_ISSUES: '2',

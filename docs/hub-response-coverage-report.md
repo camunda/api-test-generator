@@ -136,10 +136,11 @@ review"** that shows the check before and after. Read that section first.
 `fix/coverage-`, with the labels `nightly-api-fix`, `auto-generated` and `hub`. The body ends with
 "Found by the camunda-hub coverage-fix agent". The thread under the weekly Slack message lists the ones still open.
 
-**Each pull request links to its endpoint's tracking issue.** The body carries a `closes #<issue>` line pointing at the
+**Each pull request links to its endpoint's tracking issue.** The body carries a `relates to #<issue>` line pointing at the
 per-endpoint issue whose gap it fixes, so the pull request and the issue show each other on GitHub (open the issue and you
-see the pull request in its timeline). It says `closes`: one pull request fixes one endpoint, and that endpoint now has its
-own issue, so merging the pull request closes it (the next weekly report would close it anyway once the endpoint is covered).
+see the pull request in its timeline). It says `relates to`, not `closes`: an endpoint issue lists every gap on that endpoint
+and one pull request fixes only one of them, so a closing link would shut it while the others remain — the weekly report
+closes the endpoint issue itself once the endpoint has no gap left.
 The link is added automatically after the `verify` job passes, so it is only ever on a checked pull request.
 
 **Who reviews them.** A person, always. The usual live check (`hub-pr-live-check`) skips these pull requests on purpose: it

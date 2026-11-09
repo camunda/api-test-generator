@@ -226,8 +226,8 @@ export function prIssueLinks(
     if (key === null) continue;
     const issue = candidateByKebab.get(key)?.issue;
     if (typeof issue !== 'number') continue;
-    // A digit boundary after the number: an existing `closes #420` must not count as linking #42.
-    if (typeof p.body === 'string' && new RegExp(`closes #${issue}(?![0-9])`).test(p.body)) {
+    // A digit boundary after the number: an existing `relates to #420` must not count as linking #42.
+    if (typeof p.body === 'string' && new RegExp(`relates to #${issue}(?![0-9])`).test(p.body)) {
       continue;
     }
     links.push({ number: p.number, issue });

@@ -159,6 +159,16 @@ jobs:
             --description 'Owned by the Hub team (auto-added to the Hub board)' \
             --color 0E8A16 --force
 
+      # Full history for the endpoint-author git-blame: clone-hub-sibling fetches --depth 1, and blame on a
+      # shallow clone attributes every line to the fetched tip (wrong owners). Deepen before the issue step;
+      # if the unshallow fails the checkout stays shallow, and the issue step detects .git/shallow and falls
+      # back to the @camunda/hub mention rather than assigning the wrong owner.
+      - name: Deepen the camunda-hub checkout for endpoint-author attribution
+        if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && !inputs.dry_run)
+        run: |
+          git -C ../camunda-hub fetch --unshallow \
+            || echo "::warning::could not unshallow camunda-hub; endpoint issues fall back to @camunda/hub for assignment"
+
       # One issue per uncovered endpoint, each assigned to whoever added the endpoint (git-blame of the
       # operation's spec line in the camunda-hub sibling clone; @camunda/hub mention fallback) — the
       # 2026-10-28 handover decision that every gap should have a DRI. Found by exact title in any state,

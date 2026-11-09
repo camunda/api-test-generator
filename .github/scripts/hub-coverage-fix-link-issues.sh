@@ -1,17 +1,19 @@
 #!/usr/bin/env bash
-# Append `closes #<issue>` to each coverage-fix PR the verifier matched to a tracking issue, so the PR and
-# the issue cross-reference each other on GitHub (and the per-endpoint issue auto-closes when the PR merges).
-# The issue per PR comes from the verifier output (`links: [{number, issue}]`), which is deterministic and
-# reuses the selector's branch -> candidate -> endpoint mapping — never from the agent.
+# Append `relates to #<issue>` to each coverage-fix PR the verifier matched to a tracking issue, so the PR
+# and the issue cross-reference each other on GitHub. It is a NON-closing reference on purpose: an endpoint
+# issue lists every gap on that endpoint (say a missing 403 and a missing 404 and a lifecycle test), but one
+# coverage-fix PR fixes only one of them — a `closes` link would shut the issue while the other gaps remain,
+# and the next weekly report would reopen it. The weekly report closes the endpoint issue on its own once the
+# endpoint has no gap left. The issue per PR comes from the verifier output (`links: [{number, issue}]`),
+# which is deterministic and reuses the selector's branch -> candidate -> endpoint mapping — never from the agent.
 #
 #   usage: hub-coverage-fix-link-issues.sh <verify-out.json>
 #
 # The PR body is read FRESH from GitHub immediately before editing, not from an earlier snapshot: the live-Hub
 # check step runs before this one and adds a `### Live Hub check` section to the body, so editing from a stale
 # snapshot would erase it. On a failed read the PR is left untouched. Idempotent: a body that already carries
-# the exact `closes #<issue>` reference (with a digit boundary, so #42 does not match #420) is skipped.
-# Never fails the run — a missing cross-reference is a convenience, not a correctness gate. A `closes` link
-# on purpose: one PR fixes one endpoint, and that endpoint now has its own issue, so merging the PR closes it.
+# the exact `relates to #<issue>` reference (with a digit boundary, so #42 does not match #420) is skipped.
+# Never fails the run — a missing cross-reference is a convenience, not a correctness gate.
 set -uo pipefail
 
 out="${1:?usage: hub-coverage-fix-link-issues.sh <verify-out.json>}"
@@ -32,14 +34,14 @@ while read -r link; do
     echo "::warning::Could not read the description of PR #${num}; leaving it untouched."
     continue
   fi
-  # A digit boundary after the number: `closes #42` must not be considered present by `closes #420`.
-  if printf '%s' "$body" | grep -qE "closes #${issue}([^0-9]|\$)"; then
+  # A digit boundary after the number: `relates to #42` must not be considered present by `relates to #420`.
+  if printf '%s' "$body" | grep -qE "relates to #${issue}([^0-9]|\$)"; then
     echo "PR #${num} already links #${issue}."
     continue
   fi
   # Append after a blank line; the body still opens with the agent's "## In plain words" section the verifier
   # required, and keeps the live-check section, so the link disturbs neither.
-  if printf '%s\n\n%s\n' "$body" "closes #${issue}" | gh pr edit "$num" --repo "$repo" --body-file -; then
+  if printf '%s\n\n%s\n' "$body" "relates to #${issue}" | gh pr edit "$num" --repo "$repo" --body-file -; then
     echo "Linked PR #${num} to #${issue}."
     count=$((count + 1))
   else

@@ -18,7 +18,8 @@
 #   REPORT_DIR                holds endpoints.json + the per-endpoint body files
 #   REPO_URL, RUN_URL
 #   AUTHOR_RESOLVER           operationId -> login resolver (default .github/scripts/hub-endpoint-author.sh)
-#   HUB_DIR                   camunda-hub checkout for the git-blame (default ../camunda-hub)
+#   HUB_DIR                   camunda-hub checkout for the git-blame (default ../camunda-hub); must have FULL
+#                             history — a shallow checkout (.git/shallow present) skips blame and uses the team
 #   HUB_TOKEN                 camunda-hub read token the resolver uses
 #   HUB_TEAM                  team for the @-mention fallback (default camunda/hub)
 #
@@ -42,10 +43,14 @@ hub_team="${HUB_TEAM:-camunda/hub}"
 
 # Assign issue #$1 (operationId $2) to the endpoint author, or mention the team when none resolves.
 # Called only when the issue is freshly created (a new issue has no assignee). Best-effort — a miss is
-# logged and the run continues.
+# logged and the run continues. The author is resolved by git-blaming the operation's spec line, which
+# needs full history: a SHALLOW checkout (clone-hub-sibling fetches --depth 1) blames every line to the
+# fetched tip, so when `.git/shallow` is present the blame is skipped and the issue falls through to the
+# @camunda/hub mention instead — a correct-but-unassigned issue beats one assigned to the wrong person.
+# The workflow deepens the checkout before this step; if that fetch failed the marker remains and we degrade.
 assign_owner() {
   local num="$1" op="$2" login=''
-  if [ -n "$op" ] && [ -d "${hub_dir}/.git" ]; then
+  if [ -n "$op" ] && [ -d "${hub_dir}/.git" ] && [ ! -f "${hub_dir}/.git/shallow" ]; then
     login=$(GH_TOKEN="${HUB_TOKEN:-}" bash "$resolver" "$op" "$hub_dir" 2>/dev/null || true)
   fi
   if [ -n "$login" ] && gh issue edit "$num" --add-assignee "$login" >/dev/null 2>&1; then

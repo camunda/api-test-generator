@@ -431,13 +431,13 @@ describe('prIssueLinks', () => {
   });
 
   it('skips a PR whose body already carries the link (idempotent)', () => {
-    const linked = pr(1, { body: `${PLAIN}\n\ncloses #42` });
+    const linked = pr(1, { body: `${PLAIN}\n\nrelates to #42` });
     expect(prIssueLinks([linked], withIssue, RUN, 0)).toEqual([]);
   });
 
   it('does not treat a longer issue number as the existing link (digit boundary)', () => {
-    // `closes #420` must not count as already linking #42.
-    const other = pr(1, { body: `${PLAIN}\n\ncloses #420` });
+    // `relates to #420` must not count as already linking #42.
+    const other = pr(1, { body: `${PLAIN}\n\nrelates to #420` });
     expect(prIssueLinks([other], withIssue, RUN, 0)).toEqual([{ number: 1, issue: 42 }]);
   });
 

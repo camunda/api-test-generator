@@ -80,7 +80,7 @@ const LIVE_CHECK = `${PLAIN}
 <!-- live-check:end -->`;
 
 describe('hub-coverage-fix-link-issues', () => {
-  it('appends `closes #<issue>` to each linked PR, reading the body fresh', () => {
+  it('appends `relates to #<issue>` to each linked PR, reading the body fresh', () => {
     const r = run(
       [
         { number: 1, issue: 42 },
@@ -90,8 +90,8 @@ describe('hub-coverage-fix-link-issues', () => {
     );
     expect(r.editCalls).toHaveLength(2);
     expect(r.edited(1)).toContain(PLAIN);
-    expect(r.edited(1).trimEnd().endsWith('closes #42')).toBe(true);
-    expect(r.edited(2).trimEnd().endsWith('closes #7')).toBe(true);
+    expect(r.edited(1).trimEnd().endsWith('relates to #42')).toBe(true);
+    expect(r.edited(2).trimEnd().endsWith('relates to #7')).toBe(true);
   });
 
   it('preserves the live-check section the preceding step added', () => {
@@ -99,7 +99,7 @@ describe('hub-coverage-fix-link-issues', () => {
     expect(r.edited(1)).toContain('### Live Hub check');
     expect(r.edited(1)).toContain('<!-- live-check:start -->');
     expect(r.edited(1)).toContain('<!-- live-check:end -->');
-    expect(r.edited(1).trimEnd().endsWith('closes #42')).toBe(true);
+    expect(r.edited(1).trimEnd().endsWith('relates to #42')).toBe(true);
   });
 
   it('leaves the PR untouched when the body cannot be read', () => {
@@ -109,16 +109,16 @@ describe('hub-coverage-fix-link-issues', () => {
   });
 
   it('skips a PR whose body already carries the link', () => {
-    const r = run([{ number: 3, issue: 9 }], { 3: `${PLAIN}\n\ncloses #9` });
+    const r = run([{ number: 3, issue: 9 }], { 3: `${PLAIN}\n\nrelates to #9` });
     expect(r.editCalls).toHaveLength(0);
     expect(r.stdout).toContain('already links #9');
   });
 
   it('does not treat a longer issue number as the existing link (digit boundary)', () => {
-    // `closes #90` must not block linking #9.
-    const r = run([{ number: 3, issue: 9 }], { 3: `${PLAIN}\n\ncloses #90` });
+    // `relates to #90` must not block linking #9.
+    const r = run([{ number: 3, issue: 9 }], { 3: `${PLAIN}\n\nrelates to #90` });
     expect(r.editCalls).toHaveLength(1);
-    expect(r.edited(3).trimEnd().endsWith('closes #9')).toBe(true);
+    expect(r.edited(3).trimEnd().endsWith('relates to #9')).toBe(true);
   });
 
   it('makes no edit when there are no links', () => {
