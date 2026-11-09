@@ -13,11 +13,14 @@
 /docs/how-it-works.md                               @camunda/hub @camunda/test-automation-team
 /.github/scripts/hub-*                              @camunda/hub @camunda/test-automation-team
 /.github/scripts/request-hub-author-review.sh       @camunda/hub @camunda/test-automation-team
+/.github/scripts/spec-bump-open-pr.sh               @camunda/hub @camunda/test-automation-team
 /scripts/triage/hub-*                               @camunda/hub @camunda/test-automation-team
 /scripts/triage/slack-*                             @camunda/hub @camunda/test-automation-team
 /scripts/e2e/hub_*.py                               @camunda/hub @camunda/test-automation-team
 /scripts/e2e/run-hub.sh                             @camunda/hub @camunda/test-automation-team
 /scripts/e2e/verify-negative-failures.py            @camunda/hub @camunda/test-automation-team
+/docker/start-hub.sh                                @camunda/hub @camunda/test-automation-team
+/docker/docker-compose.hub.yml                      @camunda/hub @camunda/test-automation-team
 /.github/workflows/hub-*.yml                        @camunda/hub @camunda/test-automation-team
 /.github/workflows/nightly-camunda-hub.yml          @camunda/hub @camunda/test-automation-team
 /.github/workflows/triage-camunda-hub-nightly.yml   @camunda/hub @camunda/test-automation-team
