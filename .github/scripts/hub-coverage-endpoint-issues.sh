@@ -114,8 +114,11 @@ jq -R -s 'split("\n") | map(select(length > 0) | split("\t") | {(.[0]): (.[1] | 
 
 # Close open per-endpoint issues whose endpoint no longer has a gap (the singular "test" suffix matches
 # only the per-endpoint issues, never the plural-"tests" summary or the old per-area issues).
-jq -r --arg x "$endpoint_suffix" \
-  '.[] | select(.state == "OPEN" and (.title | endswith($x))) | "\(.number)\t\(.title)"' \
+# Anchor on the prefix too: `in:title "$prefix"` above is a substring match, so $existing can also hold a
+# manual follow-up like "Investigate [hub-response-coverage] Foo: ... test" that ends with the suffix but
+# is not ours — startswith($p) keeps the close scoped to issues this workflow actually owns.
+jq -r --arg x "$endpoint_suffix" --arg p "$prefix" \
+  '.[] | select(.state == "OPEN" and (.title | startswith($p)) and (.title | endswith($x))) | "\(.number)\t\(.title)"' \
   <<< "$existing" | while IFS=$'\t' read -r num title; do
   if ! grep -qxF "$title" "$current"; then
     gh issue close "$num" --reason completed \
@@ -125,8 +128,8 @@ done
 
 # Migration: close the old per-area issues (plural-"tests" suffix) that the per-endpoint model replaces.
 # One-time — they are never recreated. The summary issue has no colon suffix, so it is never matched.
-jq -r --arg x "$area_suffix" \
-  '.[] | select(.state == "OPEN" and (.title | endswith($x))) | .number' \
+jq -r --arg x "$area_suffix" --arg p "$prefix" \
+  '.[] | select(.state == "OPEN" and (.title | startswith($p)) and (.title | endswith($x))) | .number' \
   <<< "$existing" | while read -r num; do
   gh issue close "$num" --reason completed \
     --comment "Coverage gaps are now tracked per endpoint (one issue per endpoint, assigned to its author), so this per-area issue is superseded and closed automatically. See the summary issue for the index."

@@ -438,6 +438,30 @@ describe('per-endpoint issue lifecycle (stub gh)', () => {
     // the still-open keptOp (5) and the already-closed one (8) are left alone.
     expect(closed).toEqual(['6', '9']);
   });
+
+  it('never closes a manual follow-up whose title only contains the prefix mid-string', () => {
+    // `issue list --search "in:title [hub-response-coverage]"` is a substring match, so a human
+    // follow-up like "Investigate [hub-response-coverage] fixedOp: ... test" comes back in $existing. It
+    // ends with the suffix the close/migrate loops key on but is not ours — the startswith($prefix) guard
+    // must spare both decoys while the real clean endpoint (6) and per-area (9) issues still close.
+    const r = runIssueScript(
+      'hub-coverage-endpoint-issues.sh',
+      endpointFiles('keptOp'),
+      [
+        { number: 5, title: endpointTitle('keptOp'), state: 'OPEN' },
+        { number: 6, title: endpointTitle('fixedOp'), state: 'OPEN' },
+        { number: 9, title: areaTitle('Files'), state: 'OPEN' },
+        { number: 20, title: `Investigate ${endpointTitle('fixedOp')}`, state: 'OPEN' },
+        { number: 21, title: `Investigate ${areaTitle('Files')}`, state: 'OPEN' },
+      ],
+      NO_HUB,
+    );
+    const closed = r.calls
+      .filter((c) => c.includes('issue close'))
+      .map((c) => c.split(' ')[3])
+      .sort();
+    expect(closed).toEqual(['6', '9']);
+  });
 });
 
 describe('the tracking issue is an index of the per-endpoint issues', () => {
