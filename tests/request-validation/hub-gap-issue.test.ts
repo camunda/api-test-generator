@@ -267,6 +267,10 @@ function authorStub(login: string) {
 // A HUB_DIR with no .git, so the resolver is never consulted and assignment falls back to the team.
 const NO_HUB = { HUB_DIR: join(tmpdir(), 'gap-no-hub-does-not-exist') };
 
+/** stderr of a child-process error thrown by execFileSync, narrowed without an `as` cast. */
+const stderrOf = (e: unknown): string =>
+  e && typeof e === 'object' && 'stderr' in e ? String(e.stderr) : '';
+
 describe('summary issue lifecycle (stub gh)', () => {
   it('opens the issue with the three labels when none exists', () => {
     const r = runIssueScript('hub-coverage-summary-issue.sh', { 'issue.md': 'gaps' }, []);
@@ -455,7 +459,7 @@ describe('per-endpoint issue lifecycle (stub gh)', () => {
       err = e;
     }
     expect(err).toBeDefined();
-    expect(String((err as { stderr?: Buffer }).stderr ?? '')).toContain('endpoints.json');
+    expect(stderrOf(err)).toContain('endpoints.json');
   });
 
   it('aborts (closing nothing) when endpoints.json is malformed', () => {
@@ -471,7 +475,7 @@ describe('per-endpoint issue lifecycle (stub gh)', () => {
       err = e;
     }
     expect(err).toBeDefined();
-    expect(String((err as { stderr?: Buffer }).stderr ?? '')).toContain('endpoints.json');
+    expect(stderrOf(err)).toContain('endpoints.json');
   });
 
   it('never closes a manual follow-up whose title only contains the prefix mid-string', () => {
