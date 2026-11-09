@@ -197,8 +197,9 @@ echo "gh $*" >> "$GH_LOG"
 # GH_FAIL: '|'-separated substrings; a gh call whose args contain one exits 1 (lets a test
 # simulate a rejected assignment or a failed comment). Empty/unset => every call succeeds.
 if [ -n "$GH_FAIL" ]; then
+  _args="$*"  # capture before IFS change: IFS='|' would re-join $* with '|'
   _oifs=$IFS; IFS='|'
-  for pat in $GH_FAIL; do case "$*" in *"$pat"*) IFS=$_oifs; exit 1 ;; esac; done
+  for pat in $GH_FAIL; do case "$_args" in *"$pat"*) IFS=$_oifs; exit 1 ;; esac; done
   IFS=$_oifs
 fi
 if [ "$1 $2" = "issue list" ]; then
