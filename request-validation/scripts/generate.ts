@@ -1444,12 +1444,15 @@ async function main() {
           }
           applicable.add('type-mismatch');
           applicable.add('body-top-type-mismatch');
-          applicable.add('additional-prop-general');
-          // additional-prop is narrower than -general: only when the schema
-          // itself declares additionalProperties: false (additionalProps.ts's
-          // own gate), unlike -general which fires for any object body.
+          // additional-prop applies only when the schema itself declares
+          // additionalProperties: false (additionalProps.ts's own gate). Its
+          // scenario has the same body shape as -general's, so the structural
+          // additional-prop dedupe keeps it and drops -general: count one or
+          // the other, never both.
           if (op.requestBodySchema?.additionalProperties === false) {
             applicable.add('additional-prop');
+          } else {
+            applicable.add('additional-prop-general');
           }
           if (isNestedAdditionalPropEligible(op)) applicable.add('nested-additional-prop');
         }
