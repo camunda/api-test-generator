@@ -694,7 +694,10 @@ def endpoint_issues(rows, args):
     for r in sorted(gap_rows(rows), key=lambda row: (row.get('area', 'Other'), row['operationId'])):
         op, area = r['operationId'], r.get('area', 'Other')
         codes = [('success' if b == '2xx' else b) for b in BUCKETS if r['cells'].get(b) == 'gap']
-        kinds = list(r['requestMissing'])
+        # Render each bad-request kind in plain English, keeping the slug in parentheses so a fixer can
+        # still find it in the guide's "what it means" table. CHECK_NAMES covers every kind; .get falls
+        # back to the bare slug for any future kind not yet mapped.
+        kinds = [f'{CHECK_NAMES.get(k, k)} ({k})' for k in r['requestMissing']]
         lines = [
             '_Kept up to date by the weekly **Hub response coverage** workflow: rewritten every Monday, '
             'closed automatically once this endpoint has nothing missing, reopened if a gap returns. '

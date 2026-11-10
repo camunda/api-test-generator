@@ -147,9 +147,10 @@ describe('per-endpoint coverage gap issues', () => {
     expect(byOp.r).toContain('`r` (`GET /r`) in the **Files** area');
     expect(byOp.r).toContain('- Response status codes: 404');
     expect(byOp.r).not.toContain('Bad-request kinds:');
-    // `k` has only a bad-request gap: the response-code line is omitted.
+    // `k` has only a bad-request gap: the response-code line is omitted, and the kind is rendered in
+    // plain English with its slug kept in parentheses (so a fixer can still look it up in the guide).
     expect(byOp.k).not.toContain('Response status codes:');
-    expect(byOp.k).toContain('- Bad-request kinds: param-missing');
+    expect(byOp.k).toMatch(/- Bad-request kinds: .+\(param-missing\)/);
     // Never the cryptic dash placeholder.
     expect(byOp.r).not.toContain('—');
     expect(byOp.k).not.toContain('—');
