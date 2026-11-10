@@ -5,6 +5,8 @@ import { findCursorFields, findPaginationPage, isRecord } from './paginationShap
 
 interface Opts {
   onlyOperations?: Set<string>;
+  /** Capability-gated field names (#404): an optional gated field is left out of the baseline body. */
+  capabilityGates?: ReadonlyMap<string, unknown>;
 }
 
 /**
@@ -35,7 +37,7 @@ export function generatePaginationCursorInvalid(
     if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId)) continue;
     const page = findPaginationPage(op);
     if (!page) continue;
-    const baseline = buildBaselineBody(op);
+    const baseline = buildBaselineBody(op, { gates: opts.capabilityGates });
     if (!isRecord(baseline)) continue;
     for (const field of findCursorFields(page.branches)) {
       const body = structuredClone(baseline);

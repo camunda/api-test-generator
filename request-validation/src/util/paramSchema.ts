@@ -14,6 +14,8 @@ export interface SchemaFragment {
   format?: string;
   enum?: unknown[];
   allOf?: SchemaFragment[];
+  oneOf?: unknown[];
+  anyOf?: unknown[];
 }
 
 export interface ResolvedParamSchema {
@@ -40,20 +42,34 @@ function isSchemaFragment(v: unknown): v is SchemaFragment {
 export function resolveParamSchema(p: ParameterModel): ResolvedParamSchema | undefined {
   const schema = isSchemaFragment(p.schema) ? p.schema : undefined;
   if (!schema) return undefined;
+  return resolveFieldSchema(schema);
+}
+
+/**
+ * The constraint fields a value must satisfy, merged from the schema itself, every `allOf` part
+ * (recursively) and the first branch of a `oneOf`/`anyOf`. A Camunda key that may be one of several
+ * key types (`ScopeKey` is `oneOf: [ProcessInstanceKey, ElementInstanceKey]`, each `allOf: [LongKey]`)
+ * keeps its numeric `pattern` only inside those branches. The branches of the specs' key unions share
+ * the same constraints, so the first one is representative. The schema's own fields win over its parts.
+ */
+export function resolveFieldSchema(schema: SchemaFragment): ResolvedParamSchema {
   const out: ResolvedParamSchema = { schema };
-  function merge(s: SchemaFragment | undefined): void {
-    if (!s || typeof s !== 'object') return;
+  const seen = new Set<SchemaFragment>();
+  function merge(s: unknown): void {
+    if (!isSchemaFragment(s) || seen.has(s)) return;
+    seen.add(s);
     if (typeof s.pattern === 'string' && out.pattern === undefined) out.pattern = s.pattern;
     if (typeof s.minLength === 'number' && out.minLength === undefined) out.minLength = s.minLength;
     if (typeof s.maxLength === 'number' && out.maxLength === undefined) out.maxLength = s.maxLength;
     if (typeof s.format === 'string' && out.format === undefined) out.format = s.format;
     if (Array.isArray(s.enum) && !out.enumValues) out.enumValues = s.enum.slice();
     if (s.type !== undefined && out.type === undefined) out.type = s.type;
+    if (Array.isArray(s.allOf)) for (const part of s.allOf) merge(part);
+    for (const branches of [s.oneOf, s.anyOf]) {
+      if (Array.isArray(branches) && branches.length) merge(branches[0]);
+    }
   }
   merge(schema);
-  if (Array.isArray(schema.allOf)) {
-    for (const part of schema.allOf) merge(part);
-  }
   return out;
 }
 
@@ -117,15 +133,23 @@ const BASE_DATE_MS = Date.UTC(2025, 0, 1);
  * value `buildValidValue` gives it.
  */
 export function orderedDateValues(params: ParameterModel[]): Map<string, string> {
+  return orderedDateValuesFor(
+    params.map((p) => ({ name: p.name, resolved: resolveParamSchema(p) })),
+  );
+}
+
+/** {@link orderedDateValues} for any named fields, such as the properties of one body object. */
+export function orderedDateValuesFor(
+  fields: readonly { name: string; resolved: ResolvedParamSchema | undefined }[],
+): Map<string, string> {
   const dates: { name: string; format: string; end: boolean }[] = [];
-  for (const p of params) {
-    const r = resolveParamSchema(p);
+  for (const { name, resolved: r } of fields) {
     // A date restricted to an enum keeps its allowed member (findValidValue picks it), so it is
     // left out of the synthesized ordering.
     if (r?.enumValues?.length) continue;
     const f = r?.format;
     if (f === 'date-time' || f === 'date')
-      dates.push({ name: p.name, format: f, end: END_NAME.test(p.name) });
+      dates.push({ name, format: f, end: END_NAME.test(name) });
   }
   dates.sort((a, b) => Number(a.end) - Number(b.end)); // stable: declaration order within each group
   const out = new Map<string, string>();
@@ -160,17 +184,26 @@ export function buildSiblingValues(
   return out;
 }
 
-/** The first candidate that meets the schema's length bounds and pattern, if any does. */
-function firstSatisfying(candidates: string[], r: ResolvedParamSchema): string | undefined {
-  let re: RegExp | undefined;
-  if (r.pattern) {
+/**
+ * An OpenAPI `pattern` as a JavaScript RegExp. Unicode mode first, so property escapes such as
+ * `\p{L}` (Java regex syntax the specs use for ids) mean a letter rather than a literal `p{L}`.
+ * Undefined for a pattern JavaScript cannot compile (e.g. a Java-only flag), which cannot be
+ * checked here.
+ */
+export function compilePattern(pattern: string): RegExp | undefined {
+  for (const flags of ['u', '']) {
     try {
-      re = new RegExp(r.pattern);
+      return new RegExp(pattern, flags);
     } catch {
-      // A pattern JavaScript cannot compile (e.g. a Java-only flag) cannot be checked here.
-      re = undefined;
+      // try the next mode
     }
   }
+  return undefined;
+}
+
+/** The first candidate that meets the schema's length bounds and pattern, if any does. */
+function firstSatisfying(candidates: string[], r: ResolvedParamSchema): string | undefined {
+  const re = r.pattern ? compilePattern(r.pattern) : undefined;
   return candidates.find(
     (c) =>
       (r.minLength === undefined || c.length >= r.minLength) &&
