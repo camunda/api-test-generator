@@ -23,9 +23,10 @@
 #   HUB_TOKEN                 camunda-hub read token the resolver uses
 #   HUB_TEAM                  team for the @-mention fallback (default camunda/hub)
 #
-# Appends one Slack-formatted entry per endpoint to REPORT_DIR/endpoint-links.txt and one markdown line
-# per endpoint to REPORT_DIR/endpoint-index.md (a link to its issue, grouped by area; an endpoint with no
-# issue yet is listed with its area), which the summary script puts into the tracking issue. Also writes
+# Appends one markdown line per endpoint to REPORT_DIR/endpoint-index.md (a link to its issue, grouped by
+# area; an endpoint with no issue yet is listed with its area), which the summary script puts into the
+# tracking issue — that issue is the index people read, so the Slack message links it rather than listing
+# every endpoint inline. Also writes
 # REPORT_DIR/endpoint-issues.json, a {"<operationId>": <issue-number>} map for every endpoint that has an
 # issue this run (endpoints whose issue opens on a later run are omitted). The coverage-fix selector reads
 # it so a fix PR can link `closes #<issue>` to the endpoint it fixes.
@@ -104,7 +105,6 @@ while read -r entry; do
   if [ -z "$found" ]; then
     if [ "$new" -ge "${MAX_NEW_ENDPOINT_ISSUES:-40}" ]; then
       echo "Cap reached: '$title' will be opened on a later run."
-      echo "$op ($area)" >> "$REPORT_DIR/endpoint-links.txt"
       printf -- '- `%s` — %s (its issue opens on a later run)\n' "$op" "$area" >> "$REPORT_DIR/endpoint-index.md"
       continue
     fi
@@ -121,7 +121,6 @@ while read -r entry; do
     gh issue comment "$num" --body "Re-checked on $today: still missing. $RUN_URL"
     url="$REPO_URL/issues/$num"
   fi
-  echo "<$url|$op ($area)>" >> "$REPORT_DIR/endpoint-links.txt"
   printf -- '- [ ] #%s `%s` — %s\n' "${url##*/}" "$op" "$area" >> "$REPORT_DIR/endpoint-index.md"
   printf '%s\t%s\n' "$op" "${url##*/}" >> "$pairs"
 done < <(jq -c '.[]' "$REPORT_DIR/endpoints.json")

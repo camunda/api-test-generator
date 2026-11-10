@@ -66,8 +66,9 @@ When the coverage-fix agent has pull requests waiting for review, a reply appear
 
 ## Closing a gap
 
-Some gaps need a generator change, not just a Hub setting. Each endpoint issue lists that endpoint's **missing responses**
-and **missing bad-request tests**. Use the table below for what it lacks.
+Some gaps need a generator change, not just a Hub setting. Each endpoint issue lists only the dimensions that
+apply to it — its **missing response status codes**, its **missing bad-request kinds**, or both (a dimension
+with nothing missing is omitted, not shown as a dash). Use the table below for what it lacks.
 
 | The row says it is missing | What it means | Where to look, and the usual fix |
 |---|---|---|
