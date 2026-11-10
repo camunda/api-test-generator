@@ -1608,7 +1608,7 @@ export function buildRequestBodyFromCanonical(
           if (!scenario.bindings[varName]) scenario.bindings[varName] = PENDING_BINDING;
           template[leaf] = `${'${'}${varName}}`;
         } else if (defaults && Object.hasOwn(defaults, leaf)) {
-          template[leaf] = defaults[leaf];
+          template[leaf] = requestDefaultValue(defaults[leaf]);
         } else if (f.enum?.length) {
           // #338 — schema declares an enum for this required scalar
           // field. Emit the first enum literal instead of seeding a
@@ -1739,7 +1739,26 @@ export function buildRequestBodyFromCanonical(
         if (!suppressBindingFill && scenario.bindings?.[varBase]) {
           template[leaf] = `${'${'}${varBase}}`;
         } else if (defaults && Object.hasOwn(defaults, leaf)) {
-          template[leaf] = defaults[leaf];
+          template[leaf] = requestDefaultValue(defaults[leaf]);
+        }
+      }
+    }
+    // An optional top-level ARRAY field (recorded as `field[]`) has no scalar
+    // binding to fill it from, so the loop above skips it. A request default
+    // declared for this operation fills it instead: e.g. Hub's createCredential
+    // needs a `credentialTemplateSchema` for any credential template Hub cannot
+    // look up (#757). Only `operations.<opId>` defaults apply, not `global`
+    // ones, so a global array default (camunda-oca's `fetchVariable`,
+    // `tenantIds`) is not sent by every operation that declares the field.
+    const operationDefaults = loadRequestDefaults().operations?.[opId];
+    if (operationDefaults) {
+      for (const f of nodes.filter((n) => !n.required && n.path.endsWith('[]'))) {
+        const leaf = f.path.slice(0, -2);
+        if (leaf.includes('[]') || leaf.includes('.')) continue;
+        if (allowedFields && !allowedFields.has(leaf)) continue;
+        if (variantLeafNames?.has(leaf)) continue;
+        if (template[leaf] === undefined && Object.hasOwn(operationDefaults, leaf)) {
+          template[leaf] = requestDefaultValue(operationDefaults[leaf]);
         }
       }
     }
@@ -2171,19 +2190,42 @@ function loadRequestDefaults(): RequestDefaults {
   // candidate is computed lazily because getActiveConfigDir reads
   // configs.json and throws when it is absent (e.g. the parent of the
   // repo root).
+  //
+  // A missing file means "no defaults", but a file that exists and does not
+  // parse is a real misconfiguration: falling back to empty defaults would
+  // silently put the seeded string placeholders back into bodies that need
+  // typed values (Hub's createCredential, #757) and fail at runtime instead.
   const repoRootCandidates = [process.cwd(), path.resolve(process.cwd(), '..')];
   for (const root of repoRootCandidates) {
+    let data: string;
+    let p: string;
     try {
-      const p = path.resolve(getActiveConfigDir(root), 'request-defaults.json');
-      const data = fsSync.readFileSync(p, 'utf8');
+      p = path.resolve(getActiveConfigDir(root), 'request-defaults.json');
+      data = fsSync.readFileSync(p, 'utf8');
+    } catch {
+      continue;
+    }
+    try {
       // biome-ignore lint/plugin: JSON.parse returns `any`; the file shape is the runtime contract for request-defaults.json.
-      const json = JSON.parse(data) as RequestDefaults;
-      requestDefaultsCache = json;
-      return requestDefaultsCache;
-    } catch {}
+      requestDefaultsCache = JSON.parse(data) as RequestDefaults;
+    } catch (err) {
+      throw new Error(
+        `Malformed request-defaults.json at ${p}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+    return requestDefaultsCache;
   }
   requestDefaultsCache = { operations: {}, global: {} };
   return requestDefaultsCache;
+}
+
+/**
+ * A request default as a fresh copy, so a later in-place write into one
+ * generated body (e.g. a variant's `setLeafPlaceholder` filling an array
+ * element) cannot change the cached default every other scenario reads.
+ */
+function requestDefaultValue(value: unknown): unknown {
+  return structuredClone(value);
 }
 function getRequestDefaultsForOperation(opId: string): Record<string, unknown> | undefined {
   const all = loadRequestDefaults();

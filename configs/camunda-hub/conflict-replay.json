@@ -150,6 +150,31 @@
       "operationId": "restoreProjectSnapshot",
       "issue": "https://github.com/camunda/api-test-generator/issues/638",
       "reason": "Documented 409 could not be provoked on a live Hub."
+    },
+    {
+      "operationId": "deleteCredential",
+      "issue": "https://github.com/camunda/api-test-generator/issues/757",
+      "reason": "The documented 409 needs a credential deployed to a cluster that rejects removing it (or a Self-Managed cluster with basic authentication). The test Hub has no environment with a reachable cluster to deploy to."
+    },
+    {
+      "operationId": "deployCredentialToEnvironment",
+      "issue": "https://github.com/camunda/api-test-generator/issues/757",
+      "reason": "The documented 409 needs a credential that targets an environment it has no configuration for, or a Self-Managed cluster with basic authentication. The test Hub has no environments to target."
+    },
+    {
+      "operationId": "undeployCredentialFromEnvironment",
+      "issue": "https://github.com/camunda/api-test-generator/issues/757",
+      "reason": "The documented 409 is the basic-authentication error, which needs a credential deployed to an environment on a Self-Managed cluster that uses basic authentication. The test Hub has no environment with a cluster."
+    },
+    {
+      "operationId": "getCredentialDeployment",
+      "issue": "https://github.com/camunda/api-test-generator/issues/757",
+      "reason": "The documented 409 is the basic-authentication error, which needs a credential deployed to an environment on a Self-Managed cluster that uses basic authentication. The test Hub has no environment with a cluster."
+    },
+    {
+      "operationId": "getCredentialDeployments",
+      "issue": "https://github.com/camunda/api-test-generator/issues/757",
+      "reason": "The documented 409 is the basic-authentication error, which needs a credential deployed to an environment on a Self-Managed cluster that uses basic authentication. The test Hub has no environment with a cluster."
     }
   ]
 }

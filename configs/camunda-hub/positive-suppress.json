@@ -16,6 +16,18 @@
         "summary": "Cluster delete + usage-metrics need a chainable, client-minted clusterId the planner can't source",
         "url": "https://github.com/camunda/camunda-hub/issues/25907"
       }
+    },
+    {
+      "operationId": "deployCredentialToEnvironment",
+      "reason": "Out of scope for the suite's Hub, not a Hub bug: deploying writes the credential to the cluster of an environment the credential targets, and the test Hub has no environment with a reachable cluster. The planner also has no environmentId to chain (an unknown or untargeted environment answers 404). Revisit if the suite's Hub gets a connected cluster (api-test-generator#757)."
+    },
+    {
+      "operationId": "undeployCredentialFromEnvironment",
+      "reason": "Same as deployCredentialToEnvironment: undeploying removes the credential from the cluster of a targeted environment, which needs an environment with a reachable cluster the test Hub does not have (api-test-generator#757)."
+    },
+    {
+      "operationId": "getCredentialDeployment",
+      "reason": "Same as deployCredentialToEnvironment: the status of one environment needs an environment the credential targets, and Hub reads that status from the environment's cluster, which the test Hub does not have. The planner has no environmentId to chain, so the seeded one answers 404 (api-test-generator#757). getCredentialDeployments, which lists every targeted environment, stays in the suite."
     }
   ]
 }
