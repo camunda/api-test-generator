@@ -189,10 +189,16 @@ make_fixtures() {
   export RV_FIXTURE_CATALOG_ASSET_KEY; RV_FIXTURE_CATALOG_ASSET_KEY="$(ingest_catalog_asset)"
   # Every op on /credentials/{credentialKey} binds the path variable to a Credential
   # before it reads the body or the query, so a filler key 404s before validation
-  # (#757). The name must match ^[a-z_][a-z0-9_]*$, and credentialTemplateSchema is
-  # required because Hub cannot look this credential template up. No target, so
+  # (#757). The name must match ^[a-z_][a-z0-9_]*$ and be unique in the organization,
+  # so it carries a per-run suffix: a second run against the same Hub would otherwise
+  # get 400 and leave the key empty. credentialTemplateId 'x' version 1 matches the
+  # updateCredential baseline body, so a malformed-field test does not change the
+  # template; a changed template Hub cannot look up would answer 400
+  # "credentialTemplateSchema is required" whatever field the test broke.
+  # credentialTemplateSchema is required here for the same reason. No target, so
   # nothing is deployed to a cluster.
-  export RV_FIXTURE_CREDENTIAL_KEY; RV_FIXTURE_CREDENTIAL_KEY="$(curl -s -X POST "$POS_URL/credentials" "${h[@]}" -d '{"name":"rv_fixture_credential","displayName":"rv-fixture-credential","credentialTemplateId":"rv-fixture-credential-template","credentialTemplateVersion":1,"credentialTemplateSchema":[{"id":"region","label":"Region"}],"sameConfigForAllTargets":true,"config":{"region":"eu-west-1"}}' | _jget credentialKey)"
+  local credential_body; credential_body="$(printf '{"name":"rv_fixture_credential_%s","displayName":"rv-fixture-credential","credentialTemplateId":"x","credentialTemplateVersion":1,"credentialTemplateSchema":[{"id":"region","label":"Region"}],"sameConfigForAllTargets":true,"config":{"region":"eu-west-1"}}' "$(date +%s)${RANDOM}")"
+  export RV_FIXTURE_CREDENTIAL_KEY; RV_FIXTURE_CREDENTIAL_KEY="$(curl -s -X POST "$POS_URL/credentials" "${h[@]}" -d "$credential_body" | _jget credentialKey)"
   echo "  fixtures: ws=$RV_FIXTURE_WORKSPACE_KEY v2proj=$RV_FIXTURE_V2_PROJECT_KEY folder=$RV_FIXTURE_FOLDER_KEY file=$RV_FIXTURE_FILE_KEY version=$RV_FIXTURE_VERSION_KEY projectSnapshot=$RV_FIXTURE_PROJECT_SNAPSHOT_KEY catalogAsset=$RV_FIXTURE_CATALOG_ASSET_KEY credential=$RV_FIXTURE_CREDENTIAL_KEY"
   # Surface any failed create: an empty key means the tests fall back to the 'x'
   # filler for that resource (via `|| 'x'`) and will 404/403 as if unfixtured.

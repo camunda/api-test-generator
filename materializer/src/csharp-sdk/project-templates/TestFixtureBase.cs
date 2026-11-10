@@ -581,6 +581,12 @@ public abstract class TestFixtureBase
                 {
                     return $"{varName}-{id}-{NextCounter(bucket, "id")}-{RandomBase36(rnd, 6)}";
                 }
+                // Mirrors seed-rules.json: a plain `name` field gets lowercase letters,
+                // digits and `_` only, so it also matches identifier-style patterns.
+                if (varName == "nameVar")
+                {
+                    return $"name_{RandomBase36(rnd, 8)}";
+                }
                 if (Regex.IsMatch(varName, "name", RegexOptions.IgnoreCase))
                 {
                     return $"{varName}-{RandomBase36(rnd, 8)}";
