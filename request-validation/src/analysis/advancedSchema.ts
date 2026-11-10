@@ -21,6 +21,15 @@ function isObject(v: unknown): v is JsonObject {
   return !!v && typeof v === 'object' && !Array.isArray(v);
 }
 
+/**
+ * The coverage report's applicability check for `nested-additional-prop`. A nested object alone is not
+ * enough: the generator only injects into a nested object that declares `additionalProperties: false`
+ * and is present in the baseline body. Asking the generator itself keeps the two from drifting apart.
+ */
+export function isNestedAdditionalPropEligible(op: OperationModel): boolean {
+  return generateNestedAdditionalProps([op], { capPerOperation: 1 }).length > 0;
+}
+
 export function generateNestedAdditionalProps(
   ops: OperationModel[],
   opts: Opts,

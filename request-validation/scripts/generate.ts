@@ -10,6 +10,7 @@ import {
   generateNestedAdditionalProps,
   generateUniqueItemsViolations,
   isFormatInvalidEligible,
+  isNestedAdditionalPropEligible,
 } from '../src/analysis/advancedSchema.js';
 import {
   generateAllOfConflicts,
@@ -1450,7 +1451,7 @@ async function main() {
           if (op.requestBodySchema?.additionalProperties === false) {
             applicable.add('additional-prop');
           }
-          if (f.hasNestedObject) applicable.add('nested-additional-prop');
+          if (isNestedAdditionalPropEligible(op)) applicable.add('nested-additional-prop');
         }
         if (f.hasEnums) applicable.add('enum-violation');
         if (isUnionEligible(op)) applicable.add('union');
