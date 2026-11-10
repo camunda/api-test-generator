@@ -710,6 +710,11 @@ def endpoint_issues(rows, args):
             lines.append(f'- Response status codes: {", ".join(codes)}')
         if kinds:
             lines.append(f'- Bad-request kinds: {", ".join(kinds)}')
+        elif r['requestChecks'] == 'gap':
+            # request_check_state() reports a gap with no enumerable kinds when the negative suite generated
+            # no scenario for this endpoint at all (or none its applicability rules recognise). Say so
+            # explicitly, so the body always has a bullet rather than a bare "is missing a test for:".
+            lines.append('- Bad-request tests: none generated for this endpoint yet')
         if args.run_url:
             lines += ['', f'Full table: {args.run_url}']
         lines += ['', f'How to fix a gap: [guide]({GUIDE_URL}#closing-a-gap)']

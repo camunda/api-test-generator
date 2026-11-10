@@ -156,6 +156,17 @@ describe('per-endpoint coverage gap issues', () => {
     expect(byOp.k).not.toContain('—');
   });
 
+  it('still lists a bullet when the endpoint has no generated bad-request test at all', () => {
+    // request_check_state() reports a gap with an empty requestMissing when the negative suite generated
+    // no scenario for the endpoint; with its response codes covered, the body would otherwise have no
+    // bullet under "is missing a test for:". The fallback keeps it non-empty.
+    const noRv: Row = { ...ok('n'), area: 'Files', requestChecks: 'gap', requestMissing: [] };
+    const [[, body]] = endpointIssues([noRv]);
+    expect(body).toContain('- Bad-request tests: none generated for this endpoint yet');
+    expect(body).toMatch(/is missing a test for:\n\n- /);
+    expect(body).not.toContain('—');
+  });
+
   it('ends every endpoint issue with a link to the guide on fixing a gap', () => {
     const [[, body]] = endpointIssues([gap('f1', 'Files')]);
     expect(body).toContain(
