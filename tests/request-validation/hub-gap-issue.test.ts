@@ -133,7 +133,7 @@ describe('per-endpoint coverage gap issues', () => {
     ]);
   });
 
-  it('states the missing responses and bad-request kinds, and the endpoint, in the body', () => {
+  it('lists only the dimension actually missing, omitting a covered one (no "—" placeholder)', () => {
     const kinds: Row = {
       ...ok('k'),
       area: 'Files',
@@ -143,11 +143,16 @@ describe('per-endpoint coverage gap issues', () => {
     const byOp = Object.fromEntries(
       endpointIssues([gap('r', 'Files'), kinds]).map(([, body, op]) => [op, body]),
     );
+    // `r` has only a response-code gap: the bad-request line is omitted, not shown as "—".
     expect(byOp.r).toContain('`r` (`GET /r`) in the **Files** area');
-    expect(byOp.r).toContain('- Responses: 404');
-    expect(byOp.r).toContain('- Bad-request kinds: —');
-    expect(byOp.k).toContain('- Responses: —');
+    expect(byOp.r).toContain('- Response status codes: 404');
+    expect(byOp.r).not.toContain('Bad-request kinds:');
+    // `k` has only a bad-request gap: the response-code line is omitted.
+    expect(byOp.k).not.toContain('Response status codes:');
     expect(byOp.k).toContain('- Bad-request kinds: param-missing');
+    // Never the cryptic dash placeholder.
+    expect(byOp.r).not.toContain('—');
+    expect(byOp.k).not.toContain('—');
   });
 
   it('ends every endpoint issue with a link to the guide on fixing a gap', () => {
@@ -242,7 +247,6 @@ fi
       .split('\n')
       .filter((l) => l && !l.startsWith('gh issue list')),
     issueUrl: read('issue-url.txt').trim(),
-    endpointLinks: read('endpoint-links.txt').trim().split('\n').filter(Boolean),
     endpointIndex: read('endpoint-index.md').trim().split('\n').filter(Boolean),
     endpointIssues: ((raw) => (raw ? JSON.parse(raw) : undefined))(read('endpoint-issues.json')),
     rendered: read('issue.rendered.md'),
@@ -328,7 +332,7 @@ describe('summary issue lifecycle (stub gh)', () => {
 });
 
 describe('per-endpoint issue lifecycle (stub gh)', () => {
-  it('creates, updates and reopens by exact title, and links each one', () => {
+  it('creates, updates and reopens by exact title', () => {
     const r = runIssueScript(
       'hub-coverage-endpoint-issues.sh',
       endpointFiles('newOp', 'openOp', 'shutOp'),
@@ -341,11 +345,6 @@ describe('per-endpoint issue lifecycle (stub gh)', () => {
     expect(r.calls.filter((c) => c.includes('issue create'))).toHaveLength(1);
     expect(r.calls).toContain('gh issue reopen 6');
     expect(r.calls.some((c) => c.startsWith('gh issue edit 5 '))).toBe(true);
-    expect(r.endpointLinks).toEqual([
-      '<https://example.test/issues/101|newOp (Files)>',
-      '<https://example.test/issues/5|openOp (Files)>',
-      '<https://example.test/issues/6|shutOp (Files)>',
-    ]);
   });
 
   it('writes endpoint-issues.json mapping each endpoint with an issue to its number', () => {
@@ -424,10 +423,11 @@ describe('per-endpoint issue lifecycle (stub gh)', () => {
       ...NO_HUB,
     });
     expect(r.calls.filter((c) => c.includes('issue create'))).toHaveLength(2);
-    expect(r.endpointLinks).toEqual([
-      '<https://example.test/issues/101|a (Files)>',
-      '<https://example.test/issues/102|b (Files)>',
-      'c (Files)',
+    // a and b get linked index lines; the capped c is still listed, unlinked, in the index.
+    expect(r.endpointIndex).toEqual([
+      '- [ ] #101 `a` — Files',
+      '- [ ] #102 `b` — Files',
+      '- `c` — Files (its issue opens on a later run)',
     ]);
   });
 

@@ -693,16 +693,20 @@ def endpoint_issues(rows, args):
     out = []
     for r in sorted(gap_rows(rows), key=lambda row: (row.get('area', 'Other'), row['operationId'])):
         op, area = r['operationId'], r.get('area', 'Other')
-        codes = ', '.join(('success' if b == '2xx' else b) for b in BUCKETS if r['cells'].get(b) == 'gap') or '—'
-        kinds = ', '.join(r['requestMissing']) or '—'
+        codes = [('success' if b == '2xx' else b) for b in BUCKETS if r['cells'].get(b) == 'gap']
+        kinds = list(r['requestMissing'])
         lines = [
             '_Kept up to date by the weekly **Hub response coverage** workflow: rewritten every Monday, '
             'closed automatically once this endpoint has nothing missing, reopened if a gap returns. '
             'Please do not edit it by hand._', '',
             f'`{op}` (`{r["method"]} {r["path"]}`) in the **{area}** area is missing a test for:', '',
-            f'- Responses: {codes}',
-            f'- Bad-request kinds: {kinds}',
         ]
+        # Only list a dimension that actually has a gap (gap_rows guarantees at least one), so a covered
+        # dimension is simply absent rather than shown as a cryptic "—".
+        if codes:
+            lines.append(f'- Response status codes: {", ".join(codes)}')
+        if kinds:
+            lines.append(f'- Bad-request kinds: {", ".join(kinds)}')
         if args.run_url:
             lines += ['', f'Full table: {args.run_url}']
         lines += ['', f'How to fix a gap: [guide]({GUIDE_URL}#closing-a-gap)']

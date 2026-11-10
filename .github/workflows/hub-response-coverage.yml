@@ -268,10 +268,7 @@ jobs:
           if [ "${{ job.status }}" = "success" ]; then
             text="$(cat coverage-report/slack.txt)"
             if [ -s coverage-report/issue-url.txt ]; then
-              text="$text"$'\n'"<$(cat coverage-report/issue-url.txt)|Tracking issue>"
-            fi
-            if [ -s coverage-report/endpoint-links.txt ]; then
-              text="$text"$'\n'"Endpoint issues: $(paste -sd'\t' coverage-report/endpoint-links.txt | sed 's/\t/ · /g')"
+              text="$text"$'\n'"<$(cat coverage-report/issue-url.txt)|Tracking issue> — indexes every per-endpoint issue, grouped by area"
             fi
           else
             text=":warning: *camunda-hub response coverage* could not run this week — see ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
