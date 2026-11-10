@@ -1,39 +1,34 @@
-# Default owner: the test automation team owns the generator engine, the shared
-# tooling, and the camunda-oca config. (Narrowed from the repo-wide @camunda/hub
-# default that #718 set — Hub review is now requested only on the Hub-facing
-# surface below, so an engine/tooling-internal PR no longer pages the Hub team.)
+# Default owner: the test automation team. It owns the generator engine, the shared tooling, the
+# camunda-oca config, AND the hub report/triage tooling — the weekly coverage report, the nightly triage
+# agent, the coverage-fix agent, issue-filing, Slack notifications, digests and janitors, and their docs
+# and agent playbooks. Changes to that machinery (its formatting, plumbing, routing) are test automation's
+# to review, not the Hub team's.
 *  @camunda/test-automation-team
 
-# Hub-facing surface — what gets tested for camunda-hub, and how the Hub team is
-# notified / assigned / routed onto their board — is the Hub team's to review.
-# Test automation stays a co-owner of the shared CI plumbing, so either team can
-# review. CODEOWNERS is last-match-wins, so these override the `*` default above.
+# Hub-facing surface — the Hub team co-owns only two things:
+#   1. What gets tested for camunda-hub: the camunda-hub config (and the spec-bump that keeps the tested
+#      spec current).
+#   2. What BUILDS, STARTS or RUNS the suite against Hub: the suite-run / nightly / PR-check / on-demand
+#      workflows, the Hub runtime (docker), and the clone / token / wait / run-summary plumbing.
+# Everything the automation does with the RESULTS (report, triage, file issues, notify, digest, clean up)
+# stays on the `*` default above. CODEOWNERS is last-match-wins, so the rules below override `*`.
+
+# 1. What gets tested.
 /configs/camunda-hub/                               @camunda/hub @camunda/test-automation-team
-/docs/hub-*.md                                      @camunda/hub @camunda/test-automation-team
-/docs/how-it-works.md                               @camunda/hub @camunda/test-automation-team
-# The Hub suite's own composite actions (clone the camunda-hub sibling, mint its clone
-# token, wait for Hub, summarise the Hub run) are Hub-facing. slack-token and
-# fail-if-slack-failed are deliberately NOT co-owned here: they mint the Slack token and
-# guard the Slack alert for the OCA leg of spec-bump-check too, so they are shared and
-# stay on the test-automation default.
+/.github/workflows/spec-bump-check.yml              @camunda/hub @camunda/test-automation-team
+/.github/scripts/spec-bump-open-pr.sh               @camunda/hub @camunda/test-automation-team
+
+# 2. Building / starting / running the suite against Hub. (slack-token and fail-if-slack-failed are NOT
+# here: they serve the OCA leg of spec-bump-check too, so they stay shared on the default.)
 /.github/actions/clone-hub-sibling/                 @camunda/hub @camunda/test-automation-team
 /.github/actions/hub-clone-token/                   @camunda/hub @camunda/test-automation-team
-/.github/actions/hub-run-summary/                   @camunda/hub @camunda/test-automation-team
 /.github/actions/wait-for-hub/                      @camunda/hub @camunda/test-automation-team
-/.github/scripts/hub-*                              @camunda/hub @camunda/test-automation-team
-/.github/scripts/request-hub-author-review.sh       @camunda/hub @camunda/test-automation-team
-/.github/scripts/spec-bump-open-pr.sh               @camunda/hub @camunda/test-automation-team
-/scripts/triage/hub-*                               @camunda/hub @camunda/test-automation-team
-/scripts/triage/slack-*                             @camunda/hub @camunda/test-automation-team
-/scripts/e2e/hub_*.py                               @camunda/hub @camunda/test-automation-team
+/.github/actions/hub-run-summary/                   @camunda/hub @camunda/test-automation-team
 /scripts/e2e/run-hub.sh                             @camunda/hub @camunda/test-automation-team
-/scripts/e2e/verify-negative-failures.py            @camunda/hub @camunda/test-automation-team
 /docker/start-hub.sh                                @camunda/hub @camunda/test-automation-team
 /docker/docker-compose.hub.yml                      @camunda/hub @camunda/test-automation-team
-/.github/workflows/hub-*.yml                        @camunda/hub @camunda/test-automation-team
-/.github/workflows/nightly-camunda-hub.yml          @camunda/hub @camunda/test-automation-team
-/.github/workflows/triage-camunda-hub-nightly.yml   @camunda/hub @camunda/test-automation-team
-/.github/workflows/spec-bump-check.yml              @camunda/hub @camunda/test-automation-team
 /.github/workflows/_hub-suite-run.yml               @camunda/hub @camunda/test-automation-team
-/.github/workflows/close-stale-nightly-api-fix-prs.yml  @camunda/hub @camunda/test-automation-team
-/resources/workspace-templates/camunda-hub-*/       @camunda/hub @camunda/test-automation-team
+/.github/workflows/nightly-camunda-hub.yml          @camunda/hub @camunda/test-automation-team
+/.github/workflows/hub-pr-check.yml                 @camunda/hub @camunda/test-automation-team
+/.github/workflows/hub-pr-live-check.yml            @camunda/hub @camunda/test-automation-team
+/.github/workflows/hub-ondemand-test.yml            @camunda/hub @camunda/test-automation-team
