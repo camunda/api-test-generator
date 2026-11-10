@@ -9,6 +9,7 @@ import {
   generateMultipleOfViolations,
   generateNestedAdditionalProps,
   generateUniqueItemsViolations,
+  isFormatInvalidEligible,
 } from '../src/analysis/advancedSchema.js';
 import {
   generateAllOfConflicts,
@@ -1463,7 +1464,12 @@ async function main() {
         if (f.hasUniqueItems) applicable.add('unique-items-violation');
         if (f.hasMultipleOf) applicable.add('multiple-of-violation');
         if (f.hasConstraints) applicable.add('constraint-violation');
-        if (f.hasFormats) applicable.add('format-invalid');
+        if (
+          isFormatInvalidEligible(op, {
+            unenforcedStringFormats: rvConfig.unenforcedStringFormats,
+          })
+        )
+          applicable.add('format-invalid');
       }
     }
     // auth-absent/auth-invalid (#495) target the same operation set (shared

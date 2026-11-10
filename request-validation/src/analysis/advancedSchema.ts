@@ -158,6 +158,18 @@ export function generateMultipleOfViolations(
   return out;
 }
 
+/**
+ * The coverage report's applicability check for `format-invalid`. A `format` alone is not enough: the
+ * generator only breaks string formats it has an invalid value for, skips unenforced formats, and needs
+ * the field in the baseline body. Asking the generator itself keeps the two from drifting apart.
+ */
+export function isFormatInvalidEligible(
+  op: OperationModel,
+  opts: Pick<Opts, 'unenforcedStringFormats'>,
+): boolean {
+  return generateFormatInvalid([op], opts).length > 0;
+}
+
 export function generateFormatInvalid(ops: OperationModel[], opts: Opts): ValidationScenario[] {
   const out: ValidationScenario[] = [];
   // Shared with the parameter generators. `date` stays out: this body generator has never emitted
