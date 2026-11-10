@@ -29,7 +29,10 @@ import {
   isMissingBodyEligible,
 } from '../src/analysis/bodyTopLevel.js';
 import { generateBodyTypeMismatch } from '../src/analysis/bodyTypeMismatch.js';
-import { generateConstraintViolations } from '../src/analysis/constraintViolations.js';
+import {
+  generateConstraintViolations,
+  isConstraintViolationEligible,
+} from '../src/analysis/constraintViolations.js';
 import { generateDeepMissingRequired } from '../src/analysis/deepMissingRequired.js';
 import { generateDiscriminatorMismatch } from '../src/analysis/discriminatorMismatch.js';
 import { generateEnumViolations } from '../src/analysis/enumViolations.js';
@@ -1463,7 +1466,8 @@ async function main() {
         if (isAllOfConflictEligible(op)) applicable.add('allof-conflict');
         if (f.hasUniqueItems) applicable.add('unique-items-violation');
         if (f.hasMultipleOf) applicable.add('multiple-of-violation');
-        if (f.hasConstraints) applicable.add('constraint-violation');
+        if (isConstraintViolationEligible(op, { capabilityGates }))
+          applicable.add('constraint-violation');
         if (
           isFormatInvalidEligible(op, {
             unenforcedStringFormats: rvConfig.unenforcedStringFormats,
