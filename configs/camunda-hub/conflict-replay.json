@@ -133,6 +133,23 @@
         }
       },
       "reason": "Restoring an element-template version without the required `version` answers 400 ('version' must not be null). Verified live against camunda/hub:SNAPSHOT."
+    },
+    {
+      "name": "template-deleted-since-snapshot",
+      "operationId": "restoreProjectSnapshot",
+      "expectStatus": 409,
+      "before": [
+        {
+          "operationId": "createFile",
+          "body": {
+            "type": "element-template",
+            "content": "{\"$schema\":\"https://unpkg.com/@camunda/element-templates-json-schema/resources/schema.json\",\"name\":\"Hub API test template\",\"id\":\"io.camunda.test.hub-api-tests.element-template\",\"appliesTo\":[\"bpmn:Task\"],\"properties\":[],\"version\":1}"
+          }
+        },
+        "createProjectSnapshot",
+        "deleteFile"
+      ],
+      "reason": "Restoring a project snapshot that contains an element-template file deleted since the snapshot answers 409 (DeletedElementTemplateRestoreException: the deleted template blocks the whole restore)."
     }
   ],
   "untested": [
@@ -145,11 +162,6 @@
       "operationId": "updateProject",
       "issue": "https://github.com/camunda/api-test-generator/issues/638",
       "reason": "The documented conflict needs a migration-created catch-all project, which the public API cannot create."
-    },
-    {
-      "operationId": "restoreProjectSnapshot",
-      "issue": "https://github.com/camunda/api-test-generator/issues/638",
-      "reason": "Documented 409 could not be provoked on a live Hub."
     }
   ]
 }

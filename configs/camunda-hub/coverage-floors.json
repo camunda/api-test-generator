@@ -6,11 +6,11 @@
     "401": 64,
     "403": 63,
     "404": 42,
-    "409": 9
+    "409": 10
   },
   "optionalFieldsSent": 63,
   "requestChecksCovered": 32,
-  "fullyAssertedOperations": 56,
+  "fullyAssertedOperations": 58,
   "lifecycleCreateCovered": 6,
   "lifecycleRestoreCovered": 4,
   "lifecycleEdgeCovered": 1,
