@@ -132,6 +132,25 @@ describe('request-validation: resource-fixture emit (#352)', () => {
     expect(out).toContain('process.env["RV_FIXTURE_CATALOG_ASSET_KEY"] || "x"');
   });
 
+  it('substitutes the credentialKey filler from the hub config map', () => {
+    // Regression guard (#757): every op on /credentials/{credentialKey} binds the
+    // path variable to a Credential before it reads the body or the query, so a
+    // filler key 404s and every 400-expecting scenario on that path fails.
+    // scripts/e2e/run-hub.sh make_fixtures creates the credential.
+    const hubFixtures = loadHubResourceFixtures();
+    expect(hubFixtures.credentialKey).toBe('RV_FIXTURE_CREDENTIAL_KEY');
+    const out = renderScenarioForTest(
+      scenario({
+        method: 'PATCH',
+        path: '/credentials/{credentialKey}',
+        params: { credentialKey: 'x' },
+      }),
+      'probe',
+      hubFixtures,
+    );
+    expect(out).toContain('process.env["RV_FIXTURE_CREDENTIAL_KEY"] || "x"');
+  });
+
   // Representative path template for each of camunda-oca's four
   // pathResourceFixtures-only runtime keys (#614). The expected env var name
   // for each comes from RUNTIME_KEY_ENV_VARS — support/global-setup.ts's own

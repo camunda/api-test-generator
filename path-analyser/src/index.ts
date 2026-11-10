@@ -1743,6 +1743,25 @@ export function buildRequestBodyFromCanonical(
         }
       }
     }
+    // An optional top-level ARRAY field (recorded as `field[]`) has no scalar
+    // binding to fill it from, so the loop above skips it. A request default
+    // declared for this operation fills it instead: e.g. Hub's createCredential
+    // needs a `credentialTemplateSchema` for any credential template Hub cannot
+    // look up (#757). Only `operations.<opId>` defaults apply, not `global`
+    // ones, so a global array default (camunda-oca's `fetchVariable`,
+    // `tenantIds`) is not sent by every operation that declares the field.
+    const operationDefaults = loadRequestDefaults().operations?.[opId];
+    if (operationDefaults) {
+      for (const f of nodes.filter((n) => !n.required && n.path.endsWith('[]'))) {
+        const leaf = f.path.slice(0, -2);
+        if (leaf.includes('[]') || leaf.includes('.')) continue;
+        if (allowedFields && !allowedFields.has(leaf)) continue;
+        if (variantLeafNames?.has(leaf)) continue;
+        if (template[leaf] === undefined && Object.hasOwn(operationDefaults, leaf)) {
+          template[leaf] = operationDefaults[leaf];
+        }
+      }
+    }
     // Fallback: ensure all domain request.* bindings are present even if
     // canonical nodes are missing (e.g., oneOf variants). Restricted to
     // top-level fields for the same reason as the loop above — deep-leaf
