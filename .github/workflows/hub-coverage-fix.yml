@@ -36,8 +36,6 @@ defaults:
 
 permissions:
   contents: read
-  # OIDC token so Vault can authenticate this job via JWT (no long-lived secrets).
-  id-token: write
   # Read the report run's artifact (download-artifact across runs).
   actions: read
   # Read the agent's own PR history and the open PRs (github.token, not the App token).
@@ -55,6 +53,77 @@ env:
   DRY_RUN: ${{ github.event_name == 'workflow_run' && 'false' || github.event.inputs.dry_run || 'true' }}
 
 jobs:
+  fix-secrets:
+    name: Wrap secrets for the coverage-fix agent
+    if: >-
+      ${{ github.event_name != 'workflow_run' || (
+        vars.COVERAGE_FIX_AUTO != 'false'
+        && github.event.workflow_run.conclusion == 'success'
+        && github.event.workflow_run.event == 'schedule'
+        && github.event.workflow_run.head_branch == 'main') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      wrap-token: ${{ steps.wrap.outputs.wrap-token }}
+    steps:
+      # --- Credentials ---------------------------------------------------------
+      # The only write token. Scoped to api-test-generator (the same grant spec-bump-check.yml uses
+      # for its bump PRs). There is deliberately NO token for camunda-hub: the agent cannot write
+      # there. In a dry run no write token is minted at all, so nothing can be pushed.
+      - name: Generate qa-processes App token (api-test-generator draft PRs)
+        id: qa-token-generator
+        if: ${{ env.DRY_RUN != 'true' }}
+        continue-on-error: true
+        uses: camunda/infra-global-github-actions/generate-github-app-token-from-vault-secrets@7a9c6f3e477321400802c88290068f88a7ed5684
+        with:
+          github-app-id-vault-key: GITHUB_APP_ID
+          github-app-id-vault-path: secret/data/products/qa/ci/github.com/apps/camunda/qa-processes
+          github-app-private-key-vault-key: GITHUB_APP_SECRET
+          github-app-private-key-vault-path: secret/data/products/qa/ci/github.com/apps/camunda/qa-processes
+          vault-auth-method: jwt
+          vault-auth-jwt-path: ${{ secrets.VAULT_JWT_PATH }}
+          vault-auth-jwt-role: ${{ secrets.VAULT_JWT_ROLE }}
+          vault-auth-jwt-audience: ${{ secrets.VAULT_JWT_AUDIENCE }}
+          vault-url: ${{ secrets.VAULT_ADDR }}
+          owner: camunda
+          repositories: api-test-generator
+          skip-token-revoke: true
+
+      # Read-only clone token for the private camunda-hub (Contents: Read).
+      - name: Mint camunda-hub clone token
+        id: hub-token
+        # Empty on failure: the agent job stops with a clear error at "Configure git credentials" when it needs the token.
+        continue-on-error: true
+        uses: camunda/infra-global-github-actions/generate-github-app-token-from-vault-secrets@7a9c6f3e477321400802c88290068f88a7ed5684
+        with:
+          github-app-id-vault-key: GITHUB_PREVIEW_ENVIRONMENTS_APP_ID
+          github-app-id-vault-path: secret/data/products/web-modeler/ci/preview-envs
+          github-app-private-key-vault-key: GITHUB_PREVIEW_ENVIRONMENTS_APP_PRIVATE_KEY
+          github-app-private-key-vault-path: secret/data/products/web-modeler/ci/preview-envs
+          vault-auth-method: jwt
+          vault-auth-jwt-path: ${{ secrets.VAULT_JWT_PATH }}
+          vault-auth-jwt-role: ${{ secrets.VAULT_JWT_ROLE }}
+          vault-auth-jwt-audience: ${{ secrets.VAULT_JWT_AUDIENCE }}
+          vault-url: ${{ secrets.VAULT_ADDR }}
+          owner: camunda
+          repositories: camunda-hub
+          skip-token-revoke: true
+
+      - name: Wrap secrets for the agent job
+        id: wrap
+        uses: camunda/infra-global-github-actions/vault-wrapped-secrets/wrap@c21e31eece771eb13d6c5e08e8831c9de62888bd # vault-wrapped-secrets-1.0.0
+        with:
+          vault-url: ${{ secrets.VAULT_ADDR }}
+          vault-auth-jwt-path: ${{ secrets.VAULT_JWT_PATH }}
+          vault-auth-jwt-role: ${{ secrets.VAULT_JWT_ROLE }}
+          vault-auth-jwt-audience: ${{ secrets.VAULT_JWT_AUDIENCE }}
+          secrets: |
+            secret/data/products/qa/ci/common CLAUDE_API_KEY | ANTHROPIC_API_KEY
+            secret/data/products/qa/ci/common GH_TOKEN | GH_PAT
+          values: '{"GH_TOKEN_GENERATOR": "${{ steps.qa-token-generator.outputs.token }}", "HUB_CLONE_TOKEN": "${{ steps.hub-token.outputs.token }}"}'
+
   fix:
     name: Report → limits → workspace → Claude coverage-fix → result
     # A manual run always goes ahead. A run after the weekly report goes ahead unless it is switched off, and needs a
@@ -65,6 +134,7 @@ jobs:
         && github.event.workflow_run.conclusion == 'success'
         && github.event.workflow_run.event == 'schedule'
         && github.event.workflow_run.head_branch == 'main') }}
+    needs: fix-secrets
     runs-on: ubuntu-latest
     timeout-minutes: 45
     # What the verify job needs, taken from steps that finished before the agent started.
@@ -76,6 +146,13 @@ jobs:
       # The weekly report run this run read: its tracking issue and Slack message get the run's report.
       report_run_id: ${{ steps.report-run.outputs.run_id }}
     steps:
+      - name: Unwrap secrets from Vault
+        id: vault
+        uses: camunda/infra-global-github-actions/vault-wrapped-secrets/unwrap@c21e31eece771eb13d6c5e08e8831c9de62888bd # vault-wrapped-secrets-1.0.0
+        with:
+          vault-url: ${{ secrets.VAULT_ADDR }}
+          wrap-token: ${{ needs.fix-secrets.outputs.wrap-token }}
+
       - name: Checkout api-test-generator
         uses: actions/checkout@v6
         with:
@@ -234,63 +311,13 @@ jobs:
           path: ${{ github.workspace }}/selection.json
           if-no-files-found: error
 
-      # --- Credentials ---------------------------------------------------------
-      - name: Fetch Anthropic key + GitHub PAT from Vault
-        id: vault
-        if: ${{ steps.select.outputs.count != '0' }}
-        uses: hashicorp/vault-action@v4
-        with:
-          url: ${{ secrets.VAULT_ADDR }}
-          method: jwt
-          path: ${{ secrets.VAULT_JWT_PATH }}
-          role: ${{ secrets.VAULT_JWT_ROLE }}
-          jwtGithubAudience: ${{ secrets.VAULT_JWT_AUDIENCE }}
-          # Only the step outputs are used. Exporting would leave the workspace-install PAT in the
-          # environment of every later step, including the agent.
-          exportEnv: false
-          secrets: |
-            secret/data/products/qa/ci/common CLAUDE_API_KEY | ANTHROPIC_API_KEY ;
-            secret/data/products/qa/ci/common GH_TOKEN | GH_PAT ;
-
-      # The only write token. Scoped to api-test-generator (the same grant spec-bump-check.yml uses
-      # for its bump PRs). There is deliberately NO token for camunda-hub: the agent cannot write
-      # there. In a dry run no write token is minted at all, so nothing can be pushed.
-      - name: Generate qa-processes App token (api-test-generator draft PRs)
-        id: qa-token-generator
-        if: ${{ steps.select.outputs.count != '0' && env.DRY_RUN != 'true' }}
-        continue-on-error: true
-        uses: camunda/infra-global-github-actions/generate-github-app-token-from-vault-secrets@7a9c6f3e477321400802c88290068f88a7ed5684
-        with:
-          github-app-id-vault-key: GITHUB_APP_ID
-          github-app-id-vault-path: secret/data/products/qa/ci/github.com/apps/camunda/qa-processes
-          github-app-private-key-vault-key: GITHUB_APP_SECRET
-          github-app-private-key-vault-path: secret/data/products/qa/ci/github.com/apps/camunda/qa-processes
-          vault-auth-method: jwt
-          vault-auth-jwt-path: ${{ secrets.VAULT_JWT_PATH }}
-          vault-auth-jwt-role: ${{ secrets.VAULT_JWT_ROLE }}
-          vault-auth-jwt-audience: ${{ secrets.VAULT_JWT_AUDIENCE }}
-          vault-url: ${{ secrets.VAULT_ADDR }}
-          owner: camunda
-          repositories: api-test-generator
-
       - name: Ensure labels exist (api-test-generator)
-        if: ${{ steps.qa-token-generator.outputs.token != '' }}
+        if: ${{ steps.select.outputs.count != '0' && fromJSON(steps.vault.outputs.secrets).GH_TOKEN_GENERATOR != '' }}
         env:
-          GH_TOKEN: ${{ steps.qa-token-generator.outputs.token }}
+          GH_TOKEN: ${{ fromJSON(steps.vault.outputs.secrets).GH_TOKEN_GENERATOR }}
         run: |
           gh label create nightly-api-fix --repo camunda/api-test-generator --color FF4444 --description "Bot-opened fix PR for a nightly triage finding (test-generation bug or coverage gap)" 2>/dev/null || true
           gh label create auto-generated --repo camunda/api-test-generator --color ededed --description "Opened by automation, not a human" 2>/dev/null || true
-
-      # Read-only clone token for the private camunda-hub (Contents: Read).
-      - name: Mint camunda-hub clone token
-        id: hub-token
-        if: ${{ steps.select.outputs.count != '0' }}
-        uses: ./.github/actions/hub-clone-token
-        with:
-          vault-url: ${{ secrets.VAULT_ADDR }}
-          vault-jwt-path: ${{ secrets.VAULT_JWT_PATH }}
-          vault-jwt-role: ${{ secrets.VAULT_JWT_ROLE }}
-          vault-jwt-audience: ${{ secrets.VAULT_JWT_AUDIENCE }}
 
       # --- Toolchain (same pins as triage-camunda-hub-nightly.yml; bump together) ----
       - name: Setup Go (for workspace-cli)
@@ -303,7 +330,7 @@ jobs:
         if: ${{ steps.select.outputs.count != '0' }}
         env:
           GOPRIVATE: github.com/camunda/*
-          GH_PAT: ${{ steps.vault.outputs.GH_PAT }}
+          GH_PAT: ${{ fromJSON(steps.vault.outputs.secrets).GH_PAT }}
         run: |
           set -euo pipefail
           if [ -z "$GH_PAT" ]; then
@@ -329,7 +356,7 @@ jobs:
       - name: Configure git credentials for cloning camunda-hub
         if: ${{ steps.select.outputs.count != '0' }}
         env:
-          HUB_TOKEN: ${{ steps.hub-token.outputs.token }}
+          HUB_TOKEN: ${{ fromJSON(steps.vault.outputs.secrets).HUB_CLONE_TOKEN }}
         run: |
           set -euo pipefail
           if [ -z "$HUB_TOKEN" ]; then
@@ -427,9 +454,9 @@ jobs:
         id: agent
         if: ${{ steps.select.outputs.count != '0' }}
         env:
-          ANTHROPIC_API_KEY: ${{ steps.vault.outputs.ANTHROPIC_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ fromJSON(steps.vault.outputs.secrets).ANTHROPIC_API_KEY }}
           # Empty in a dry run (no token is minted), so a push or `gh pr create` fails by design.
-          GH_TOKEN_GENERATOR: ${{ steps.qa-token-generator.outputs.token }}
+          GH_TOKEN_GENERATOR: ${{ fromJSON(steps.vault.outputs.secrets).GH_TOKEN_GENERATOR }}
           COVERAGE_REPORT_DIR: ${{ env.REPORT_DIR }}
           COVERAGE_CANDIDATES_FILE: ${{ github.workspace }}/selection.json
           OPEN_FIX_PRS_FILE: ${{ github.workspace }}/open-fix-prs.json

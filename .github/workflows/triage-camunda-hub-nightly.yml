@@ -43,8 +43,6 @@ defaults:
 
 permissions:
   contents: read
-  # OIDC token so Vault can authenticate this job via JWT (no long-lived secrets).
-  id-token: write
   # Read the triggering run's artifacts (download-artifact across runs).
   actions: read
   # An explicit `permissions:` block replaces the default token scope entirely
@@ -65,8 +63,134 @@ env:
   REPORTS_DIR: ${{ github.workspace }}/hub-reports
 
 jobs:
+  triage-secrets:
+    name: Wrap secrets for the triage agent
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.head_repository.full_name == github.repository &&
+       github.event.workflow_run.head_branch == 'main')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      wrap-token: ${{ steps.wrap.outputs.wrap-token }}
+      slack-wrap-token: ${{ steps.wrap-slack.outputs.wrap-token }}
+    steps:
+      # Every step here is best effort (continue-on-error): the triage job must still start on a night with no
+      # reports, to announce that, and the steps that need a value fail on their own when it is missing.
+      # Two separately-scoped GitHub App tokens — the agent's write access is
+      # asymmetric by design (camunda-hub: issues only; api-test-generator: may
+      # open a PR for a confirmed test-generation/coverage fix), so each repo
+      # gets its own token rather than one broad grant. Same App + Vault wiring
+      # as spec-bump-check.yml and the stale-PR janitor in both cases.
+      # continue-on-error: if the App can't reach a repo, that token is empty
+      # and the agent degrades to report-only for that repo (Slack still
+      # surfaces the bug) rather than failing the run.
+      - name: Generate qa-processes App token (camunda-hub issues)
+        id: qa-token-hub
+        continue-on-error: true
+        # Pinned SHA — same pin as spec-bump-check.yml + the janitor. Bump intentionally.
+        uses: camunda/infra-global-github-actions/generate-github-app-token-from-vault-secrets@7a9c6f3e477321400802c88290068f88a7ed5684
+        with:
+          github-app-id-vault-key: GITHUB_APP_ID
+          github-app-id-vault-path: secret/data/products/qa/ci/github.com/apps/camunda/qa-processes
+          github-app-private-key-vault-key: GITHUB_APP_SECRET
+          github-app-private-key-vault-path: secret/data/products/qa/ci/github.com/apps/camunda/qa-processes
+          vault-auth-method: jwt
+          vault-auth-jwt-path: ${{ secrets.VAULT_JWT_PATH }}
+          vault-auth-jwt-role: ${{ secrets.VAULT_JWT_ROLE }}
+          vault-auth-jwt-audience: ${{ secrets.VAULT_JWT_AUDIENCE }}
+          vault-url: ${{ secrets.VAULT_ADDR }}
+          owner: camunda
+          repositories: camunda-hub
+          skip-token-revoke: true
+
+      # Same App, scoped to api-test-generator instead — this is the SAME grant
+      # (contents:write + pull-requests:write) spec-bump-check.yml's bump-PR
+      # token already uses successfully on this repo (e.g. the chore/spec-bump-*
+      # PRs), so opening a fix PR here needs no new App permission.
+      - name: Generate qa-processes App token (api-test-generator fix PRs)
+        id: qa-token-generator
+        continue-on-error: true
+        uses: camunda/infra-global-github-actions/generate-github-app-token-from-vault-secrets@7a9c6f3e477321400802c88290068f88a7ed5684
+        with:
+          github-app-id-vault-key: GITHUB_APP_ID
+          github-app-id-vault-path: secret/data/products/qa/ci/github.com/apps/camunda/qa-processes
+          github-app-private-key-vault-key: GITHUB_APP_SECRET
+          github-app-private-key-vault-path: secret/data/products/qa/ci/github.com/apps/camunda/qa-processes
+          vault-auth-method: jwt
+          vault-auth-jwt-path: ${{ secrets.VAULT_JWT_PATH }}
+          vault-auth-jwt-role: ${{ secrets.VAULT_JWT_ROLE }}
+          vault-auth-jwt-audience: ${{ secrets.VAULT_JWT_AUDIENCE }}
+          vault-url: ${{ secrets.VAULT_ADDR }}
+          owner: camunda
+          repositories: api-test-generator
+          skip-token-revoke: true
+
+      # Clone token for the private camunda-hub (Contents:Read). A single git
+      # `insteadOf` with this App installation token clones camunda-hub AND the two
+      # public repos (installation tokens can read public repos), so workspace-cli
+      # resolves all three from the manifest without extra creds.
+      - name: Mint camunda-hub clone token
+        id: hub-token
+        continue-on-error: true
+        uses: camunda/infra-global-github-actions/generate-github-app-token-from-vault-secrets@7a9c6f3e477321400802c88290068f88a7ed5684
+        with:
+          github-app-id-vault-key: GITHUB_PREVIEW_ENVIRONMENTS_APP_ID
+          github-app-id-vault-path: secret/data/products/web-modeler/ci/preview-envs
+          github-app-private-key-vault-key: GITHUB_PREVIEW_ENVIRONMENTS_APP_PRIVATE_KEY
+          github-app-private-key-vault-path: secret/data/products/web-modeler/ci/preview-envs
+          vault-auth-method: jwt
+          vault-auth-jwt-path: ${{ secrets.VAULT_JWT_PATH }}
+          vault-auth-jwt-role: ${{ secrets.VAULT_JWT_ROLE }}
+          vault-auth-jwt-audience: ${{ secrets.VAULT_JWT_AUDIENCE }}
+          vault-url: ${{ secrets.VAULT_ADDR }}
+          owner: camunda
+          repositories: camunda-hub
+          skip-token-revoke: true
+
+      # --- Secrets from Vault (GitHub OIDC/JWT) -------------------------------
+      # Anthropic key + a GitHub PAT, from the SAME Vault KV path this repo's
+      # nightly already reads (SLACK_BOT_USER_OAUTH_TOKEN + TESTRAIL_*), so no
+      # new policy is needed — KV v2 read is path-level. Key names match what
+      # lives at qa/ci/common: CLAUDE_API_KEY, GH_TOKEN. (GitHub *writes* use
+      # the qa-processes App tokens below, not this PAT — it exists solely to
+      # authenticate the workspace-cli install below, see that step's comment.
+      # A missing key is not caught here (see the note on this job's steps): the triage job's
+      # PAT guard and the agent step fail on the empty value, so it still shows up loudly.
+      - name: Wrap secrets for the agent job
+        id: wrap
+        continue-on-error: true
+        uses: camunda/infra-global-github-actions/vault-wrapped-secrets/wrap@c21e31eece771eb13d6c5e08e8831c9de62888bd # vault-wrapped-secrets-1.0.0
+        with:
+          vault-url: ${{ secrets.VAULT_ADDR }}
+          vault-auth-jwt-path: ${{ secrets.VAULT_JWT_PATH }}
+          vault-auth-jwt-role: ${{ secrets.VAULT_JWT_ROLE }}
+          vault-auth-jwt-audience: ${{ secrets.VAULT_JWT_AUDIENCE }}
+          secrets: |
+            secret/data/products/qa/ci/common CLAUDE_API_KEY | ANTHROPIC_API_KEY
+            secret/data/products/qa/ci/common GH_TOKEN | GH_PAT
+          values: '{"GH_TOKEN_HUB": "${{ steps.qa-token-hub.outputs.token }}", "GH_TOKEN_GENERATOR": "${{ steps.qa-token-generator.outputs.token }}", "HUB_CLONE_TOKEN": "${{ steps.hub-token.outputs.token }}"}'
+
+      # The Slack posts at the end of the triage job need this token, so it is handed over too. A separate wrap
+      # keeps the original behaviour: a missing Slack token never takes the other secrets down with it.
+      - name: Wrap Slack bot token
+        id: wrap-slack
+        continue-on-error: true
+        uses: camunda/infra-global-github-actions/vault-wrapped-secrets/wrap@c21e31eece771eb13d6c5e08e8831c9de62888bd # vault-wrapped-secrets-1.0.0
+        with:
+          vault-url: ${{ secrets.VAULT_ADDR }}
+          vault-auth-jwt-path: ${{ secrets.VAULT_JWT_PATH }}
+          vault-auth-jwt-role: ${{ secrets.VAULT_JWT_ROLE }}
+          vault-auth-jwt-audience: ${{ secrets.VAULT_JWT_AUDIENCE }}
+          secrets: |
+            secret/data/products/qa/ci/common SLACK_BOT_USER_OAUTH_TOKEN | SLACK_BOT_TOKEN
+
   triage:
     name: Download reports → workspace → Claude triage → Slack
+    needs: triage-secrets
     runs-on: ubuntu-latest
     # 30 -> 45: #482's live curl-replay verification adds a full Hub pull +
     # boot (up to 10 min per wait-for-hub's own default timeout) on any
@@ -87,6 +211,25 @@ jobs:
        github.event.workflow_run.head_branch == 'main')
 
     steps:
+      # First steps: the secrets come from the triage-secrets job, so this job needs no Vault login.
+      # Best effort, like the wrap steps there: a failure leaves the outputs empty and the steps that
+      # need a value fail or degrade on their own (see their comments).
+      - name: Unwrap secrets from Vault
+        id: vault
+        continue-on-error: true
+        uses: camunda/infra-global-github-actions/vault-wrapped-secrets/unwrap@c21e31eece771eb13d6c5e08e8831c9de62888bd # vault-wrapped-secrets-1.0.0
+        with:
+          vault-url: ${{ secrets.VAULT_ADDR }}
+          wrap-token: ${{ needs.triage-secrets.outputs.wrap-token }}
+
+      - name: Unwrap Slack bot token from Vault
+        id: slack
+        continue-on-error: true
+        uses: camunda/infra-global-github-actions/vault-wrapped-secrets/unwrap@c21e31eece771eb13d6c5e08e8831c9de62888bd # vault-wrapped-secrets-1.0.0
+        with:
+          vault-url: ${{ secrets.VAULT_ADDR }}
+          wrap-token: ${{ needs.triage-secrets.outputs.slack-wrap-token }}
+
       - name: Checkout api-test-generator
         uses: actions/checkout@v6
         with:
@@ -249,86 +392,13 @@ jobs:
         if: ${{ always() && steps.verify-hub-start.outcome == 'success' }}
         run: ./docker/start-hub.sh stop || true
 
-      # --- Secrets from Vault (GitHub OIDC/JWT) -------------------------------
-      # Anthropic key + a GitHub PAT, from the SAME Vault KV path this repo's
-      # nightly already reads (SLACK_BOT_USER_OAUTH_TOKEN + TESTRAIL_*), so no
-      # new policy is needed — KV v2 read is path-level. Key names match what
-      # lives at qa/ci/common: CLAUDE_API_KEY, GH_TOKEN. (GitHub *writes* use
-      # the qa-processes App tokens below, not this PAT — it exists solely to
-      # authenticate the workspace-cli install below, see that step's comment.
-      # Required, so a genuinely-missing key fails loudly.
-      - name: Fetch Anthropic key + GitHub PAT from Vault
-        id: vault
-        # Only the agent needs these, and the agent only runs when has_reports
-        # is true (see below) — gating it here too means a Vault hiccup on a
-        # no-reports night can't hard-fail the job before it reaches the
-        # inconclusive-result write.
-        if: ${{ steps.reports.outputs.has_reports == 'true' }}
-        uses: hashicorp/vault-action@v4
-        with:
-          url: ${{ secrets.VAULT_ADDR }}
-          method: jwt
-          path: ${{ secrets.VAULT_JWT_PATH }}
-          role: ${{ secrets.VAULT_JWT_ROLE }}
-          jwtGithubAudience: ${{ secrets.VAULT_JWT_AUDIENCE }}
-          secrets: |
-            secret/data/products/qa/ci/common CLAUDE_API_KEY | ANTHROPIC_API_KEY ;
-            secret/data/products/qa/ci/common GH_TOKEN | GH_PAT ;
-
-      # Two separately-scoped GitHub App tokens — the agent's write access is
-      # asymmetric by design (camunda-hub: issues only; api-test-generator: may
-      # open a PR for a confirmed test-generation/coverage fix), so each repo
-      # gets its own token rather than one broad grant. Same App + Vault wiring
-      # as spec-bump-check.yml and the stale-PR janitor in both cases.
-      # continue-on-error: if the App can't reach a repo, that token is empty
-      # and the agent degrades to report-only for that repo (Slack still
-      # surfaces the bug) rather than failing the run.
-      - name: Generate qa-processes App token (camunda-hub issues)
-        id: qa-token-hub
-        continue-on-error: true
-        # Pinned SHA — same pin as spec-bump-check.yml + the janitor. Bump intentionally.
-        uses: camunda/infra-global-github-actions/generate-github-app-token-from-vault-secrets@7a9c6f3e477321400802c88290068f88a7ed5684
-        with:
-          github-app-id-vault-key: GITHUB_APP_ID
-          github-app-id-vault-path: secret/data/products/qa/ci/github.com/apps/camunda/qa-processes
-          github-app-private-key-vault-key: GITHUB_APP_SECRET
-          github-app-private-key-vault-path: secret/data/products/qa/ci/github.com/apps/camunda/qa-processes
-          vault-auth-method: jwt
-          vault-auth-jwt-path: ${{ secrets.VAULT_JWT_PATH }}
-          vault-auth-jwt-role: ${{ secrets.VAULT_JWT_ROLE }}
-          vault-auth-jwt-audience: ${{ secrets.VAULT_JWT_AUDIENCE }}
-          vault-url: ${{ secrets.VAULT_ADDR }}
-          owner: camunda
-          repositories: camunda-hub
-
-      # Same App, scoped to api-test-generator instead — this is the SAME grant
-      # (contents:write + pull-requests:write) spec-bump-check.yml's bump-PR
-      # token already uses successfully on this repo (e.g. the chore/spec-bump-*
-      # PRs), so opening a fix PR here needs no new App permission.
-      - name: Generate qa-processes App token (api-test-generator fix PRs)
-        id: qa-token-generator
-        continue-on-error: true
-        uses: camunda/infra-global-github-actions/generate-github-app-token-from-vault-secrets@7a9c6f3e477321400802c88290068f88a7ed5684
-        with:
-          github-app-id-vault-key: GITHUB_APP_ID
-          github-app-id-vault-path: secret/data/products/qa/ci/github.com/apps/camunda/qa-processes
-          github-app-private-key-vault-key: GITHUB_APP_SECRET
-          github-app-private-key-vault-path: secret/data/products/qa/ci/github.com/apps/camunda/qa-processes
-          vault-auth-method: jwt
-          vault-auth-jwt-path: ${{ secrets.VAULT_JWT_PATH }}
-          vault-auth-jwt-role: ${{ secrets.VAULT_JWT_ROLE }}
-          vault-auth-jwt-audience: ${{ secrets.VAULT_JWT_AUDIENCE }}
-          vault-url: ${{ secrets.VAULT_ADDR }}
-          owner: camunda
-          repositories: api-test-generator
-
       # Best-effort label pre-creation, deterministic bash (not left to the
       # agent's own retry-on-error, which is fuzzier). kind/bug already exists
       # on camunda-hub; nightly-detected and nightly-api-fix don't yet.
       - name: Ensure labels exist (camunda-hub)
-        if: ${{ steps.qa-token-hub.outputs.token != '' }}
+        if: ${{ fromJSON(steps.vault.outputs.secrets || '{}').GH_TOKEN_HUB != '' }}
         env:
-          GH_TOKEN: ${{ steps.qa-token-hub.outputs.token }}
+          GH_TOKEN: ${{ fromJSON(steps.vault.outputs.secrets || '{}').GH_TOKEN_HUB }}
         run: |
           gh label create kind/bug --repo camunda/camunda-hub --color d73a4a --description "A confirmed defect" 2>/dev/null || true
           gh label create nightly-detected --repo camunda/camunda-hub --color 5319e7 --description "Filed by the camunda-hub nightly API triage agent" 2>/dev/null || true
@@ -343,39 +413,12 @@ jobs:
           gh label create nightly-api-fix --repo camunda/camunda-hub --color FF4444 --description "Human fix PR for a nightly-detected camunda-hub issue" 2>/dev/null || true
 
       - name: Ensure labels exist (api-test-generator)
-        if: ${{ steps.qa-token-generator.outputs.token != '' }}
+        if: ${{ fromJSON(steps.vault.outputs.secrets || '{}').GH_TOKEN_GENERATOR != '' }}
         env:
-          GH_TOKEN: ${{ steps.qa-token-generator.outputs.token }}
+          GH_TOKEN: ${{ fromJSON(steps.vault.outputs.secrets || '{}').GH_TOKEN_GENERATOR }}
         run: |
           gh label create nightly-api-fix --repo camunda/api-test-generator --color FF4444 --description "Bot-opened fix PR for a nightly triage finding (test-generation bug or coverage gap)" 2>/dev/null || true
           gh label create auto-generated --repo camunda/api-test-generator --color ededed --description "Opened by automation, not a human" 2>/dev/null || true
-
-      - name: Fetch Slack bot token from Vault
-        id: slack
-        continue-on-error: true
-        uses: ./.github/actions/slack-token
-        with:
-          vault-url: ${{ secrets.VAULT_ADDR }}
-          vault-jwt-path: ${{ secrets.VAULT_JWT_PATH }}
-          vault-jwt-role: ${{ secrets.VAULT_JWT_ROLE }}
-          vault-jwt-audience: ${{ secrets.VAULT_JWT_AUDIENCE }}
-
-      # Clone token for the private camunda-hub (Contents:Read). A single git
-      # `insteadOf` with this App installation token clones camunda-hub AND the two
-      # public repos (installation tokens can read public repos), so workspace-cli
-      # resolves all three from the manifest without extra creds.
-      - name: Mint camunda-hub clone token
-        id: hub-token
-        # Only needed to clone camunda-hub for the agent's workspace, which
-        # only happens when has_reports is true — same reasoning as the
-        # Anthropic key fetch above.
-        if: ${{ steps.reports.outputs.has_reports == 'true' }}
-        uses: ./.github/actions/hub-clone-token
-        with:
-          vault-url: ${{ secrets.VAULT_ADDR }}
-          vault-jwt-path: ${{ secrets.VAULT_JWT_PATH }}
-          vault-jwt-role: ${{ secrets.VAULT_JWT_ROLE }}
-          vault-jwt-audience: ${{ secrets.VAULT_JWT_AUDIENCE }}
 
       # --- Toolchain ----------------------------------------------------------
       # 'stable' (not a pinned major) — the exact Go version isn't part of this
@@ -418,7 +461,7 @@ jobs:
         if: ${{ steps.reports.outputs.has_reports == 'true' }}
         env:
           GOPRIVATE: github.com/camunda/*
-          GH_PAT: ${{ steps.vault.outputs.GH_PAT }}
+          GH_PAT: ${{ fromJSON(steps.vault.outputs.secrets || '{}').GH_PAT }}
         run: |
           set -euo pipefail
           if [ -z "$GH_PAT" ]; then
@@ -463,7 +506,7 @@ jobs:
         # inconclusive-result write — same reasoning as the two steps above.
         if: ${{ steps.reports.outputs.has_reports == 'true' }}
         env:
-          HUB_TOKEN: ${{ steps.hub-token.outputs.token }}
+          HUB_TOKEN: ${{ fromJSON(steps.vault.outputs.secrets || '{}').HUB_CLONE_TOKEN }}
         run: |
           set -euo pipefail
           # hub-token isn't continue-on-error (unlike the two qa-processes
@@ -618,13 +661,13 @@ jobs:
           # verification unavailable for that test, fall back to
           # single-observation judgment (see the guidance's own section).
           CURL_VERIFICATION_FILE: ${{ github.workspace }}/curl-verification.json
-          ANTHROPIC_API_KEY: ${{ steps.vault.outputs.ANTHROPIC_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ fromJSON(steps.vault.outputs.secrets || '{}').ANTHROPIC_API_KEY }}
           # Two separately-scoped tokens — see "Configure git credentials" above
           # and the guidance's Role section for which one is valid where.
           # Empty if the App couldn't be reached → the agent falls back to
           # report-only for that repo at runtime.
-          GH_TOKEN_HUB: ${{ steps.qa-token-hub.outputs.token }}
-          GH_TOKEN_GENERATOR: ${{ steps.qa-token-generator.outputs.token }}
+          GH_TOKEN_HUB: ${{ fromJSON(steps.vault.outputs.secrets || '{}').GH_TOKEN_HUB }}
+          GH_TOKEN_GENERATOR: ${{ fromJSON(steps.vault.outputs.secrets || '{}').GH_TOKEN_GENERATOR }}
           NIGHTLY_RUN_URL: ${{ steps.nightly.outputs.run_url }}
           REPORTS_DIR: ${{ env.REPORTS_DIR }}
           WORKSPACE_NAME: ${{ steps.ws.outputs.name }}
@@ -764,16 +807,16 @@ jobs:
       # digest does not ping hub-medic for any of these — this assignment is the
       # notification.
       - name: Assign nightly agent findings to the endpoint author (best-effort)
-        if: ${{ steps.reports.outputs.has_reports == 'true' && (steps.qa-token-generator.outputs.token != '' || steps.qa-token-hub.outputs.token != '') }}
+        if: ${{ steps.reports.outputs.has_reports == 'true' && (fromJSON(steps.vault.outputs.secrets || '{}').GH_TOKEN_GENERATOR != '' || fromJSON(steps.vault.outputs.secrets || '{}').GH_TOKEN_HUB != '') }}
         continue-on-error: true
         env:
           WORKSPACE_NAME: ${{ steps.ws.outputs.name }}
           # PR writes on api-test-generator (assign + request review).
-          GH_TOKEN_GENERATOR: ${{ steps.qa-token-generator.outputs.token }}
+          GH_TOKEN_GENERATOR: ${{ fromJSON(steps.vault.outputs.secrets || '{}').GH_TOKEN_GENERATOR }}
           # Issues:write on camunda-hub — assigns / mentions on the fresh-bug issue.
-          GH_TOKEN_HUB: ${{ steps.qa-token-hub.outputs.token }}
+          GH_TOKEN_HUB: ${{ fromJSON(steps.vault.outputs.secrets || '{}').GH_TOKEN_HUB }}
           # Contents:Read on camunda-hub — the helper maps a commit SHA -> login.
-          HUB_TOKEN: ${{ steps.hub-token.outputs.token }}
+          HUB_TOKEN: ${{ fromJSON(steps.vault.outputs.secrets || '{}').HUB_CLONE_TOKEN }}
           # Findings it could not route to any owner, read by the thread fail-safe below.
           UNROUTED_FILE: ${{ github.workspace }}/hub-unrouted.txt
         run: |
@@ -798,12 +841,12 @@ jobs:
       # --- Post the triaged digest to Slack -----------------------------------
       - name: Post triage summary to Slack
         id: slack-summary
-        if: ${{ always() && steps.slack.outputs.SLACK_BOT_TOKEN != '' }}
+        if: ${{ always() && fromJSON(steps.slack.outputs.secrets || '{}').SLACK_BOT_TOKEN != '' }}
         # Notification infra must not fail the run — the triage JSON is already
         # produced and uploaded regardless of whether Slack is reachable.
         continue-on-error: true
         env:
-          SLACK_BOT_TOKEN: ${{ steps.slack.outputs.SLACK_BOT_TOKEN }}
+          SLACK_BOT_TOKEN: ${{ fromJSON(steps.slack.outputs.secrets || '{}').SLACK_BOT_TOKEN }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           NIGHTLY_RUN_URL: ${{ steps.nightly.outputs.run_url }}
           COOKBOOK_URL: ${{ github.server_url }}/${{ github.repository }}/blob/main/docs/hub-nightly-cookbook.md
@@ -829,10 +872,10 @@ jobs:
 
       - name: Post per-failure detail to Slack thread
         id: slack-thread
-        if: ${{ always() && steps.slack.outputs.SLACK_BOT_TOKEN != '' && steps.slack-summary.outputs.ts != '' }}
+        if: ${{ always() && fromJSON(steps.slack.outputs.secrets || '{}').SLACK_BOT_TOKEN != '' && steps.slack-summary.outputs.ts != '' }}
         continue-on-error: true
         env:
-          SLACK_BOT_TOKEN: ${{ steps.slack.outputs.SLACK_BOT_TOKEN }}
+          SLACK_BOT_TOKEN: ${{ fromJSON(steps.slack.outputs.secrets || '{}').SLACK_BOT_TOKEN }}
           SLACK_TS: ${{ steps.slack-summary.outputs.ts }}
           SLACK_CHANNEL_ID: ${{ steps.slack-summary.outputs.channel }}
         run: |
@@ -884,4 +927,4 @@ jobs:
         if: always()
         uses: ./.github/actions/fail-if-slack-failed
         with:
-          outcomes: "${{ (steps.slack.outcome == 'success' && steps.slack.outputs.SLACK_BOT_TOKEN == '') && 'failure' || steps.slack.outcome }} ${{ steps.slack-summary.outcome }} ${{ steps.slack-thread.outcome }}"
+          outcomes: "${{ (steps.slack.outcome == 'success' && fromJSON(steps.slack.outputs.secrets || '{}').SLACK_BOT_TOKEN == '') && 'failure' || steps.slack.outcome }} ${{ steps.slack-summary.outcome }} ${{ steps.slack-thread.outcome }}"
