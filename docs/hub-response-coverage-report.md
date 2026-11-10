@@ -20,7 +20,7 @@ Workflow: [`hub-response-coverage.yml`](../.github/workflows/hub-response-covera
 
 The report job starts at 05:00 UTC on Monday, and the Slack message and issues appear when it finishes. The coverage-fix agent starts after that.
 
-**Who acts.** The Hub team. The tracking issue and the per-area issues carry the `team/hub` label, so — once the Hub project has an auto-add rule on `label:team/hub` — they land on the Hub team board automatically and stay there until closed, rather than depending on someone noticing the Monday message. They still have no individual assignee; the team picks them up from the board. `hub-medic` is **@-mentioned only when coverage regressed since last week** (fewer endpoints fully tested, fewer with all bad-request kinds, more endpoints with no test, or a new endpoint shipped untested); on a flat or improving week the message posts with no mention. The agent's draft PRs are listed in the thread under the weekly message as before.
+**Who acts.** The Hub team. The tracking issue and the per-endpoint issues carry the `team/hub` label, so — once the Hub project has an auto-add rule on `label:team/hub` — they land on the Hub team board automatically and stay there until closed, rather than depending on someone noticing the Monday message. **Each per-endpoint issue is assigned to whoever added the endpoint** (git-blame of the operation's spec line; an `@camunda/hub` mention when no author resolves), so every gap has a DRI — the 2026-10-28 handover decision. `hub-medic` is **@-mentioned only when coverage regressed since last week** (fewer endpoints fully tested, fewer with all bad-request kinds, more endpoints with no test, or a new endpoint shipped untested); on a flat or improving week the message posts with no mention. The agent's draft PRs are listed in the thread under the weekly message as before.
 
 > **One-time board setup (project admin).** The workflow adds the `team/hub` label, but the board auto-add is a GitHub Project setting it cannot flip. To route these issues onto the Hub team board, open the Hub team **GitHub Project → Settings → Workflows → "Auto-add to project"**, enable it, and set the filter to `is:issue label:team/hub` scoped to `camunda/api-test-generator`. Until this is set, the issues carry the label but do not appear on the board — nothing breaks, they just stay in the repo's issue list. (A single rule on `label:team/hub` is enough; do **not** filter on the broad `hub` label, which also tags test-automation's own generator work.)
 
@@ -66,8 +66,8 @@ When the coverage-fix agent has pull requests waiting for review, a reply appear
 
 ## Closing a gap
 
-Some gaps need a generator change, not just a Hub setting. An area issue lists, per endpoint, the **missing responses**
-and the **missing bad-request tests**. Find the endpoint's row, then use the table for what it lacks.
+Some gaps need a generator change, not just a Hub setting. Each endpoint issue lists that endpoint's **missing responses**
+and **missing bad-request tests**. Use the table below for what it lacks.
 
 | The row says it is missing | What it means | Where to look, and the usual fix |
 |---|---|---|
@@ -75,7 +75,7 @@ and the **missing bad-request tests**. Find the endpoint's row, then use the tab
 | **400**, **401**, **403**, **404** | A bad-request, no-auth, forbidden or not-found test is missing | Generated when the operation is eligible and not excluded. First check `excludeOperations` in `configs/camunda-hub/request-validation.json` (the entry always has a `reason`; a Hub issue is optional, and some exclusions such as `purgeFile` and `addMember` have only a reason). If it is not excluded, it is not eligible: **403** needs a request that reaches the authorization check, so a valid fixture-backed request body and path (`resourceFixtures` in the same file; the rule is `isAuthDenyEligible` in `request-validation/src/analysis/authDeny.ts`), and **404** needs an ID the generator can make up (`isNotFoundEligible` in `request-validation/src/analysis/notFoundFakeId.ts`). The fix is then fixture modelling or the eligibility rule, not an exclusion. The modes `authAbsentMode`, `authDenyMode` and `notFoundMode` in the same file set how Hub is expected to answer. A 404 test needs an ID it can make up, so an endpoint with no path key needs the not-found generator extended (`notFoundFakeId.ts` and the emitter that writes its tests). Do not add a test file by hand: generation deletes the output folder every time, and the report only counts generated files |
 | **409** | A documented conflict is not tested (only a 409 the spec documents is counted) | Needs a state first. In `configs/camunda-hub/conflict-replay.json`, use `replay` when repeating the same call is enough to conflict (a duplicate create), or `sequences` for setup calls followed by the call that should answer 409 (for example restoring a file whose project was deleted). List it under `untested` with an issue if it cannot be provoked. The weekly report reads the latest Hub `main` spec, but the invariant tests use the pinned one (`spec-pin.json`), and they fail an entry for a 409 the pinned spec does not document: if the 409 is new, bump the pin first (see [the README](../README.md#bumping-the-spec-pin)) |
 | **a bad-request kind** (for example `allof-conflict`, `union`, `missing-body`) | The endpoint has no test of that kind | Generated from the spec's schema. For the body-shape kinds the report can list a kind that cannot be built for that endpoint, so first generate (see below) and look for the endpoint in `generated/camunda-hub/request-validation/COVERAGE.md`. If the kind applies but is not generated, the fix is in the generator's code (`request-validation/src/analysis/`, and `request-validation/scripts/generate.ts` decides which kinds count as applicable), not in config. If it does not apply it is an over-count: there is no switch today to mark a kind not applicable, so say so in the issue and leave it open |
-| **Lifecycle tests** (in the weekly Slack message, not in an area issue) | A resource or link has no create, read, delete flow | Add it to `configs/camunda-hub/ontology/entity-kinds.json` or `edges.json` |
+| **Lifecycle tests** (in the weekly Slack message, not in a per-endpoint issue) | A resource or link has no create, read, delete flow | Add it to `configs/camunda-hub/ontology/entity-kinds.json` or `edges.json` |
 
 After the fix:
 
@@ -136,11 +136,12 @@ review"** that shows the check before and after. Read that section first.
 `fix/coverage-`, with the labels `nightly-api-fix`, `auto-generated` and `hub`. The body ends with
 "Found by the camunda-hub coverage-fix agent". The thread under the weekly Slack message lists the ones still open.
 
-**Each pull request links to its area's tracking issue.** The body carries a `relates to #<issue>` line pointing at the
-per-area issue whose gap it closes, so the pull request and the issue show each other on GitHub (open the issue and you see
-the pull request in its timeline). It says `relates to`, not `closes`: one pull request fixes one endpoint, while the area
-issue usually lists several, so merging the pull request does not close the issue — the next weekly report closes it once the
-area is clean. The link is added automatically after the `verify` job passes, so it is only ever on a checked pull request.
+**Each pull request links to its endpoint's tracking issue.** The body carries a `relates to #<issue>` line pointing at the
+per-endpoint issue whose gap it fixes, so the pull request and the issue show each other on GitHub (open the issue and you
+see the pull request in its timeline). It says `relates to`, not `closes`: an endpoint issue lists every gap on that endpoint
+and one pull request fixes only one of them, so a closing link would shut it while the others remain — the weekly report
+closes the endpoint issue itself once the endpoint has no gap left.
+The link is added automatically after the `verify` job passes, so it is only ever on a checked pull request.
 
 **Who reviews them.** A person, always. The usual live check (`hub-pr-live-check`) skips these pull requests on purpose: it
 would run the agent's code with Hub access before anything had checked it. What happens instead depends on the kind:
@@ -169,7 +170,7 @@ left and attempted nothing.
 
 Both the Slack reply and the issue comment open with a short note that the counts cover **only what the agent auto-fixes**
 (resources with no create-read-delete test, and config-only 403/404 gaps) — the full backlog is in the weekly report and the
-per-area issues. So "1 gap left for a person" is the agent's own scope, not the total number of gaps. The Slack reply's
+per-endpoint issues. So "1 gap left for a person" is the agent's own scope, not the total number of gaps. The Slack reply's
 **Details** link points at that run's own comment on the tracking issue (not just the issue top), so it lands on the full record.
 
 **How it runs.** Two ways.

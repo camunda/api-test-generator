@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import {
   chmodSync,
   existsSync,
@@ -21,6 +21,8 @@ const script = join(
 type Row = {
   operationId: string;
   area?: string;
+  method?: string;
+  path?: string;
   requestChecks: 'ok' | 'gap' | 'hold' | 'na';
   cells: Record<string, string>;
   requestMissing: string[];
@@ -28,6 +30,8 @@ type Row = {
 
 const ok = (id: string): Row => ({
   operationId: id,
+  method: 'GET',
+  path: `/${id}`,
   requestChecks: 'ok',
   cells: { '2xx': 'ok', '404': 'ok' },
   requestMissing: [],
@@ -64,15 +68,15 @@ describe('weekly coverage gap issue body', () => {
     expect(issueBody([held])).toBe('');
   });
 
-  it('is an index, not a second table: counts, the marker for the area links, no endpoint rows', () => {
+  it('is an index, not a second table: counts, the marker for the endpoint links, no endpoint rows', () => {
     const body = issueBody([{ ...ok('a'), cells: { '2xx': 'ok', '404': 'gap' } }, ok('b')]);
     expect(body).toContain('**1** still have something missing');
-    expect(body).toContain('<!-- AREA_INDEX -->');
+    expect(body).toContain('<!-- ENDPOINT_INDEX -->');
     expect(body).not.toContain('| `a`');
     expect(body).not.toContain('Missing responses');
     expect(body).not.toMatch(/^\|/m);
     expect(body).toContain('Bad-request tests: every kind that applies is covered.');
-    expect(body).toContain('opened gradually');
+    expect(body).toContain('open gradually');
     expect(body).toContain('Full table: http://run');
   });
 
@@ -80,87 +84,83 @@ describe('weekly coverage gap issue body', () => {
     const row: Row = { ...ok('a'), requestChecks: 'gap', requestMissing: ['param-missing'] };
     const body = issueBody([row], { a: ['param-missing'] });
     expect(body).toContain('Bad-request tests: Most often missing');
-    expect(body).toContain('<!-- AREA_INDEX -->');
+    expect(body).toContain('<!-- ENDPOINT_INDEX -->');
   });
 });
 
-/** Runs area_issues() on made-up rows and returns [title, body] pairs. */
-function areaIssues(rows: Row[]): [string, string, string, number, string[]][] {
+/** Runs endpoint_issues() on made-up rows and returns [title, body, operationId, area] tuples. */
+function endpointIssues(rows: Row[]): [string, string, string, string][] {
   const code = [
     'import sys, json, types, importlib.util',
     `spec = importlib.util.spec_from_file_location('h', ${JSON.stringify(script)})`,
     'h = importlib.util.module_from_spec(spec); spec.loader.exec_module(h)',
     'rows = json.load(sys.stdin)',
-    "json.dump(h.area_issues(rows, types.SimpleNamespace(run_url='http://run')), sys.stdout)",
+    "json.dump(h.endpoint_issues(rows, types.SimpleNamespace(run_url='http://run')), sys.stdout)",
   ].join('\n');
   return JSON.parse(
     execFileSync('python3', ['-B', '-c', code], { input: JSON.stringify(rows), encoding: 'utf8' }),
   );
 }
 
-describe('per-area coverage gap issues', () => {
+describe('per-endpoint coverage gap issues', () => {
   const gap = (id: string, area: string): Row => ({
     ...ok(id),
     area,
     cells: { '2xx': 'ok', '404': 'gap' },
   });
 
-  it('opens nothing when no area has a gap', () => {
-    expect(areaIssues([{ ...ok('a'), area: 'Files' }])).toEqual([]);
+  it('opens nothing when no endpoint has a gap', () => {
+    expect(endpointIssues([{ ...ok('a'), area: 'Files' }])).toEqual([]);
   });
 
-  it('makes one issue per area, only for areas with a gap, sorted by area', () => {
-    const issues = areaIssues([
-      gap('f1', 'Files'),
+  it('makes one issue per uncovered endpoint, sorted by area then operationId', () => {
+    const issues = endpointIssues([
       gap('f2', 'Files'),
+      gap('f1', 'Files'),
       { ...ok('c1'), area: 'Comments' },
       gap('m1', 'Milestones'),
     ]);
     expect(issues.map(([title]) => title)).toEqual([
-      '[hub-response-coverage] Files: missing response or bad-request tests',
-      '[hub-response-coverage] Milestones: missing response or bad-request tests',
+      '[hub-response-coverage] f1: missing response or bad-request test',
+      '[hub-response-coverage] f2: missing response or bad-request test',
+      '[hub-response-coverage] m1: missing response or bad-request test',
     ]);
-    expect(issues[0][1]).toContain('**2** endpoints in the **Files** area');
-    expect(issues[0][1]).toContain('`f1`');
-    expect(issues[0][1]).not.toContain('`m1`');
-    expect(issues[1][1]).toContain('**1** endpoint in the **Milestones** area');
+    // operationId + area ride along for the workflow (assignment and area-grouped index).
+    expect(issues.map(([, , op, area]) => [op, area])).toEqual([
+      ['f1', 'Files'],
+      ['f2', 'Files'],
+      ['m1', 'Milestones'],
+    ]);
   });
 
-  it('lists a response-only gap and a bad-request-only gap in the area table', () => {
+  it('states the missing responses and bad-request kinds, and the endpoint, in the body', () => {
     const kinds: Row = {
       ...ok('k'),
       area: 'Files',
       requestChecks: 'gap',
       requestMissing: ['param-missing'],
     };
-    const [[, body]] = areaIssues([gap('r', 'Files'), kinds, { ...ok('fine'), area: 'Files' }]);
-    expect(body).toContain('| `r` | 404 | — |');
-    expect(body).toContain('| `k` | — | param-missing |');
-    expect(body).not.toContain('`fine`');
+    const byOp = Object.fromEntries(
+      endpointIssues([gap('r', 'Files'), kinds]).map(([, body, op]) => [op, body]),
+    );
+    expect(byOp.r).toContain('`r` (`GET /r`) in the **Files** area');
+    expect(byOp.r).toContain('- Responses: 404');
+    expect(byOp.r).toContain('- Bad-request kinds: —');
+    expect(byOp.k).toContain('- Responses: —');
+    expect(byOp.k).toContain('- Bad-request kinds: param-missing');
   });
 
-  it('caps an area table at 100 endpoints and says how many were left out', () => {
-    const rows = Array.from({ length: 103 }, (_, i) => gap(`op${i}`, 'Files'));
-    const [[, body]] = areaIssues(rows);
-    expect(body.match(/^\| `op/gm)).toHaveLength(100);
-    expect(body).toContain('…and 3 more');
-  });
-
-  it('hands the endpoint ids to the index, in table order', () => {
-    const issues = areaIssues([gap('f1', 'Files'), gap('f2', 'Files')]);
-    expect(issues[0][4]).toEqual(['f1', 'f2']);
-  });
-
-  it('ends every area issue with a link to the guide on fixing a gap', () => {
-    const [[, body]] = areaIssues([gap('f1', 'Files')]);
+  it('ends every endpoint issue with a link to the guide on fixing a gap', () => {
+    const [[, body]] = endpointIssues([gap('f1', 'Files')]);
     expect(body).toContain(
       'How to fix a gap: [guide](https://github.com/camunda/api-test-generator/blob/main/docs/hub-response-coverage-report.md#closing-a-gap)',
     );
   });
 
   it('files an endpoint without an area under Other', () => {
-    const [[title]] = areaIssues([{ ...ok('x'), cells: { '2xx': 'gap' } }]);
-    expect(title).toBe('[hub-response-coverage] Other: missing response or bad-request tests');
+    const [[title, , op, area]] = endpointIssues([{ ...ok('x'), cells: { '2xx': 'gap' } }]);
+    expect(title).toBe('[hub-response-coverage] x: missing response or bad-request test');
+    expect([op, area]).toEqual(['x', 'Other']);
   });
 });
 
@@ -182,7 +182,7 @@ function runIssueScript(
 ) {
   const dir = mkdtempSync(join(tmpdir(), 'gap-issue-'));
   const report = join(dir, 'report');
-  mkdirSync(join(report, 'areas'), { recursive: true });
+  mkdirSync(join(report, 'endpoints'), { recursive: true });
   for (const [name, body] of Object.entries(files)) {
     writeFileSync(join(report, name), body.replaceAll('$REPORT', report));
   }
@@ -194,6 +194,14 @@ function runIssueScript(
     join(bin, 'gh'),
     `#!/usr/bin/env bash
 echo "gh $*" >> "$GH_LOG"
+# GH_FAIL: '|'-separated substrings; a gh call whose args contain one exits 1 (lets a test
+# simulate a rejected assignment or a failed comment). Empty/unset => every call succeeds.
+if [ -n "$GH_FAIL" ]; then
+  _args="$*"  # capture before IFS change: IFS='|' would re-join $* with '|'
+  _oifs=$IFS; IFS='|'
+  for pat in $GH_FAIL; do case "$_args" in *"$pat"*) IFS=$_oifs; exit 1 ;; esac; done
+  IFS=$_oifs
+fi
 if [ "$1 $2" = "issue list" ]; then
   expr=""; prev=""
   for a in "$@"; do [ "$prev" = "--jq" ] && expr="$a"; prev="$a"; done
@@ -205,7 +213,10 @@ fi
   );
   chmodSync(join(bin, 'gh'), 0o755);
   writeFileSync(join(dir, 'log'), '');
-  execFileSync('bash', [join(scriptsDir, script)], {
+  // spawnSync (not execFileSync) so stderr is captured on success too — the lookup-cap warning is emitted
+  // on a run that still exits 0. On a non-zero exit, throw an error carrying stderr so stderrOf(err) works.
+  const res = spawnSync('bash', [join(scriptsDir, script)], {
+    encoding: 'utf8',
     env: {
       ...process.env,
       PATH: `${bin}:${process.env.PATH}`,
@@ -218,6 +229,12 @@ fi
       ...env,
     },
   });
+  if (res.error) throw res.error;
+  if (res.status !== 0) {
+    throw Object.assign(new Error(`hub-coverage script exited ${res.status}`), {
+      stderr: res.stderr,
+    });
+  }
   const read = (f: string) =>
     existsSync(join(report, f)) ? readFileSync(join(report, f), 'utf8') : '';
   return {
@@ -225,24 +242,44 @@ fi
       .split('\n')
       .filter((l) => l && !l.startsWith('gh issue list')),
     issueUrl: read('issue-url.txt').trim(),
-    areaLinks: read('area-links.txt').trim().split('\n').filter(Boolean),
-    areaIndex: read('area-index.md').trim().split('\n').filter(Boolean),
-    areaIssues: ((raw) => (raw ? JSON.parse(raw) : undefined))(read('area-issues.json')),
+    endpointLinks: read('endpoint-links.txt').trim().split('\n').filter(Boolean),
+    endpointIndex: read('endpoint-index.md').trim().split('\n').filter(Boolean),
+    endpointIssues: ((raw) => (raw ? JSON.parse(raw) : undefined))(read('endpoint-issues.json')),
     rendered: read('issue.rendered.md'),
+    stderr: res.stderr,
   };
 }
 
-const area = (name: string, gaps = 1) => ({
-  title: areaTitle(name),
-  file: `$REPORT/areas/${name}.md`,
-  area: name,
-  gaps,
-  endpoints: Array.from({ length: gaps }, (_, i) => `${name.toLowerCase()}${i + 1}`),
+const endpointTitle = (op: string) =>
+  `[hub-response-coverage] ${op}: missing response or bad-request test`;
+
+const endpoint = (op: string, areaName = 'Files') => ({
+  title: endpointTitle(op),
+  file: `$REPORT/endpoints/${op}.md`,
+  operationId: op,
+  area: areaName,
 });
-const areaFiles = (...names: string[]) => ({
-  'areas.json': JSON.stringify(names.map((n) => area(n))),
-  ...Object.fromEntries(names.map((n) => [`areas/${n}.md`, `body ${n}`])),
+const endpointFiles = (...ops: string[]) => ({
+  'endpoints.json': JSON.stringify(ops.map((o) => endpoint(o))),
+  ...Object.fromEntries(ops.map((o) => [`endpoints/${o}.md`, `body ${o}`])),
 });
+
+// A resolver stub (echoes a login) + a dir that looks like a git checkout, so the endpoint script's
+// assignment path resolves an author; omit `hubDir` in a test to force the @camunda/hub fallback.
+function authorStub(login: string) {
+  const dir = mkdtempSync(join(tmpdir(), 'gap-author-'));
+  mkdirSync(join(dir, 'hub', '.git'), { recursive: true });
+  const resolver = join(dir, 'resolver.sh');
+  writeFileSync(resolver, `#!/usr/bin/env bash\necho '${login}'\n`);
+  chmodSync(resolver, 0o755);
+  return { AUTHOR_RESOLVER: resolver, HUB_DIR: join(dir, 'hub'), HUB_TOKEN: 'x' };
+}
+// A HUB_DIR with no .git, so the resolver is never consulted and assignment falls back to the team.
+const NO_HUB = { HUB_DIR: join(tmpdir(), 'gap-no-hub-does-not-exist') };
+
+/** stderr of a child-process error thrown by execFileSync, narrowed without an `as` cast. */
+const stderrOf = (e: unknown): string =>
+  e && typeof e === 'object' && 'stderr' in e ? String(e.stderr) : '';
 
 describe('summary issue lifecycle (stub gh)', () => {
   it('opens the issue with the three labels when none exists', () => {
@@ -290,81 +327,225 @@ describe('summary issue lifecycle (stub gh)', () => {
   });
 });
 
-describe('per-area issue lifecycle (stub gh)', () => {
+describe('per-endpoint issue lifecycle (stub gh)', () => {
   it('creates, updates and reopens by exact title, and links each one', () => {
-    const r = runIssueScript('hub-coverage-area-issues.sh', areaFiles('New', 'Open', 'Shut'), [
-      { number: 5, title: areaTitle('Open'), state: 'OPEN' },
-      { number: 6, title: areaTitle('Shut'), state: 'CLOSED' },
-    ]);
+    const r = runIssueScript(
+      'hub-coverage-endpoint-issues.sh',
+      endpointFiles('newOp', 'openOp', 'shutOp'),
+      [
+        { number: 5, title: endpointTitle('openOp'), state: 'OPEN' },
+        { number: 6, title: endpointTitle('shutOp'), state: 'CLOSED' },
+      ],
+      NO_HUB,
+    );
     expect(r.calls.filter((c) => c.includes('issue create'))).toHaveLength(1);
     expect(r.calls).toContain('gh issue reopen 6');
     expect(r.calls.some((c) => c.startsWith('gh issue edit 5 '))).toBe(true);
-    expect(r.areaLinks).toEqual([
-      '<https://example.test/issues/101|New (1)>',
-      '<https://example.test/issues/5|Open (1)>',
-      '<https://example.test/issues/6|Shut (1)>',
+    expect(r.endpointLinks).toEqual([
+      '<https://example.test/issues/101|newOp (Files)>',
+      '<https://example.test/issues/5|openOp (Files)>',
+      '<https://example.test/issues/6|shutOp (Files)>',
     ]);
   });
 
-  it('writes area-issues.json mapping each area with an issue to its number', () => {
-    const r = runIssueScript('hub-coverage-area-issues.sh', areaFiles('New', 'Open', 'Shut'), [
-      { number: 5, title: areaTitle('Open'), state: 'OPEN' },
-      { number: 6, title: areaTitle('Shut'), state: 'CLOSED' },
-    ]);
-    expect(r.areaIssues).toEqual({ New: 101, Open: 5, Shut: 6 });
+  it('writes endpoint-issues.json mapping each endpoint with an issue to its number', () => {
+    const r = runIssueScript(
+      'hub-coverage-endpoint-issues.sh',
+      endpointFiles('newOp', 'openOp', 'shutOp'),
+      [
+        { number: 5, title: endpointTitle('openOp'), state: 'OPEN' },
+        { number: 6, title: endpointTitle('shutOp'), state: 'CLOSED' },
+      ],
+      NO_HUB,
+    );
+    expect(r.endpointIssues).toEqual({ newOp: 101, openOp: 5, shutOp: 6 });
   });
 
-  it('omits an area from area-issues.json when its issue opens on a later run (cap reached)', () => {
-    const r = runIssueScript('hub-coverage-area-issues.sh', areaFiles('A', 'B', 'C'), [], {
-      MAX_NEW_AREA_ISSUES: '2',
+  it('assigns a newly created issue to the resolved endpoint author', () => {
+    const r = runIssueScript('hub-coverage-endpoint-issues.sh', endpointFiles('newOp'), [], {
+      ...authorStub('alice'),
     });
-    // A and B get issues this run; C is capped, so it has no entry (and thus no PR link until it does).
-    expect(r.areaIssues).toEqual({ A: 101, B: 102 });
+    expect(r.calls).toContain('gh issue edit 101 --add-assignee alice');
   });
 
-  it('opens at most MAX_NEW_AREA_ISSUES new issues and lists the rest unlinked', () => {
-    const r = runIssueScript('hub-coverage-area-issues.sh', areaFiles('A', 'B', 'C'), [], {
-      MAX_NEW_AREA_ISSUES: '2',
+  it('mentions @camunda/hub on a new issue when no endpoint author resolves', () => {
+    const r = runIssueScript('hub-coverage-endpoint-issues.sh', endpointFiles('newOp'), [], NO_HUB);
+    const mention = r.calls.find((c) => c.startsWith('gh issue comment 101 '));
+    expect(mention).toContain('@camunda/hub');
+    expect(r.calls.some((c) => c.includes('--add-assignee'))).toBe(false);
+  });
+
+  it('skips the blame on a shallow checkout and mentions the team (blame would mis-attribute)', () => {
+    // A shallow clone (clone-hub-sibling fetches --depth 1) carries .git/shallow; git blame there
+    // attributes every line to the fetched tip, so the script must NOT blame — it falls back to the team
+    // rather than assign the wrong owner. The workflow deepens the checkout first; this guards the case
+    // where that unshallow fetch failed.
+    const stub = authorStub('alice');
+    writeFileSync(join(stub.HUB_DIR, '.git', 'shallow'), 'deadbeef\n');
+    const r = runIssueScript('hub-coverage-endpoint-issues.sh', endpointFiles('newOp'), [], stub);
+    expect(r.calls.some((c) => c.includes('--add-assignee'))).toBe(false);
+    const mention = r.calls.find((c) => c.startsWith('gh issue comment 101 '));
+    expect(mention).toContain('@camunda/hub');
+  });
+
+  it('falls back to the team mention when a resolved author cannot be assigned in this repo', () => {
+    // The common real case: the endpoint author resolves, but is not an assignable collaborator on this
+    // repo, so `gh issue edit --add-assignee` is rejected — the script must fall through to the @camunda/hub mention.
+    const r = runIssueScript('hub-coverage-endpoint-issues.sh', endpointFiles('newOp'), [], {
+      ...authorStub('alice'),
+      GH_FAIL: '--add-assignee',
+    });
+    expect(r.calls).toContain('gh issue edit 101 --add-assignee alice'); // attempted
+    const mention = r.calls.find((c) => c.startsWith('gh issue comment 101 '));
+    expect(mention).toContain('@camunda/hub'); // fell back to the team
+  });
+
+  it('keeps processing later endpoints when an owner mention fails', () => {
+    // A failed @camunda/hub mention on one endpoint must not abort the run — the next endpoint still gets its issue.
+    const r = runIssueScript('hub-coverage-endpoint-issues.sh', endpointFiles('opA', 'opB'), [], {
+      ...NO_HUB,
+      GH_FAIL: 'issue comment',
+    });
+    expect(r.calls.filter((c) => c.startsWith('gh issue create')).length).toBe(2);
+  });
+
+  it('omits an endpoint from endpoint-issues.json when its issue opens on a later run (cap reached)', () => {
+    const r = runIssueScript('hub-coverage-endpoint-issues.sh', endpointFiles('a', 'b', 'c'), [], {
+      MAX_NEW_ENDPOINT_ISSUES: '2',
+      ...NO_HUB,
+    });
+    // a and b get issues this run; c is capped, so it has no entry (and thus no PR link until it does).
+    expect(r.endpointIssues).toEqual({ a: 101, b: 102 });
+  });
+
+  it('opens at most MAX_NEW_ENDPOINT_ISSUES new issues and lists the rest unlinked', () => {
+    const r = runIssueScript('hub-coverage-endpoint-issues.sh', endpointFiles('a', 'b', 'c'), [], {
+      MAX_NEW_ENDPOINT_ISSUES: '2',
+      ...NO_HUB,
     });
     expect(r.calls.filter((c) => c.includes('issue create'))).toHaveLength(2);
-    expect(r.areaLinks).toEqual([
-      '<https://example.test/issues/101|A (1)>',
-      '<https://example.test/issues/102|B (1)>',
-      'C (1)',
+    expect(r.endpointLinks).toEqual([
+      '<https://example.test/issues/101|a (Files)>',
+      '<https://example.test/issues/102|b (Files)>',
+      'c (Files)',
     ]);
   });
 
-  it('closes an open area issue whose area is clean, but never the summary issue', () => {
-    const r = runIssueScript('hub-coverage-area-issues.sh', areaFiles('Kept'), [
-      { number: 5, title: areaTitle('Kept'), state: 'OPEN' },
-      { number: 6, title: areaTitle('Fixed'), state: 'OPEN' },
-      { number: 7, title: SUMMARY, state: 'OPEN' },
-      { number: 8, title: areaTitle('AlreadyClosed'), state: 'CLOSED' },
-    ]);
-    const closes = r.calls.filter((c) => c.includes('issue close'));
-    expect(closes).toHaveLength(1);
-    expect(closes[0]).toContain('issue close 6');
+  it('closes a clean endpoint issue and migrates the old per-area issues, never the summary', () => {
+    const r = runIssueScript(
+      'hub-coverage-endpoint-issues.sh',
+      endpointFiles('keptOp'),
+      [
+        { number: 5, title: endpointTitle('keptOp'), state: 'OPEN' },
+        { number: 6, title: endpointTitle('fixedOp'), state: 'OPEN' },
+        { number: 7, title: SUMMARY, state: 'OPEN' },
+        { number: 8, title: endpointTitle('closedOp'), state: 'CLOSED' },
+        { number: 9, title: areaTitle('Files'), state: 'OPEN' },
+      ],
+      NO_HUB,
+    );
+    const closed = r.calls
+      .filter((c) => c.includes('issue close'))
+      .map((c) => c.split(' ')[3])
+      .sort();
+    // fixedOp (6) is a clean per-endpoint issue; the old per-area issue (9) is migrated; the summary (7),
+    // the still-open keptOp (5) and the already-closed one (8) are left alone.
+    expect(closed).toEqual(['6', '9']);
+  });
+
+  it('aborts (closing nothing) when endpoints.json is missing — a broken report is not "no gaps"', () => {
+    // No endpoints.json in the report dir: an upstream crash, not a genuine empty result. Without the
+    // guard the read yields zero endpoints and the cleanup loop closes every open issue as resolved; the
+    // script must abort instead. (A real no-gaps run is a valid `[]`, exercised elsewhere.)
+    let err: unknown;
+    try {
+      runIssueScript(
+        'hub-coverage-endpoint-issues.sh',
+        {},
+        [{ number: 6, title: endpointTitle('fixedOp'), state: 'OPEN' }],
+        NO_HUB,
+      );
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toBeDefined();
+    expect(stderrOf(err)).toContain('endpoints.json');
+  });
+
+  it('aborts (closing nothing) when endpoints.json is malformed', () => {
+    let err: unknown;
+    try {
+      runIssueScript(
+        'hub-coverage-endpoint-issues.sh',
+        { 'endpoints.json': '{not json' },
+        [{ number: 6, title: endpointTitle('fixedOp'), state: 'OPEN' }],
+        NO_HUB,
+      );
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toBeDefined();
+    expect(stderrOf(err)).toContain('endpoints.json');
+  });
+
+  it('never closes a manual follow-up whose title only contains the prefix mid-string', () => {
+    // `issue list --search "in:title [hub-response-coverage]"` is a substring match, so a human
+    // follow-up like "Investigate [hub-response-coverage] fixedOp: ... test" comes back in $existing. It
+    // ends with the suffix the close/migrate loops key on but is not ours — the startswith($prefix) guard
+    // must spare both decoys while the real clean endpoint (6) and per-area (9) issues still close.
+    const r = runIssueScript(
+      'hub-coverage-endpoint-issues.sh',
+      endpointFiles('keptOp'),
+      [
+        { number: 5, title: endpointTitle('keptOp'), state: 'OPEN' },
+        { number: 6, title: endpointTitle('fixedOp'), state: 'OPEN' },
+        { number: 9, title: areaTitle('Files'), state: 'OPEN' },
+        { number: 20, title: `Investigate ${endpointTitle('fixedOp')}`, state: 'OPEN' },
+        { number: 21, title: `Investigate ${areaTitle('Files')}`, state: 'OPEN' },
+      ],
+      NO_HUB,
+    );
+    const closed = r.calls
+      .filter((c) => c.includes('issue close'))
+      .map((c) => c.split(' ')[3])
+      .sort();
+    expect(closed).toEqual(['6', '9']);
+  });
+
+  it('warns when the coverage-issue lookup hits its result cap (truncation could miss issues)', () => {
+    // Force the cap low so the lookup is provably truncated. A truncated lookup can miss an existing issue
+    // (duplicate) and skip its cleanup, so the run must surface a loud warning rather than degrade silently.
+    const r = runIssueScript(
+      'hub-coverage-endpoint-issues.sh',
+      endpointFiles('keptOp'),
+      [
+        { number: 5, title: endpointTitle('keptOp'), state: 'OPEN' },
+        { number: 6, title: endpointTitle('otherOp'), state: 'CLOSED' },
+      ],
+      { ...NO_HUB, COVERAGE_ISSUE_LOOKUP_LIMIT: '1' },
+    );
+    expect(r.stderr).toContain('hit the 1-result cap');
   });
 });
 
-describe('the tracking issue is an index of the area issues', () => {
-  it('writes one line per area: a link to its issue, or its endpoints when the issue is not open yet', () => {
+describe('the tracking issue is an index of the per-endpoint issues', () => {
+  it('writes one line per endpoint: a link to its issue, or the endpoint when its issue is not open yet', () => {
     const files = {
-      'areas.json': JSON.stringify([area('New', 1), area('Open', 2), area('Late', 2)]),
-      'areas/New.md': 'b',
-      'areas/Open.md': 'b',
-      'areas/Late.md': 'b',
+      'endpoints.json': JSON.stringify([endpoint('newOp'), endpoint('openOp'), endpoint('lateOp')]),
+      'endpoints/newOp.md': 'b',
+      'endpoints/openOp.md': 'b',
+      'endpoints/lateOp.md': 'b',
     };
     const r = runIssueScript(
-      'hub-coverage-area-issues.sh',
+      'hub-coverage-endpoint-issues.sh',
       files,
-      [{ number: 5, title: areaTitle('Open'), state: 'OPEN' }],
-      { MAX_NEW_AREA_ISSUES: '1' },
+      [{ number: 5, title: endpointTitle('openOp'), state: 'OPEN' }],
+      { MAX_NEW_ENDPOINT_ISSUES: '1', ...NO_HUB },
     );
-    expect(r.areaIndex).toEqual([
-      '- [ ] #101 **New**: 1 endpoint',
-      '- [ ] #5 **Open**: 2 endpoints',
-      '- **Late**: 2 endpoints (its issue opens on a later run): `late1`, `late2`',
+    expect(r.endpointIndex).toEqual([
+      '- [ ] #101 `newOp` — Files',
+      '- [ ] #5 `openOp` — Files',
+      '- `lateOp` — Files (its issue opens on a later run)',
     ]);
   });
 
@@ -372,21 +553,19 @@ describe('the tracking issue is an index of the area issues', () => {
     const r = runIssueScript(
       'hub-coverage-summary-issue.sh',
       {
-        'issue.md': 'top\n<!-- AREA_INDEX -->\nbottom\n',
-        'area-index.md': '- [ ] #5 **A & B**: 1 endpoint `x`\n- **C**: 2 endpoints\n',
+        'issue.md': 'top\n<!-- ENDPOINT_INDEX -->\nbottom\n',
+        'endpoint-index.md': '- [ ] #5 `a & b` — Files\n- `c` — Files\n',
       },
       [],
     );
-    expect(r.rendered).toBe(
-      'top\n- [ ] #5 **A & B**: 1 endpoint `x`\n- **C**: 2 endpoints\nbottom\n',
-    );
+    expect(r.rendered).toBe('top\n- [ ] #5 `a & b` — Files\n- `c` — Files\nbottom\n');
     expect(r.calls[0]).toContain('issue.rendered.md');
   });
 
   it('drops the marker line when there is no index, instead of leaving it in the issue', () => {
     const r = runIssueScript(
       'hub-coverage-summary-issue.sh',
-      { 'issue.md': 'top\n<!-- AREA_INDEX -->\nbottom\n' },
+      { 'issue.md': 'top\n<!-- ENDPOINT_INDEX -->\nbottom\n' },
       [],
     );
     expect(r.rendered).toBe('top\nbottom\n');
@@ -395,7 +574,7 @@ describe('the tracking issue is an index of the area issues', () => {
   it('rewrites an existing issue from the rendered body, never the marker version', () => {
     const r = runIssueScript(
       'hub-coverage-summary-issue.sh',
-      { 'issue.md': '<!-- AREA_INDEX -->\n', 'area-index.md': '- line\n' },
+      { 'issue.md': '<!-- ENDPOINT_INDEX -->\n', 'endpoint-index.md': '- line\n' },
       [{ number: 7, title: SUMMARY, state: 'OPEN' }],
     );
     const edit = r.calls.find((c) => c.startsWith('gh issue edit 7'));

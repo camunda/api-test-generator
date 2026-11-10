@@ -189,12 +189,13 @@ jobs:
         id: select
         run: |
           set -euo pipefail
-          # area-issues.json (from the weekly report artifact) maps each area to its tracking-issue number, so
-          # each candidate carries the issue a fix PR should link. A report from before it existed is tolerated.
+          # endpoint-issues.json (from the weekly report artifact) maps each uncovered endpoint (by operationId)
+          # to its tracking-issue number, so each candidate carries the issue a fix PR should `closes`. A report
+          # from before it existed is tolerated.
           node scripts/triage/hub-coverage-fix-select.ts \
             "${REPORT_DIR}/summary.json" "${REPORT_DIR}/rows.json" "${GITHUB_WORKSPACE}/agent-prs.json" \
             "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${GITHUB_WORKSPACE}/open-fix-prs.json" \
-            "${REPORT_DIR}/area-issues.json" \
+            "${REPORT_DIR}/endpoint-issues.json" \
             > "${GITHUB_WORKSPACE}/selection.json"
           cat "${GITHUB_WORKSPACE}/selection.json"
           echo "count=$(jq '.candidates | length' "${GITHUB_WORKSPACE}/selection.json")" >> "$GITHUB_OUTPUT"
@@ -731,11 +732,11 @@ jobs:
         run: |
           RUN_PRS="${RUNNER_TEMP}/run-prs.json" PR_CHANGES="${RUNNER_TEMP}/pr-changes.json" bash .github/scripts/hub-coverage-fix-live-check.sh
 
-      # Cross-reference each verified PR with its area's tracking issue: append `relates to #<issue>` to the PR
-      # body, which makes GitHub link the two in both directions. Deterministic — the issue per PR comes from the
-      # verifier output, not the agent. Gated explicitly on verification passing, NOT on the preceding live-check
-      # step: linking is independent, so a live-check dispatch failure must not suppress it. A link failure never
-      # fails the run.
+      # Cross-reference each verified PR with its endpoint's tracking issue: append `closes #<issue>` to the PR
+      # body, which makes GitHub link the two and auto-close the endpoint issue when the PR merges. Deterministic
+      # — the issue per PR comes from the verifier output, not the agent. Gated explicitly on verification passing,
+      # NOT on the preceding live-check step: linking is independent, so a live-check dispatch failure must not
+      # suppress it. A link failure never fails the run.
       - name: Link each verified PR to its tracking issue
         if: ${{ always() && steps.verify.outcome == 'success' && env.DRY_RUN != 'true' }}
         continue-on-error: true

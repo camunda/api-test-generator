@@ -652,14 +652,16 @@ def gap_rows(rows):
             if r['requestChecks'] == 'gap' or any(v == 'gap' for v in r['cells'].values())]
 
 
-AREA_INDEX_MARKER = '<!-- AREA_INDEX -->'
+ENDPOINT_INDEX_MARKER = '<!-- ENDPOINT_INDEX -->'
 
 
 def issue_body(s, rows, args):
-    """Body of the rolling tracking issue, or '' when nothing is missing (the workflow then closes it).
+    """Body of the rolling summary issue, or '' when nothing is missing (the workflow then closes it).
 
-    The endpoint tables live in the per-area issues; this one is the index. The body is rendered by
-    hub-coverage-summary-issue.sh, which replaces AREA_INDEX_MARKER with the area-index.md lines that hub-coverage-area-issues.sh writes (one per area, a link to its issue)."""
+    The per-endpoint detail lives in one issue per uncovered endpoint; this one is the index. The body is
+    rendered by hub-coverage-summary-issue.sh, which replaces ENDPOINT_INDEX_MARKER with the
+    endpoint-index.md lines that hub-coverage-endpoint-issues.sh writes (one per endpoint, grouped by
+    area: a link to its issue, or the endpoint itself when its issue has not opened yet)."""
     gaps = gap_rows(rows)
     if not gaps:
         return ''
@@ -668,9 +670,10 @@ def issue_body(s, rows, args):
         'closed automatically once nothing is missing. Please do not edit it by hand._', '',
         f'**{s["fullyAsserted"]} of {s["operations"]} endpoints** have a test for every response the API spec lists '
         f'(2xx/400/401/403/404/409; a documented 500 is not checked); '
-        f'**{len(gaps)}** still have something missing. The endpoints are listed in one issue per area of the API, '
-        'opened gradually (at most 10 new ones per week); an area that has no issue yet is listed here with its endpoints.',
-        '', AREA_INDEX_MARKER, '',
+        f'**{len(gaps)}** still have something missing. Each endpoint below has its own issue, assigned to whoever '
+        'added the endpoint; they open gradually (a per-week flood-guard cap), and an endpoint whose issue has not '
+        'opened yet is listed here under its area.',
+        '', ENDPOINT_INDEX_MARKER, '',
         'Bad-request tests: ' + (request_gap_summary(s) if s['requestCheckGaps'] else 'every kind that applies is covered.'),
     ]
     if args.run_url:
@@ -679,40 +682,31 @@ def issue_body(s, rows, args):
     return '\n'.join(lines) + '\n'
 
 
-def gap_table(gaps):
-    lines = ['| Endpoint | Missing responses | Missing bad-request tests |', '|---|---|---|']
-    for r in gaps[:100]:
+TITLE_PREFIX = '[hub-response-coverage] '
+ENDPOINT_TITLE_SUFFIX = ': missing response or bad-request test'
+
+
+def endpoint_issues(rows, args):
+    """(title, body, operationId, area) per uncovered endpoint, sorted by area then operationId so the
+    index comes out grouped by area. One issue per endpoint; the workflow assigns it to whoever added the
+    endpoint (git-blame of the operation's spec line), falling back to an @camunda/hub mention."""
+    out = []
+    for r in sorted(gap_rows(rows), key=lambda row: (row.get('area', 'Other'), row['operationId'])):
+        op, area = r['operationId'], r.get('area', 'Other')
         codes = ', '.join(('success' if b == '2xx' else b) for b in BUCKETS if r['cells'].get(b) == 'gap') or '—'
         kinds = ', '.join(r['requestMissing']) or '—'
-        lines.append(f'| `{r["operationId"]}` | {codes} | {kinds} |')
-    if len(gaps) > 100:
-        lines.append(f'| …and {len(gaps) - 100} more (see the full table in the run) | | |')
-    return lines
-
-
-AREA_TITLE_PREFIX = '[hub-response-coverage] '
-
-
-def area_issues(rows, args):
-    """(title, body, area, gap count, endpoint ids) per API area (the spec's first tag) with at least one endpoint gap."""
-    by_area = collections.defaultdict(list)
-    for r in gap_rows(rows):
-        by_area[r.get('area', 'Other')].append(r)
-    out = []
-    for area in sorted(by_area):
-        gaps = by_area[area]
         lines = [
             '_Kept up to date by the weekly **Hub response coverage** workflow: rewritten every Monday, '
-            'closed automatically once this area has nothing missing, reopened if a gap returns. '
+            'closed automatically once this endpoint has nothing missing, reopened if a gap returns. '
             'Please do not edit it by hand._', '',
-            f'**{len(gaps)}** {"endpoint" if len(gaps) == 1 else "endpoints"} in the **{area}** area '
-            'still miss a response test or a bad-request test.', '',
-        ] + gap_table(gaps)
+            f'`{op}` (`{r["method"]} {r["path"]}`) in the **{area}** area is missing a test for:', '',
+            f'- Responses: {codes}',
+            f'- Bad-request kinds: {kinds}',
+        ]
         if args.run_url:
             lines += ['', f'Full table: {args.run_url}']
         lines += ['', f'How to fix a gap: [guide]({GUIDE_URL}#closing-a-gap)']
-        out.append((f'{AREA_TITLE_PREFIX}{area}: missing response or bad-request tests', '\n'.join(lines) + '\n', area,
-                    len(gaps), [g['operationId'] for g in gaps]))
+        out.append((f'{TITLE_PREFIX}{op}{ENDPOINT_TITLE_SUFFIX}', '\n'.join(lines) + '\n', op, area))
     return out
 
 
@@ -798,13 +792,13 @@ def main():
     open(f'{args.out}/matrix.md', 'w').write(matrix(summary, rows))
     open(f'{args.out}/slack.txt', 'w').write(slack(summary, prev, args))
     open(f'{args.out}/issue.md', 'w').write(issue_body(summary, rows, args))
-    os.makedirs(f'{args.out}/areas', exist_ok=True)
+    os.makedirs(f'{args.out}/endpoints', exist_ok=True)
     index = []
-    for n, (title, body, area, count, endpoints) in enumerate(area_issues(rows, args)):
-        open(f'{args.out}/areas/area-{n}.md', 'w').write(body)
-        index.append({'title': title, 'file': f'{args.out}/areas/area-{n}.md', 'area': area, 'gaps': count,
-                      'endpoints': endpoints})
-    json.dump(index, open(f'{args.out}/areas.json', 'w'), indent=1)
+    for n, (title, body, op, area) in enumerate(endpoint_issues(rows, args)):
+        open(f'{args.out}/endpoints/endpoint-{n}.md', 'w').write(body)
+        index.append({'title': title, 'file': f'{args.out}/endpoints/endpoint-{n}.md',
+                      'operationId': op, 'area': area})
+    json.dump(index, open(f'{args.out}/endpoints.json', 'w'), indent=1)
     write_history(f'{args.out}/history.csv', args.previous_history, history_row(summary, args))
     open(f'{args.out}/history.md', 'w').write(history_markdown(f'{args.out}/history.csv'))
     print(open(f'{args.out}/slack.txt').read())

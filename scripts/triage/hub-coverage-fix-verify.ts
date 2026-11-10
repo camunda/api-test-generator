@@ -207,10 +207,11 @@ export interface PrIssueLink {
   issue: number;
 }
 
-// For each of this run's opened PRs whose candidate has a tracking issue, the `relates to #<issue>` link the
+// For each of this run's opened PRs whose candidate has a tracking issue, the `closes #<issue>` link the
 // workflow should add to the PR body — unless the body already carries that exact reference. Deterministic:
 // it reuses the same branch -> candidate mapping verify() uses, so the linking step never re-derives the
-// kebab/area logic in shell. A candidate with no issue (its area had no issue yet) yields no link.
+// kebab/area logic in shell. `closes` (not `relates to`): one PR fixes one endpoint, so it resolves that
+// endpoint's own issue. A candidate with no issue (its endpoint had no issue yet) yields no link.
 export function prIssueLinks(
   allPrs: RunPr[],
   selection: Selection,

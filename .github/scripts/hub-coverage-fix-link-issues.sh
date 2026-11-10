@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
-# Append `relates to #<issue>` to each coverage-fix PR the verifier matched to a tracking issue, so the PR and
-# the issue cross-reference each other on GitHub. The issue per PR comes from the verifier output
-# (`links: [{number, issue}]`), which is deterministic and reuses the selector's branch -> candidate -> area
-# mapping — never from the agent.
+# Append `relates to #<issue>` to each coverage-fix PR the verifier matched to a tracking issue, so the PR
+# and the issue cross-reference each other on GitHub. It is a NON-closing reference on purpose: an endpoint
+# issue lists every gap on that endpoint (say a missing 403 and a missing 404 and a lifecycle test), but one
+# coverage-fix PR fixes only one of them — a `closes` link would shut the issue while the other gaps remain,
+# and the next weekly report would reopen it. The weekly report closes the endpoint issue on its own once the
+# endpoint has no gap left. The issue per PR comes from the verifier output (`links: [{number, issue}]`),
+# which is deterministic and reuses the selector's branch -> candidate -> endpoint mapping — never from the agent.
 #
 #   usage: hub-coverage-fix-link-issues.sh <verify-out.json>
 #
@@ -10,8 +13,7 @@
 # check step runs before this one and adds a `### Live Hub check` section to the body, so editing from a stale
 # snapshot would erase it. On a failed read the PR is left untouched. Idempotent: a body that already carries
 # the exact `relates to #<issue>` reference (with a digit boundary, so #42 does not match #420) is skipped.
-# Never fails the run — a missing cross-reference is a convenience, not a correctness gate. A `relates to`
-# (not `closes`) link on purpose: one PR fixes one endpoint, the area issue usually lists several.
+# Never fails the run — a missing cross-reference is a convenience, not a correctness gate.
 set -uo pipefail
 
 out="${1:?usage: hub-coverage-fix-link-issues.sh <verify-out.json>}"
