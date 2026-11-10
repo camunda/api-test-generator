@@ -26,8 +26,8 @@
       "reason": "Same as deployCredentialToEnvironment: undeploying removes the credential from the cluster of a targeted environment, which needs an environment with a reachable cluster the test Hub does not have (api-test-generator#757)."
     },
     {
-      "operationId": "getCredentialEnvironment",
-      "reason": "Same as deployCredentialToEnvironment: the status of one environment needs an environment the credential targets, and Hub reads that status from the environment's cluster, which the test Hub does not have. The planner has no environmentId to chain, so the seeded one answers 404 (api-test-generator#757). getCredentialEnvironments, which lists every targeted environment, stays in the suite."
+      "operationId": "getCredentialDeployment",
+      "reason": "Same as deployCredentialToEnvironment: the status of one environment needs an environment the credential targets, and Hub reads that status from the environment's cluster, which the test Hub does not have. The planner has no environmentId to chain, so the seeded one answers 404 (api-test-generator#757). getCredentialDeployments, which lists every targeted environment, stays in the suite."
     }
   ]
 }

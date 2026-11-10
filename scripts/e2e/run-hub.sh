@@ -149,7 +149,7 @@ make_fixtures() {
   export RV_FIXTURE_WORKSPACE_KEY; RV_FIXTURE_WORKSPACE_KEY="$(curl -s -X POST "$POS_URL/workspaces" "${h[@]}" -d '{"name":"rv-fixture-ws"}' | _jget workspaceKey)"
   # removeClusterRegistration 403 auth-deny: clusterId is a plain path string that @PreAuthorize reads before any cluster lookup or feature-flag gate (see HubV2ClusterController.deleteCluster), so a made-up id reaches the 403. No cluster is created and the denied delete removes nothing.
   export RV_FIXTURE_CLUSTER_ID; RV_FIXTURE_CLUSTER_ID="rv-fixture-nonexistent-cluster"
-  # deploy/undeploy/getCredentialEnvironment 403 auth-deny: @PreAuthorize checks the authority on the credential (RV_FIXTURE_CREDENTIAL_KEY below) before the environmentId is looked up, so a made-up id reaches the 403. No environment is created, and the denied request deploys nothing.
+  # deploy/undeploy/getCredentialDeployment 403 auth-deny: @PreAuthorize checks the authority on the credential (RV_FIXTURE_CREDENTIAL_KEY below) before the environmentId is looked up, so a made-up id reaches the 403. No environment is created, and the denied request deploys nothing.
   export RV_FIXTURE_ENVIRONMENT_ID; RV_FIXTURE_ENVIRONMENT_ID="rv-fixture-nonexistent-environment"
   # removeMember 403 auth-deny: the email path key must resolve to an existing member so the deny request does not 404 before the authority check. Add the seeded camunda user to the fixture workspace and export the address; the denied delete keeps the member.
   curl -s -X POST "$POS_URL/workspaces/$RV_FIXTURE_WORKSPACE_KEY/members" "${h[@]}" -d '{"email":"camunda@example.com","role":"viewer"}' >/dev/null
