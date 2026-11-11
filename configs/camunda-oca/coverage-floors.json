@@ -1,0 +1,52 @@
+{
+  "$comment": "Floors for the response-coverage numbers in scripts/e2e/hub_response_coverage.py for the camunda-oca config, enforced by the Layer-3 invariant 'response coverage does not regress'. Baseline pinned at camunda/camunda spec 8e9f91df (2026-11-09). A floor is one-way: a PR that closes a gap raises it, a higher number never fails, and a floor is never lowered to make CI pass. maxOperationsWithNoRequestTest and maxShapeUnvalidated are ceilings (ratchet to zero). A spec-pin bump that legitimately changes a number updates floors in the same PR.",
+  "assertedByStatus": {
+    "2xx": 233,
+    "400": 172,
+    "401": 160,
+    "403": 6,
+    "404": 33,
+    "409": 0
+  },
+  "optionalFieldsSent": 57,
+  "requestChecksCovered": 121,
+  "fullyAssertedOperations": 25,
+  "lifecycleCreateCovered": 10,
+  "lifecycleRestoreCovered": 0,
+  "lifecycleEdgeCovered": 0,
+  "maxOperationsWithNoRequestTest": 4,
+  "maxShapeUnvalidated": 28,
+  "requestKindEndpoints": {
+    "additional-prop": 85,
+    "additional-prop-general": 35,
+    "auth-absent": 239,
+    "auth-deny": 7,
+    "auth-invalid": 239,
+    "constraint-violation": 35,
+    "enum-violation": 59,
+    "explicit-null-required": 46,
+    "format-invalid": 4,
+    "malformed-json-body": 121,
+    "missing-body": 57,
+    "missing-required": 102,
+    "missing-required-combo": 16,
+    "not-found-fake-id": 33,
+    "oneof-ambiguous": 4,
+    "oneof-cross-bleed": 4,
+    "oneof-none-match": 4,
+    "pagination-cursor-invalid": 46,
+    "pagination-limit-invalid": 47,
+    "pagination-offset-past-total": 47,
+    "param-constraint-violation": 95,
+    "param-enum-violation": 1,
+    "param-missing": 3,
+    "param-type-mismatch": 9,
+    "type-mismatch": 124,
+    "union": 4,
+    "unique-items-violation": 10
+  },
+  "requestScenarioTypes": {
+    "body-top-type-mismatch": 121
+  },
+  "zeroTestOperations": []
+}
