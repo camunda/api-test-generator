@@ -1369,6 +1369,197 @@
         "summary": "tenantId query param maxLength is not validated, returns 200 instead of 400",
         "url": "https://github.com/camunda/camunda/issues/59378"
       }
+    },
+    {
+      "operationId": "getProcessDefinitionStatistics",
+      "scenarioKinds": [
+        {
+          "kind": "constraint-violation",
+          "targets": [
+            "filter.tags",
+            "filter.tags.0",
+            "filter.$or.0.tags",
+            "filter.$or.0.tags.0"
+          ]
+        }
+      ],
+      "reason": "filter.tags is not validated: an invalid top-level value returns 200 with no items, and an invalid `$or[].tags` value returns 500 DataIntegrityViolationException (live OCA camunda/camunda:SNAPSHOT, api-test-generator#771 on-demand run 43294917323). Other constraint-violation coverage is kept."
+    },
+    {
+      "operationId": "searchProcessInstances",
+      "scenarioKinds": [
+        {
+          "kind": "constraint-violation",
+          "targets": [
+            "filter.tags",
+            "filter.$or.0.tags"
+          ]
+        }
+      ],
+      "reason": "Search filter field not validated: an out-of-range value is treated as a non-matching predicate (200), not a 400 (live OCA camunda/camunda:SNAPSHOT, api-test-generator#771 on-demand run 43294917323). Other constraint-violation coverage for this operation is kept."
+    },
+    {
+      "operationId": "searchUserTasks",
+      "scenarioKinds": [
+        {
+          "kind": "constraint-violation",
+          "targets": [
+            "filter.tags",
+            "filter.$or.0.tags"
+          ]
+        }
+      ],
+      "reason": "Search filter field not validated: an out-of-range value is treated as a non-matching predicate (200), not a 400 (live OCA camunda/camunda:SNAPSHOT, api-test-generator#771 on-demand run 43294917323). Other constraint-violation coverage for this operation is kept."
+    },
+    {
+      "operationId": "searchDecisionDefinitions",
+      "scenarioKinds": [
+        {
+          "kind": "constraint-violation",
+          "targets": [
+            "filter.decisionDefinitionId"
+          ]
+        }
+      ],
+      "reason": "Search filter field not validated: an out-of-range value is treated as a non-matching predicate (200), not a 400 (live OCA camunda/camunda:SNAPSHOT, api-test-generator#771 on-demand run 43294917323). Other constraint-violation coverage for this operation is kept."
+    },
+    {
+      "operationId": "searchDecisionInstances",
+      "scenarioKinds": [
+        {
+          "kind": "constraint-violation",
+          "targets": [
+            "filter.decisionDefinitionId"
+          ]
+        }
+      ],
+      "reason": "Search filter field not validated: an out-of-range value is treated as a non-matching predicate (200), not a 400 (live OCA camunda/camunda:SNAPSHOT, api-test-generator#771 on-demand run 43294917323). Other constraint-violation coverage for this operation is kept."
+    },
+    {
+      "operationId": "searchElementInstances",
+      "scenarioKinds": [
+        {
+          "kind": "constraint-violation",
+          "targets": [
+            "filter.processDefinitionId",
+            "filter.$or.0.processDefinitionId"
+          ]
+        }
+      ],
+      "reason": "Search filter field not validated: an out-of-range value is treated as a non-matching predicate (200), not a 400 (live OCA camunda/camunda:SNAPSHOT, api-test-generator#771 on-demand run 43294917323). Other constraint-violation coverage for this operation is kept."
+    },
+    {
+      "operationId": "cancelProcessInstancesBatchOperation",
+      "scenarioKinds": [
+        {
+          "kind": "constraint-violation",
+          "targets": [
+            "filter.$or.0.tags"
+          ]
+        }
+      ],
+      "reason": "Batch filter `$or[].tags` is not validated: an oversized array still creates the batch operation (200), while the top-level `filter.tags` is rejected (live OCA camunda/camunda:SNAPSHOT, api-test-generator#771 on-demand run 43294917323). Other constraint-violation coverage is kept."
+    },
+    {
+      "operationId": "deleteProcessInstancesBatchOperation",
+      "scenarioKinds": [
+        {
+          "kind": "constraint-violation",
+          "targets": [
+            "filter.$or.0.tags"
+          ]
+        }
+      ],
+      "reason": "Batch filter `$or[].tags` is not validated: an oversized array still creates the batch operation (200), while the top-level `filter.tags` is rejected (live OCA camunda/camunda:SNAPSHOT, api-test-generator#771 on-demand run 43294917323). Other constraint-violation coverage is kept."
+    },
+    {
+      "operationId": "modifyProcessInstancesBatchOperation",
+      "scenarioKinds": [
+        {
+          "kind": "constraint-violation",
+          "targets": [
+            "filter.$or.0.tags"
+          ]
+        }
+      ],
+      "reason": "Batch filter `$or[].tags` is not validated: an oversized array still creates the batch operation (200), while the top-level `filter.tags` is rejected (live OCA camunda/camunda:SNAPSHOT, api-test-generator#771 on-demand run 43294917323). Other constraint-violation coverage is kept."
+    },
+    {
+      "operationId": "resumeProcessInstancesBatchOperation",
+      "scenarioKinds": [
+        {
+          "kind": "constraint-violation",
+          "targets": [
+            "filter.$or.0.tags"
+          ]
+        }
+      ],
+      "reason": "Batch filter `$or[].tags` is not validated: an oversized array still creates the batch operation (200), while the top-level `filter.tags` is rejected (live OCA camunda/camunda:SNAPSHOT, api-test-generator#771 on-demand run 43294917323). Other constraint-violation coverage is kept."
+    },
+    {
+      "operationId": "suspendProcessInstancesBatchOperation",
+      "scenarioKinds": [
+        {
+          "kind": "constraint-violation",
+          "targets": [
+            "filter.$or.0.tags"
+          ]
+        }
+      ],
+      "reason": "Batch filter `$or[].tags` is not validated: an oversized array still creates the batch operation (200), while the top-level `filter.tags` is rejected (live OCA camunda/camunda:SNAPSHOT, api-test-generator#771 on-demand run 43294917323). Other constraint-violation coverage is kept."
+    },
+    {
+      "operationId": "activateJobs",
+      "scenarioKinds": [
+        {
+          "kind": "constraint-violation",
+          "targets": [
+            "tenantIds.0"
+          ],
+          "constraintKinds": [
+            "belowMinLength",
+            "emptyString",
+            "patternMismatch"
+          ]
+        }
+      ],
+      "reason": "A blank or whitespace-only tenant id is normalized and the activation proceeds (200, no jobs), like the flat blank values in #404; the length violations are still asserted (live OCA camunda/camunda:SNAPSHOT, api-test-generator#771 on-demand run 43294917323)."
+    },
+    {
+      "operationId": "resolveSecrets",
+      "scenarioKinds": [
+        {
+          "kind": "constraint-violation",
+          "targets": [
+            "references.0"
+          ],
+          "constraintKinds": [
+            "aboveMaxLength",
+            "wayAboveMaxLength"
+          ]
+        }
+      ],
+      "reason": "An over-long reference is reported per item in the 200 response's `errors`, not as a 400 (live OCA camunda/camunda:SNAPSHOT, api-test-generator#771 on-demand run 43294917323); by design for a batch resolve."
+    },
+    {
+      "operationId": "getProcessDefinitionMessageSubscriptionStatistics",
+      "scenarioKinds": [
+        {
+          "kind": "constraint-violation",
+          "targets": [
+            "page.limit"
+          ],
+          "constraintKinds": [
+            "aboveMaximum",
+            "wayAboveMaximum"
+          ]
+        }
+      ],
+      "reason": "page.limit has no enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum return 200. belowMinimum coverage is kept.",
+      "knownIssue": {
+        "summary": "page.limit has no enforced upper bound for plain limit-based pagination",
+        "url": "https://github.com/camunda/camunda/issues/48053"
+      }
     }
   ]
 }
