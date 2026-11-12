@@ -1489,7 +1489,7 @@
       ],
       "reason": "page.limit has no enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum return 200. belowMinimum coverage is kept.",
       "knownIssue": {
-        "summary": "page.limit has no enforced upper bound for plain limit-based pagination",
+        "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
         "url": "https://github.com/camunda/camunda/issues/48053"
       }
     }
