@@ -7,10 +7,10 @@ import { generateUniversalAdditionalProp } from '../../request-validation/src/an
 import type { OperationModel } from '../../request-validation/src/model/types.js';
 
 /**
- * On a body that declares `additionalProperties: false`, the strict and the universal generators build
- * bodies of the same shape (baseline plus one `__`-prefixed string). generate.ts's structural dedupe
- * keeps the strict `additional-prop` scenario and drops `additional-prop-general`, so the coverage
- * report must count only one of them as applicable, or every strict Hub body shows a gap.
+ * On a body that declares `additionalProperties: false`, the strict and the universal generators would
+ * build the same request (baseline plus one unexpected key). The universal generator leaves a closed body
+ * to `additional-prop`, so the coverage report must count only that one as applicable, or every strict
+ * Hub body shows an `additional-prop-general` gap.
  */
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -30,17 +30,10 @@ const strict: OperationModel = {
   bodyRequired: true,
 };
 
-const shape = (body: unknown) =>
-  Object.entries(body && typeof body === 'object' ? body : {})
-    .map(([k, v]) => `${k.startsWith('__') ? '__X__' : k}:${typeof v}`)
-    .sort()
-    .join(',');
-
 describe('additional-prop-general applicability on strict bodies', () => {
-  it('builds the same body shape as additional-prop, which the structural dedupe collapses', () => {
-    const [strictScenario] = generateAdditionalPropsViolations([strict], {});
-    const [generalScenario] = generateUniversalAdditionalProp([strict], {});
-    expect(shape(generalScenario.requestBody)).toBe(shape(strictScenario.requestBody));
+  it('leaves a closed body to additional-prop instead of building a duplicate request', () => {
+    expect(generateAdditionalPropsViolations([strict], {})).toHaveLength(1);
+    expect(generateUniversalAdditionalProp([strict], {})).toEqual([]);
   });
 
   it('generate.ts counts additional-prop-general only when additional-prop does not apply', () => {
@@ -49,7 +42,7 @@ describe('additional-prop-general applicability on strict bodies', () => {
       'utf8',
     );
     expect(src).toMatch(
-      /additionalProperties === false\) \{\s*applicable\.add\('additional-prop'\);\s*\} else \{\s*applicable\.add\('additional-prop-general'\);/,
+      /additionalProperties === false\) \{\s*applicable\.add\('additional-prop'\);\s*\} else if \(isUniversalAdditionalPropEligible\(op, capabilityGates\)\) \{\s*applicable\.add\('additional-prop-general'\);/,
     );
   });
 });

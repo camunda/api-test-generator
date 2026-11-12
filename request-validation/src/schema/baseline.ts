@@ -172,3 +172,40 @@ function toBaseline(v: unknown): BaselineValue {
   if (isSchemaFragment(v)) return v;
   return undefined;
 }
+
+/** A valid value for one walked schema node, built the same way as the baseline body. */
+export function synthesizeBaseline(node: WalkNode): BaselineValue {
+  const t = Array.isArray(node.type) ? node.type[0] : node.type;
+  switch (t) {
+    case 'object': {
+      const obj: Record<string, unknown> = {};
+      if (node.required && node.properties) {
+        for (const r of node.required) {
+          const child = node.properties[r];
+          if (child) obj[r] = synthesizeBaseline(child);
+        }
+      }
+      if (node.properties) {
+        for (const [k, child] of Object.entries(node.properties)) {
+          if (node.required?.includes(k)) continue;
+          const raw = isSchemaFragment(child.raw) ? child.raw : undefined;
+          if (raw && isInteresting(raw)) obj[k] = synthesizeBaseline(child);
+        }
+      }
+      return obj;
+    }
+    case 'array':
+      return node.items ? [synthesizeBaseline(node.items)] : [];
+    case 'integer':
+    case 'number':
+      return 1;
+    case 'boolean':
+      return true;
+    case 'string': {
+      const first = node.enum?.[0];
+      return typeof first === 'string' ? first : 'x';
+    }
+    default:
+      return null;
+  }
+}
