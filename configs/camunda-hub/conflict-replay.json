@@ -146,10 +146,11 @@
             "content": "{\"$schema\":\"https://unpkg.com/@camunda/element-templates-json-schema/resources/schema.json\",\"name\":\"Hub API test template\",\"id\":\"io.camunda.test.hub-api-tests.element-template\",\"appliesTo\":[\"bpmn:Task\"],\"properties\":[],\"version\":1}"
           }
         },
+        "createVersion",
         "createProjectSnapshot",
         "deleteFile"
       ],
-      "reason": "Restoring a project snapshot that contains an element-template file deleted since the snapshot answers 409 (DeletedElementTemplateRestoreException: the deleted template blocks the whole restore)."
+      "reason": "Restoring a project snapshot that contains an element-template file deleted since the snapshot answers 409 (DeletedElementTemplateRestoreException: the deleted template blocks the whole restore). A snapshot only holds a template that has a published version, so the sequence publishes one first."
     }
   ],
   "untested": [
