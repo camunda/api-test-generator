@@ -173,8 +173,15 @@ function toBaseline(v: unknown): BaselineValue {
   return undefined;
 }
 
-/** A valid value for one walked schema node, built the same way as the baseline body. */
-export function synthesizeBaseline(node: WalkNode): BaselineValue {
+/**
+ * A valid value for one walked schema node, built the same way as the baseline body. `requiredOnly` leaves out the
+ * optional fields the baseline adds for their constraints: a placeholder there (`'x'` for a key pattern) may itself be
+ * invalid, which is wrong for a value built only to reach some other field.
+ */
+export function synthesizeBaseline(
+  node: WalkNode,
+  opts: { requiredOnly?: boolean } = {},
+): BaselineValue {
   const t = Array.isArray(node.type) ? node.type[0] : node.type;
   switch (t) {
     case 'object': {
@@ -182,10 +189,10 @@ export function synthesizeBaseline(node: WalkNode): BaselineValue {
       if (node.required && node.properties) {
         for (const r of node.required) {
           const child = node.properties[r];
-          if (child) obj[r] = synthesizeBaseline(child);
+          if (child) obj[r] = synthesizeBaseline(child, opts);
         }
       }
-      if (node.properties) {
+      if (node.properties && !opts.requiredOnly) {
         for (const [k, child] of Object.entries(node.properties)) {
           if (node.required?.includes(k)) continue;
           const raw = isSchemaFragment(child.raw) ? child.raw : undefined;
@@ -195,7 +202,7 @@ export function synthesizeBaseline(node: WalkNode): BaselineValue {
       return obj;
     }
     case 'array':
-      return node.items ? [synthesizeBaseline(node.items)] : [];
+      return node.items ? [synthesizeBaseline(node.items, opts)] : [];
     case 'integer':
     case 'number':
       return 1;
