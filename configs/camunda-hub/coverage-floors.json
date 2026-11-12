@@ -9,7 +9,7 @@
     "409": 9
   },
   "optionalFieldsSent": 63,
-  "requestChecksCovered": 32,
+  "requestChecksCovered": 39,
   "fullyAssertedOperations": 56,
   "lifecycleCreateCovered": 6,
   "lifecycleRestoreCovered": 4,
@@ -20,7 +20,7 @@
     "auth-absent": 64,
     "auth-deny": 61,
     "auth-invalid": 64,
-    "constraint-violation": 13,
+    "constraint-violation": 14,
     "enum-violation": 17,
     "explicit-null-required": 13,
     "format-invalid": 1,

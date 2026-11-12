@@ -3,7 +3,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { findRepoRoot, getActiveConfigName } from '../src/active-config.js';
 import { generateAdditionalPropsViolations } from '../src/analysis/additionalProps.js';
-import { generateUniversalAdditionalProp } from '../src/analysis/additionalPropUniversal.js';
+import {
+  generateUniversalAdditionalProp,
+  isUniversalAdditionalPropEligible,
+} from '../src/analysis/additionalPropUniversal.js';
 import {
   generateFormatInvalid,
   generateMultipleOfViolations,
@@ -1439,10 +1442,10 @@ async function main() {
           }
           applicable.add('type-mismatch');
           applicable.add('body-top-type-mismatch');
-          applicable.add('additional-prop-general');
-          // additional-prop is narrower than -general: only when the schema
-          // itself declares additionalProperties: false (additionalProps.ts's
-          // own gate), unlike -general which fires for any object body.
+          // -general and additional-prop split object bodies between them: a
+          // closed body (additionalProperties: false, additionalProps.ts's own
+          // gate) gets additional-prop, any other buildable one gets -general.
+          if (isUniversalAdditionalPropEligible(op)) applicable.add('additional-prop-general');
           if (op.requestBodySchema?.additionalProperties === false) {
             applicable.add('additional-prop');
           }
