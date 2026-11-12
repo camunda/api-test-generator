@@ -78,4 +78,24 @@ describe('constraint-violation on an optional field that the baseline body leave
       settings: { mode: 'x', tags: ['x', 'x'] },
     });
   });
+
+  it('leaves the optional siblings out of a parent it builds, so only the target field is invalid', () => {
+    // A placeholder 'x' in an optional pattern field (a search filter's `decisionDefinitionKey`) is itself invalid,
+    // and live OCA rejected the request for that field instead of judging the targeted one.
+    const o = op({
+      type: 'object',
+      properties: {
+        filter: {
+          type: 'object',
+          properties: {
+            someKey: { type: 'string', pattern: '^-?[0-9]+$' },
+            tags: { type: 'array', maxItems: 1, items: { type: 'string', pattern: '^[a-z]+$' } },
+          },
+        },
+      },
+    });
+    const scenarios = byKind(o);
+    expect(scenarios.get('filter.tags:aboveMaxItems')).toEqual({ filter: { tags: ['x', 'x'] } });
+    expect(scenarios.get('filter.someKey:patternMismatch')).toBeDefined();
+  });
 });

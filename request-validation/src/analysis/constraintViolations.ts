@@ -170,7 +170,7 @@ function planConstraintMutations(
     if (typeof cons.maxItems === 'number') {
       // Valid items, so the item count is the only thing wrong with the array.
       const maxItems = cons.maxItems;
-      const item = () => (node.items ? synthesizeBaseline(node.items) : 1);
+      const item = () => (node.items ? synthesizeBaseline(node.items, MINIMAL) : 1);
       out.push({
         kind: 'aboveMaxItems',
         value: Array.from({ length: maxItems + 1 }, item),
@@ -208,6 +208,9 @@ function findPathFromRoot(root: WalkNode, node: WalkNode): string[] | undefined 
  * and any parent on the way to it, is added first with a valid value for its schema node, so a constraint on an
  * optional field or on an array item can still be broken on its own.
  */
+// Values built only to reach the targeted field: required fields only, so nothing but the target is invalid.
+const MINIMAL = { requiredOnly: true };
+
 function applyAtPath(obj: unknown, root: WalkNode, path: string[], value: unknown): boolean {
   let target: unknown = obj;
   let node = root;
@@ -220,7 +223,7 @@ function applyAtPath(obj: unknown, root: WalkNode, path: string[], value: unknow
         target[0] = value;
         return true;
       }
-      if (target.length === 0) target.push(synthesizeBaseline(node.items));
+      if (target.length === 0) target.push(synthesizeBaseline(node.items, MINIMAL));
       node = node.items;
       target = target[0];
     } else if (isObject(target)) {
@@ -230,7 +233,7 @@ function applyAtPath(obj: unknown, root: WalkNode, path: string[], value: unknow
         target[seg] = value;
         return true;
       }
-      if (!(seg in target)) target[seg] = synthesizeBaseline(child);
+      if (!(seg in target)) target[seg] = synthesizeBaseline(child, MINIMAL);
       node = child;
       target = target[seg];
     } else {
