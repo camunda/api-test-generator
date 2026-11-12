@@ -11,7 +11,7 @@ import type { OperationModel, SchemaFragment } from '../../request-validation/sr
  * only breaks string formats it has an invalid value for, so Hub's `int32` pagination fields and its
  * own key formats (`ProjectKey`, `WorkspaceKey`) showed as a gap nothing could close.
  */
-function op(body: SchemaFragment, required: string[] = []): OperationModel {
+function op(body: Record<string, SchemaFragment>, required: string[] = []): OperationModel {
   return {
     operationId: 'op',
     method: 'POST',
