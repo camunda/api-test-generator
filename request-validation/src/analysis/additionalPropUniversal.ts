@@ -8,7 +8,29 @@ interface Opts {
   capabilityGates?: ReadonlyMap<string, unknown>;
 }
 
-// Always attempt one additional field injection per body-bearing operation.
+function universalBaseline(
+  op: OperationModel,
+  gates?: ReadonlyMap<string, unknown>,
+): Record<string, unknown> | undefined {
+  const schema = op.requestBodySchema;
+  if (!schema || schema.type !== 'object') return undefined;
+  // A closed body is left to additional-prop (additionalProps.ts): it sends the same request (baseline plus one
+  // unexpected key), and generate.ts's structural dedupe would drop this copy anyway.
+  if (schema.additionalProperties === false) return undefined;
+  const baseline = buildBaselineBody(op, { gates });
+  if (!baseline || typeof baseline !== 'object' || Array.isArray(baseline)) return undefined;
+  return baseline;
+}
+
+/** Does `op` get an additional-prop-general scenario? generate.ts uses this for the kind's applicability. */
+export function isUniversalAdditionalPropEligible(
+  op: OperationModel,
+  gates?: ReadonlyMap<string, unknown>,
+): boolean {
+  return universalBaseline(op, gates) !== undefined;
+}
+
+// One additional field injection per object body that does not already get an additional-prop scenario.
 export function generateUniversalAdditionalProp(
   ops: OperationModel[],
   opts: Opts,
@@ -16,10 +38,8 @@ export function generateUniversalAdditionalProp(
   const out: ValidationScenario[] = [];
   for (const op of ops) {
     if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId)) continue;
-    const schema = op.requestBodySchema;
-    if (!schema || schema.type !== 'object') continue;
-    const baseline = buildBaselineBody(op, { gates: opts.capabilityGates });
-    if (!baseline || typeof baseline !== 'object' || Array.isArray(baseline)) continue;
+    const baseline = universalBaseline(op, opts.capabilityGates);
+    if (!baseline) continue;
     const body = structuredClone(baseline);
     if (body.__extraField === undefined) {
       body.__extraField = 'unexpected';

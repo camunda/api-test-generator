@@ -1,5 +1,5 @@
 import type { OperationModel, ValidationScenario } from '../model/types.js';
-import { buildBaselineBody } from '../schema/baseline.js';
+import { buildBaselineBody, synthesizeBaseline } from '../schema/baseline.js';
 import { buildWalk, type WalkNode } from '../schema/walker.js';
 import { type CapabilityGateInfo, isBlankValue } from '../util/capabilityGate.js';
 import { buildGuaranteedPatternMismatch } from '../util/patternMismatch.js';
@@ -65,7 +65,7 @@ export function generateConstraintViolations(
       // bundled spec) is NOT assumed to behave the same way — leave it
       // ungated rather than guess.
       const isFilterNested = isNested && path[0] === 'filter';
-      const mutations = planConstraintMutations(node.constraints, t);
+      const mutations = planConstraintMutations(node.constraints, t, node);
       // Built for this target: the target stays in even when gated or unsatisfiable.
       const baseline = buildBaselineBody(op, { gates: capabilityGates, keep: path });
       if (!baseline) continue;
@@ -84,7 +84,7 @@ export function generateConstraintViolations(
         // comment above).
         if (gate && isNested && !isFilterNested) continue;
         const body = structuredClone(baseline);
-        if (!applyAtPath(body, path, mut.value)) continue;
+        if (!applyAtPath(body, root, path, mut.value)) continue;
         const target = path.join('.');
         const scenario: ValidationScenario = {
           id: makeId([op.operationId, 'constraint', path.join('_'), mut.kind]),
@@ -139,6 +139,7 @@ export function isConstraintViolationEligible(
 function planConstraintMutations(
   cons: Record<string, unknown>,
   type: string,
+  node: WalkNode,
 ): { kind: string; value: unknown }[] {
   const out: { kind: string; value: unknown }[] = [];
   if (type === 'string') {
@@ -182,13 +183,16 @@ function planConstraintMutations(
     if (typeof cons.minItems === 'number' && cons.minItems > 0)
       out.push({ kind: 'belowMinItems', value: [] });
     if (typeof cons.maxItems === 'number') {
+      // Valid items, so the item count is the only thing wrong with the array.
+      const maxItems = cons.maxItems;
+      const item = () => (node.items ? synthesizeBaseline(node.items) : 1);
       out.push({
         kind: 'aboveMaxItems',
-        value: new Array(cons.maxItems + 1).fill(1),
+        value: Array.from({ length: maxItems + 1 }, item),
       });
       out.push({
         kind: 'wayAboveMaxItems',
-        value: new Array(cons.maxItems + 5).fill(1),
+        value: Array.from({ length: maxItems + 5 }, item),
       });
     }
   }
@@ -214,19 +218,41 @@ function findPathFromRoot(root: WalkNode, node: WalkNode): string[] | undefined 
   return found;
 }
 
-function applyAtPath(obj: unknown, path: string[], value: unknown): boolean {
+/**
+ * Set `value` at `path` (a property name, or '0' for an array's first item). An optional field the baseline left out,
+ * and any parent on the way to it, is added first with a valid value for its schema node, so a constraint on an
+ * optional field or on an array item can still be broken on its own.
+ */
+function applyAtPath(obj: unknown, root: WalkNode, path: string[], value: unknown): boolean {
   let target: unknown = obj;
-  for (let i = 0; i < path.length - 1; i++) {
-    if (!isObject(target)) return false;
+  let node = root;
+  for (let i = 0; i < path.length; i++) {
     const seg = path[i];
-    if (!(seg in target)) return false;
-    target = target[seg];
+    const last = i === path.length - 1;
+    if (Array.isArray(target)) {
+      if (seg !== '0' || !node.items) return false;
+      if (last) {
+        target[0] = value;
+        return true;
+      }
+      if (target.length === 0) target.push(synthesizeBaseline(node.items));
+      node = node.items;
+      target = target[0];
+    } else if (isObject(target)) {
+      const child = node.properties?.[seg];
+      if (!child) return false;
+      if (last) {
+        target[seg] = value;
+        return true;
+      }
+      if (!(seg in target)) target[seg] = synthesizeBaseline(child);
+      node = child;
+      target = target[seg];
+    } else {
+      return false;
+    }
   }
-  if (!isObject(target)) return false;
-  const last = path[path.length - 1];
-  if (!(last in target)) return false;
-  target[last] = value;
-  return true;
+  return false;
 }
 
 function buildParams(path: string): Record<string, string> | undefined {
