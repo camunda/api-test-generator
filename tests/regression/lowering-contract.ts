@@ -66,6 +66,9 @@ export function checkLoweringContract(
           if (step.body?.kind === 'multipart') {
             for (const e of [...step.body.fields, ...step.body.files]) collectRefs(e.value, reads);
           }
+          // Echo assertions run on this step's response before its extracts
+          // are stored, so they may only read already-bound values.
+          for (const check of step.echoChecks ?? []) collectRefs(check.value, reads);
           for (const binding of reads) {
             if (!bound.has(binding)) {
               result.unboundReads.push(

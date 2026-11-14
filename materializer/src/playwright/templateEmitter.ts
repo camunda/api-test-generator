@@ -743,7 +743,7 @@ function appendInlineRequestStep(
   validatedRoutes?: ReadonlySet<string>,
 ): void {
   const respVar = `resp${idx + 1}`;
-  const urlExpr = buildUrlExpression(step.pathTemplate);
+  const urlExpr = buildUrlExpression(step.pathTemplate, step.pathParams);
   const method = step.method.toLowerCase();
   lines.push(`    await test.step('${escapeQuotes(label)}', async () => {`);
   // The shared `renderInlineStepLines` returns lines at 4-space indent
@@ -815,7 +815,7 @@ function appendObserveByIdStatusStep(
     );
   }
   const respVar = `resp${idx + 1}`;
-  const urlExpr = buildUrlExpression(step.requestPlan.pathTemplate);
+  const urlExpr = buildUrlExpression(step.requestPlan.pathTemplate, step.requestPlan.pathParams);
   const method = step.requestPlan.method.toLowerCase();
   const expectedStatus = step.assertion.expectedStatus;
   const isEC = ecOps.has(step.operationId);
@@ -875,7 +875,7 @@ function appendObserveMembershipStep(
     );
   }
   const respVar = `resp${idx + 1}`;
-  const urlExpr = buildUrlExpression(step.requestPlan.pathTemplate);
+  const urlExpr = buildUrlExpression(step.requestPlan.pathTemplate, step.requestPlan.pathParams);
   const method = step.requestPlan.method.toLowerCase();
   // Resolve binding name + access chains early so we can build the
   // awaitEventually predicate (passed into `renderInlineStepLines`)
@@ -1220,7 +1220,7 @@ function appendObserveFieldEqualsStep(
     );
   }
   const respVar = `resp${idx + 1}`;
-  const urlExpr = buildUrlExpression(step.requestPlan.pathTemplate);
+  const urlExpr = buildUrlExpression(step.requestPlan.pathTemplate, step.requestPlan.pathParams);
   const method = step.requestPlan.method.toLowerCase();
   const isEC = ecOps.has(step.operationId);
   lines.push(`    await test.step('${escapeQuotes(label)}', async () => {`);
@@ -1411,7 +1411,7 @@ function appendObserveStateEqualsStep(
     );
   }
   const respVar = `resp${idx + 1}`;
-  const urlExpr = buildUrlExpression(step.requestPlan.pathTemplate);
+  const urlExpr = buildUrlExpression(step.requestPlan.pathTemplate, step.requestPlan.pathParams);
   const method = step.requestPlan.method.toLowerCase();
   const isEC = ecOps.has(step.operationId);
   lines.push(`    await test.step('${escapeQuotes(label)}', async () => {`);

@@ -1,4 +1,4 @@
-import { camelCase } from '@camunda8/emitter-sdk';
+import { lowerPathParams } from '@camunda8/emitter-sdk';
 import type { EventualWaitSpec, RequestStep } from 'path-analyser/types';
 
 // Language-neutral decisions shared with the SDK emitters (#812).
@@ -42,10 +42,24 @@ export const BODY_PLACEHOLDER_RE = /"\\?\$\{([^}]+)\}"/g;
  * URL (and a 4xx) when a path-param binding is missing, rather than
  * the ambiguous string `"undefined"`.
  */
-export function buildUrlExpression(pathTemplate: string): string {
+function ctxAccess(binding: string): string {
+  return /^[A-Za-z_$][\w$]*$/.test(binding) ? `ctx.${binding}` : `ctx[${JSON.stringify(binding)}]`;
+}
+
+export function buildUrlExpression(
+  pathTemplate: string,
+  explicit?: readonly { name: string; var: string }[],
+): string {
+  // Resolve each placeholder through lowerPathParams() so an explicit
+  // `step.pathParams` mapping wins over the naming rule, exactly as in the
+  // lowered plan and the uniqueness seeding (#816 review).
+  const bindings = new Map(lowerPathParams(pathTemplate, explicit).map((p) => [p.name, p.binding]));
   return (
     '`' +
-    pathTemplate.replace(/\{([^}]+)\}/g, (_, p) => `\${ctx.${camelCase(p)}Var || '\${${p}}'}`) +
+    pathTemplate.replace(
+      /\{([^}]+)\}/g,
+      (_, p: string) => `\${${ctxAccess(bindings.get(p) ?? p)} || '\${${p}}'}`,
+    ) +
     '`'
   );
 }

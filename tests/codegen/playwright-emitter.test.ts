@@ -1398,6 +1398,36 @@ describe('echo checks (optional-field variants)', () => {
     expect(compare).toBeGreaterThan(guard);
   });
 
+  test('a structured array expectation renders as an array literal compared with toEqual', () => {
+    const src = render({ tags: ['a', 'b'] });
+    expect(src).toMatch(/expect\(echoed\["tags"\]\)\.toEqual\(\["a", "b"\]\)/);
+  });
+
+  test('a structured object expectation renders recursively, refs included and guarded', () => {
+    const src = render({ meta: { owner: `\${ownerVar}`, n: 1 } });
+    expect(src).toMatch(
+      /expect\(echoed\["meta"\]\)\.toEqual\(\{ "owner": ctx\["ownerVar"\], "n": 1 \}\)/,
+    );
+    expect(src).toContain('expect(ctx["ownerVar"], "ownerVar was never stored").toBeDefined();');
+  });
+
+  test('the request URL honours an explicit pathParams mapping over the naming rule', () => {
+    const c = echoCollection({});
+    const plan = c.scenarios[0].requestPlan ?? [];
+    plan[0] = {
+      ...plan[0],
+      echoChecks: undefined,
+      pathParams: [{ name: 'folderKey', var: 'otherVar' }],
+    };
+    const src = renderPlaywrightSuite(c, {
+      suiteName: 'getFolder',
+      mode: 'variant',
+      recordResponses: false,
+    });
+    expect(src).toContain(`\${ctx.otherVar || '\${folderKey}'}`);
+    expect(src).not.toContain('ctx.folderKeyVar');
+  });
+
   test('a variable reference asserts the variable was stored, before the comparison', () => {
     const src = render({ parentFolderKey: `\${otherFolderKeyVar}` });
     const stored = src.indexOf(

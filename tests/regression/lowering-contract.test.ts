@@ -119,4 +119,24 @@ describe('lowering contract: witness path bindings', () => {
       'scenarios.json s1 step0 createWidget witness getWidget reads idVar',
     ]);
   });
+
+  it('reports an echo check that reads an unset binding', () => {
+    const result = check([
+      scenario([step({ operationId: 'getX', echoChecks: { name: `\${missingVar}` } })]),
+    ]);
+    expect(result.unboundReads).toEqual(['scenarios.json s1 step0 getX reads missingVar']);
+  });
+
+  it('rejects an echo check that reads the current step’s own extract', () => {
+    const result = check([
+      scenario([
+        step({
+          operationId: 'getX',
+          extract: [{ fieldPath: 'id', bind: 'idVar' }],
+          echoChecks: { id: `\${idVar}` },
+        }),
+      ]),
+    ]);
+    expect(result.unboundReads).toEqual(['scenarios.json s1 step0 getX reads idVar']);
+  });
 });

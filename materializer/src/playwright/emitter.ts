@@ -462,13 +462,31 @@ function buildSuiteSource(collection: EndpointScenarioCollection, opts: EmitOpti
 
 /**
  * Render a lowered echo-check value as a TypeScript expression. Echo values
- * are scalars by construction (`lowerEchoChecks` rejects anything else), so
- * this never sees an object/array/file node.
+ * may be structured (`echo: { tags: ['a', 'b'] }`), so arrays and objects
+ * render recursively and compare with `toEqual()`. A file node never appears
+ * in a response expectation.
  */
-function renderLoweredScalar(value: LoweredValue): string {
-  if (value.kind === 'literal') return JSON.stringify(value.value);
-  if (value.kind === 'ref') return `ctx[${JSON.stringify(value.binding)}]`;
-  throw new Error(`Echo checks lower to literal/ref values only, got ${value.kind}`);
+function renderLoweredValue(value: LoweredValue): string {
+  switch (value.kind) {
+    case 'literal':
+      return JSON.stringify(value.value);
+    case 'ref':
+      return `ctx[${JSON.stringify(value.binding)}]`;
+    case 'array':
+      return `[${value.items.map(renderLoweredValue).join(', ')}]`;
+    case 'object':
+      return `{ ${value.entries.map((e) => `${JSON.stringify(e.key)}: ${renderLoweredValue(e.value)}`).join(', ')} }`;
+    case 'file':
+      throw new Error(`Echo checks cannot expect a file value (${value.path})`);
+  }
+}
+
+/** Every ctx binding a lowered value reads, in order, without duplicates. */
+function loweredRefs(value: LoweredValue, out: string[] = []): string[] {
+  if (value.kind === 'ref' && !out.includes(value.binding)) out.push(value.binding);
+  if (value.kind === 'array') for (const v of value.items) loweredRefs(v, out);
+  if (value.kind === 'object') for (const e of value.entries) loweredRefs(e.value, out);
+  return out;
 }
 
 function renderScenarioTest(
@@ -558,7 +576,7 @@ function renderScenarioTest(
   }
   requestPlan.forEach((step: RequestStep, idx: number) => {
     const varName = `resp${idx + 1}`;
-    const urlExpr = buildUrlExpression(step.pathTemplate);
+    const urlExpr = buildUrlExpression(step.pathTemplate, step.pathParams);
     const method = step.method.toLowerCase();
     const isFinal = idx === requestPlan.length - 1;
     const hasShape = Array.isArray(s.responseShapeFields) && s.responseShapeFields.length > 0;
@@ -622,7 +640,7 @@ function renderScenarioTest(
         body: bodyIndented,
         ...extras,
         // Additional context vars used by the deploymentGateway template:
-        url: buildUrlExpression(step.pathTemplate),
+        url: buildUrlExpression(step.pathTemplate, step.pathParams),
         expectedStatus: String(step.expect.status),
       };
       const rendered = renderRoleCallSite(roleMatch.bundle, scope);
@@ -716,14 +734,14 @@ function renderScenarioTest(
       // Render the lowered checks (#812): the field as segments and the
       // expected value as a typed literal/ref — no "${binding}" parsing here.
       for (const check of lowerEchoChecks(step.echoChecks) ?? []) {
-        const expected = renderLoweredScalar(check.value);
+        const expected = renderLoweredValue(check.value);
         // A dotted field ("folder.parentFolderKey") reaches into a wrapped resource.
         const access = check.segments.map((k) => `[${JSON.stringify(k)}]`).join('');
         // undefined equals undefined, so a missing field or an unstored variable must fail first.
         body.push(`      expect(echoed).toHaveProperty(${JSON.stringify(check.segments)});`);
-        if (check.value.kind === 'ref') {
+        for (const binding of loweredRefs(check.value)) {
           body.push(
-            `      expect(ctx[${JSON.stringify(check.value.binding)}], ${JSON.stringify(`${check.value.binding} was never stored`)}).toBeDefined();`,
+            `      expect(ctx[${JSON.stringify(binding)}], ${JSON.stringify(`${binding} was never stored`)}).toBeDefined();`,
           );
         }
         body.push(`      expect(echoed${access}).toEqual(${expected});`);
