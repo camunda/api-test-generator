@@ -47,6 +47,16 @@ describe('hub coverage report: scoped exclusions park their status code', () => 
     );
   });
 
+  it('parks 401 only when both auth-absent and auth-invalid are held', () => {
+    const both = { heldKinds: { op: ['auth-absent', 'auth-invalid'] } };
+    expect(held('op', '401', both)).toBe(true);
+  });
+
+  it('does not park 401 when only one of its two kinds is held', () => {
+    expect(held('op', '401', { heldKinds: { op: ['auth-absent'] } })).toBe(false);
+    expect(held('op', '401', { heldKinds: { op: ['auth-invalid'] } })).toBe(false);
+  });
+
   it('parks 403 when auth-deny is held for the operation', () => {
     expect(held('addMember', '403', { heldKinds: { addMember: ['auth-deny'] } })).toBe(true);
   });

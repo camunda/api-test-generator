@@ -60,17 +60,24 @@ def bucket(code):
     return '2xx' if 200 <= code < 300 else str(code)
 
 
-# The one scenario kind that asserts each of these status codes. A scoped exclusion that removes that
-# kind entirely (heldKindsByOperation) parks the status code too, the same as a whole-operation exclusion.
-# 400 has many kinds, so one held kind never parks it.
-STATUS_KIND = {'401': 'auth-absent', '403': 'auth-deny', '404': 'not-found-fake-id'}
+# The scenario kinds that assert each of these status codes. A scoped exclusion that removes every one
+# of them (heldKindsByOperation) parks the status code too, the same as a whole-operation exclusion.
+# 400 has many kinds, so it is not listed and one held kind never parks it.
+STATUS_KINDS = {
+    '401': ('auth-absent', 'auth-invalid'),
+    '403': ('auth-deny',),
+    '404': ('not-found-fake-id',),
+}
 
 
 def cell_held(op_id, b, suppressed, excluded, held_kinds):
     """Whether an untested status-code cell is known and parked by config rather than a gap."""
     if b == '2xx':
         return op_id in suppressed
-    return op_id in excluded or STATUS_KIND.get(b) in held_kinds.get(op_id, ())
+    if op_id in excluded:
+        return True
+    kinds = STATUS_KINDS.get(b)
+    return bool(kinds) and all(k in held_kinds.get(op_id, ()) for k in kinds)
 
 
 # --------------------------------------------------------------------- spec ----
