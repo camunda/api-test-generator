@@ -170,13 +170,14 @@ export function generateMultipleOfViolations(
 /**
  * The coverage report's applicability check for `format-invalid`. A `format` alone is not enough: the
  * generator only breaks string formats it has an invalid value for, skips unenforced formats, and needs
- * the field in the baseline body. Asking the generator itself keeps the two from drifting apart.
+ * the field in the baseline body. Asking the generator itself keeps the two from drifting apart;
+ * capping it at one scenario stops it at the first hit.
  */
 export function isFormatInvalidEligible(
   op: OperationModel,
   opts: Pick<Opts, 'unenforcedStringFormats'>,
 ): boolean {
-  return generateFormatInvalid([op], opts).length > 0;
+  return generateFormatInvalid([op], { ...opts, capPerOperation: 1 }).length > 0;
 }
 
 export function generateFormatInvalid(ops: OperationModel[], opts: Opts): ValidationScenario[] {
@@ -194,7 +195,9 @@ export function generateFormatInvalid(ops: OperationModel[], opts: Opts): Valida
     if (!root) continue;
     const baseline = buildBaselineBody(op);
     if (!baseline) continue;
+    let produced = 0;
     for (const node of walk.byPointer.values()) {
+      if (opts.capPerOperation && produced >= opts.capPerOperation) break;
       const raw = node.raw;
       if (
         node.type === 'string' &&
@@ -221,6 +224,7 @@ export function generateFormatInvalid(ops: OperationModel[], opts: Opts): Valida
             headersAuth: true,
             source: 'body',
           });
+          produced++;
         }
       }
     }
