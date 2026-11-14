@@ -16,8 +16,12 @@ import {
   getSpecBundleDir,
   getVariantOutputDir,
 } from '../../path-analyser/src/configResolver.js';
-import { loadGlobalContextSeedsAbox } from '../../path-analyser/src/ontology/loader.js';
+import {
+  deriveGlobalContextSeedsViews,
+  loadGlobalContextSeedsAbox,
+} from '../../path-analyser/src/ontology/loader.js';
 import { loadRequestValidationConfig } from '../../request-validation/src/config.js';
+import { checkLoweringContract } from '../../tests/regression/lowering-contract.ts';
 
 /**
  * Bundled-spec invariants — Layer 3 of the layered test strategy (#36).
@@ -5579,9 +5583,11 @@ describeForThisConfig(
       // contract; either being absent would cause `<default>`-style
       // auto-seeding to creep back in for tenants and break
       // re-runnability for producer ops.
-      const ctxSeedingPath = join(REPO_ROOT, 'materializer', 'src', 'playwright', 'ctxSeeding.ts');
+      // The gates moved from `ctxSeeding.ts` (which now only renders) to the
+      // language-neutral `planCtxSeeding` in emitter-sdk (#812).
+      const ctxSeedingPath = join(REPO_ROOT, 'emitter-sdk', 'src', 'lowering.ts');
       if (!existsSync(ctxSeedingPath)) {
-        throw new Error(`ctxSeeding.ts not found at ${ctxSeedingPath}`);
+        throw new Error(`lowering.ts not found at ${ctxSeedingPath}`);
       }
       const src = readFileSync(ctxSeedingPath, 'utf8');
       // Strip both block and line comments so JSDoc/issue cross-
@@ -5599,7 +5605,7 @@ describeForThisConfig(
         .join('\n');
       expect(
         codeOnly,
-        'ctxSeeding.ts must reference `omitWhenUnbound` in source (#342). The filter on ' +
+        'emitter-sdk/src/lowering.ts must reference `omitWhenUnbound` in source (#342). The filter on ' +
           '`globalSeedNames` and the skip in the universal-prologue emission loop are the ' +
           'two gates that prevent `tenantIdVar` (and any future omit-when-unbound binding) ' +
           'from being auto-seeded into every scenario.',
@@ -5610,7 +5616,7 @@ describeForThisConfig(
       const useCount = (codeOnly.match(/omitWhenUnbound/g) ?? []).length;
       expect(
         useCount,
-        'ctxSeeding.ts must reference `omitWhenUnbound` at least twice (interface + filter + ' +
+        'emitter-sdk/src/lowering.ts must reference `omitWhenUnbound` at least twice (interface + filter + ' +
           'skip statement). A single reference suggests the gate was deleted or stubbed.',
       ).toBeGreaterThanOrEqual(2);
     });
@@ -10991,5 +10997,29 @@ describeForThisConfig('bundled-spec invariants: capability-gated fields (#404)',
         'expectDetailContains',
       );
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Emitter lowering contract (#812)
+// ---------------------------------------------------------------------------
+// SDK adapters render `lowerScenario()` output and trust that every binding
+// a step reads is set by then. If the planner ever emits a step that reads a
+// binding nothing has set, every SDK suite would send `undefined`.
+describeForThisConfig('bundled-spec invariants: emitter lowering contract (#812)', () => {
+  const seeds = deriveGlobalContextSeedsViews(REPO_ROOT)?.globalContextSeeds ?? [];
+  const result = checkLoweringContract(
+    [SCENARIOS_DIR, FEATURE_SCENARIOS_DIR, VARIANT_SCENARIOS_DIR],
+    seeds,
+  );
+
+  it('lowers every planned scenario (no embedded placeholders, no mixed server overrides)', () => {
+    expect(result.scenarios).toBeGreaterThan(0);
+    expect(result.loweringErrors).toEqual([]);
+  });
+
+  it('every binding a lowered step reads is seeded or extracted by an earlier step', () => {
+    expect(result.steps).toBeGreaterThan(0);
+    expect(result.unboundReads).toEqual([]);
   });
 });
