@@ -2,7 +2,9 @@
  * Shared Layer-3 check for the emitter lowering contract (#812): every
  * binding a lowered step reads (a path parameter or a body/multipart ref
  * that is not omitted when unset) must already be set when the step runs,
- * either by the seeding plan or by an earlier step's extract.
+ * either by the seeding plan or by an earlier step's extract. A witness
+ * polled after a step (`waitsAfter`) may also read the step's own extracts,
+ * but never a later step's.
  *
  * SDK adapters render `lowerScenario()` output without re-checking this, so
  * a planner change that breaks it would make every SDK suite send
@@ -71,7 +73,18 @@ export function checkLoweringContract(
               );
             }
           }
+          // The step's own extracts land before its post-step witness polls,
+          // so they may legitimately supply a witness binding.
           for (const e of step.extract) bound.add(e.binding);
+          for (const wait of step.waitsAfter) {
+            for (const p of wait.pathParams) {
+              if (!bound.has(p.binding)) {
+                result.unboundReads.push(
+                  `${file} ${scenario.id} step${step.index} ${step.operationId} witness ${wait.operationId} reads ${p.binding}`,
+                );
+              }
+            }
+          }
         }
       }
     }

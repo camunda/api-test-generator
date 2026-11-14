@@ -223,4 +223,58 @@ describe('lowerScenario', () => {
       files: [{ key: 'f', value: { kind: 'file', path: 'x.bin' } }],
     });
   });
+
+  it('marks only the binding the lowered request reads unique, not the overridden fallback', () => {
+    // An explicit pathParams entry replaces the naming-rule binding: the
+    // lowered request reads `otherVar` only, so `idVar` must stay a literal.
+    const s = lowerScenario(
+      scenario({
+        bindings: { idVar: 'fixed-id' },
+        requestPlan: [
+          step({
+            operationId: 'updateThing',
+            method: 'PUT',
+            pathTemplate: '/things/{id}',
+            pathParams: [{ name: 'id', var: 'otherVar' }],
+            declares409: true,
+          }),
+        ],
+        operations: [{ operationId: 'updateThing', method: 'PUT', path: '/things/{id}' }],
+      }),
+      { globalContextSeeds: [] },
+    );
+    expect(s.uniqueBindings).toEqual(['otherVar']);
+    expect(s.seeds).toEqual([
+      { kind: 'literal', group: 'scenario', binding: 'idVar', value: 'fixed-id' },
+    ]);
+  });
+
+  it('lowers echo checks into typed values and path segments', () => {
+    const s = lowerScenario(
+      scenario({
+        requestPlan: [
+          step({
+            operationId: 'updateThing',
+            method: 'PATCH',
+            pathTemplate: '/things',
+            echoChecks: {
+              'folder.parentFolderKey': '${otherFolderKeyVar}',
+              name: 'fixed',
+              parent: null,
+            },
+          }),
+        ],
+        operations: [{ operationId: 'updateThing', method: 'PATCH', path: '/things' }],
+      }),
+      { globalContextSeeds: [] },
+    );
+    expect(s.steps[0].echoChecks).toEqual([
+      {
+        segments: ['folder', 'parentFolderKey'],
+        value: { kind: 'ref', binding: 'otherFolderKeyVar', omitWhenUnbound: false },
+      },
+      { segments: ['name'], value: { kind: 'literal', value: 'fixed' } },
+      { segments: ['parent'], value: { kind: 'literal', value: null } },
+    ]);
+  });
 });

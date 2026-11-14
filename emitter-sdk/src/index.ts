@@ -39,6 +39,7 @@ export type {
 
 export type {
   LoweredBody,
+  LoweredEchoCheck,
   LoweredExtract,
   LoweredPathParam,
   LoweredScenario,
@@ -55,6 +56,7 @@ export {
   computeUniqueBindings,
   eventuallyConsistentOps,
   fieldPathSegments,
+  lowerEchoChecks,
   lowerPathParams,
   lowerScenario,
   lowerValue,

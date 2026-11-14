@@ -154,10 +154,10 @@ function walkForPlaceholders(node: unknown, out: Set<string>): void {
 
 function collectBindingRefs(step: RequestStep): Set<string> {
   const refs = new Set<string>();
-  for (const p of step.pathParams ?? []) refs.add(p.var);
-  for (const m of step.pathTemplate?.matchAll(PATH_PARAM_RE) ?? []) {
-    refs.add(pathParamBinding(m[1]));
-  }
+  // Collect path reads through lowerPathParams() so uniqueness uses the same
+  // bindings as the lowered request: an explicit `step.pathParams` entry
+  // replaces the naming-rule binding, it does not add to it.
+  for (const p of lowerPathParams(step.pathTemplate, step.pathParams)) refs.add(p.binding);
   walkForPlaceholders(step.bodyTemplate, refs);
   walkForPlaceholders(step.multipartTemplate, refs);
   return refs;
@@ -391,6 +391,32 @@ export type LoweredBody =
       files: { key: string; value: LoweredValue }[];
     };
 
+/**
+ * One response-field equality assertion, lowered: the field as segments and
+ * the expected value as a typed literal/ref. Adapters render it; they never
+ * parse `"${binding}"` themselves.
+ */
+export interface LoweredEchoCheck {
+  /** Dotted response field (`folder.parentFolderKey`) as segments. */
+  segments: (string | number)[];
+  value: LoweredValue;
+}
+
+/**
+ * Lower the planner's `echoChecks` map (`field path -> expected value`, where
+ * `"${binding}"` reads a ctx binding) into typed checks. An echo value never
+ * names an `omitWhenUnbound` binding, so refs here are unconditional.
+ */
+export function lowerEchoChecks(
+  echoChecks: Record<string, unknown> | undefined,
+): LoweredEchoCheck[] | undefined {
+  if (!echoChecks) return undefined;
+  return Object.entries(echoChecks).map(([field, value]) => ({
+    segments: fieldPathSegments(field),
+    value: lowerValue(value, new Set<string>()),
+  }));
+}
+
 export interface LoweredWait {
   /** Eventual state waited for (for comments). */
   state: string;
@@ -417,7 +443,7 @@ export interface LoweredStep {
   /** Waits to render after this step, before the next one. */
   waitsAfter: LoweredWait[];
   searchChecks?: SearchPagingChecks;
-  echoChecks?: Record<string, unknown>;
+  echoChecks?: LoweredEchoCheck[];
   validateResponse: boolean;
   /** The planner's step, for planner features not lowered yet. Prefer the lowered fields. */
   source: RequestStep;
@@ -509,7 +535,7 @@ function lowerStep(
       pollIntervalMs: w.witness.pollIntervalMs,
     })),
     searchChecks: step.searchChecks,
-    echoChecks: step.echoChecks,
+    echoChecks: lowerEchoChecks(step.echoChecks),
     validateResponse: step.validateResponse === true,
     source: step,
   };

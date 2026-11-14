@@ -27,7 +27,8 @@ decision that does not depend on the target language and returns a `LoweredScena
 | `steps[].expect` | Expected status and, for errors, `detailContains` | Assert both |
 | `steps[].extract` | Response fields to store, as `segments` (`['items', 0, 'key']`) | `ctx[binding] = response…segments` |
 | `steps[].waitsAfter` | Witness reads to poll after the step | Poll the witness until its predicate holds |
-| `steps[].searchChecks`, `echoChecks`, `validateResponse` | Extra response checks | Optional; see the Playwright emitter for semantics |
+| `steps[].searchChecks`, `validateResponse` | Extra response checks | Optional; see the Playwright emitter for semantics |
+| `steps[].echoChecks` | Response fields that must equal a value, as `segments` plus a typed `literal`/`ref` | Assert `response…segments` equals the literal or `ctx[binding]` |
 | `serverOverride` | A non-default base URL for the whole scenario | Use it as the base URL |
 | `uniqueBindings` | Bindings seeded uniquely per run (409 avoidance) | Already applied in `seeds`; informational |
 
@@ -43,7 +44,9 @@ asserts on the real generated scenarios that:
 
 - every scenario lowers (no placeholder inside a longer string, no scenario mixing server bases);
 - every binding a step reads (path parameter, or a body ref not marked `omitWhenUnbound`) is set by
-  `seeds` or by an earlier step's `extract`.
+  `seeds` or by an earlier step's `extract`;
+- every binding a post-step witness poll reads is set by then too — the polling step's own
+  `extract` counts, a later step's does not.
 
 So an adapter can read `ctx[binding]` without guarding against undefined.
 

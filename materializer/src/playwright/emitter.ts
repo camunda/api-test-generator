@@ -5,7 +5,9 @@ import type {
   EmittedFile,
   EmitterStrategy,
   LoadedRoleBundle,
+  LoweredValue,
 } from '@camunda8/emitter-sdk';
+import { lowerEchoChecks } from '@camunda8/emitter-sdk';
 import { assertSafeGlobalContextSeeds } from 'path-analyser/ontology/loader';
 import type {
   EndpointScenario,
@@ -458,6 +460,17 @@ function buildSuiteSource(collection: EndpointScenarioCollection, opts: EmitOpti
   return lines.join('\n');
 }
 
+/**
+ * Render a lowered echo-check value as a TypeScript expression. Echo values
+ * are scalars by construction (`lowerEchoChecks` rejects anything else), so
+ * this never sees an object/array/file node.
+ */
+function renderLoweredScalar(value: LoweredValue): string {
+  if (value.kind === 'literal') return JSON.stringify(value.value);
+  if (value.kind === 'ref') return `ctx[${JSON.stringify(value.binding)}]`;
+  throw new Error(`Echo checks lower to literal/ref values only, got ${value.kind}`);
+}
+
 function renderScenarioTest(
   s: EndpointScenario,
   globalContextSeeds: readonly GlobalContextSeed[],
@@ -700,18 +713,17 @@ function renderScenarioTest(
     if (step.echoChecks && !isErrorScenario) {
       body.push(`    {`);
       body.push(`      const echoed = await ${varName}.json();`);
-      for (const [field, value] of Object.entries(step.echoChecks)) {
-        // "${xVar}" is the value stored in ctx.xVar by an earlier step.
-        const ref = typeof value === 'string' ? /^\$\{(\w+)\}$/.exec(value) : null;
-        const expected = ref ? `ctx[${JSON.stringify(ref[1])}]` : JSON.stringify(value);
+      // Render the lowered checks (#812): the field as segments and the
+      // expected value as a typed literal/ref — no "${binding}" parsing here.
+      for (const check of lowerEchoChecks(step.echoChecks) ?? []) {
+        const expected = renderLoweredScalar(check.value);
         // A dotted field ("folder.parentFolderKey") reaches into a wrapped resource.
-        const segments = field.split('.');
-        const access = segments.map((k) => `[${JSON.stringify(k)}]`).join('');
+        const access = check.segments.map((k) => `[${JSON.stringify(k)}]`).join('');
         // undefined equals undefined, so a missing field or an unstored variable must fail first.
-        body.push(`      expect(echoed).toHaveProperty(${JSON.stringify(segments)});`);
-        if (ref) {
+        body.push(`      expect(echoed).toHaveProperty(${JSON.stringify(check.segments)});`);
+        if (check.value.kind === 'ref') {
           body.push(
-            `      expect(ctx[${JSON.stringify(ref[1])}], ${JSON.stringify(`${ref[1]} was never stored`)}).toBeDefined();`,
+            `      expect(ctx[${JSON.stringify(check.value.binding)}], ${JSON.stringify(`${check.value.binding} was never stored`)}).toBeDefined();`,
           );
         }
         body.push(`      expect(echoed${access}).toEqual(${expected});`);
