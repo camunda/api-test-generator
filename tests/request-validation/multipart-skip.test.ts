@@ -15,7 +15,8 @@ import { shouldSkipForMultipart } from '../../request-validation/src/util/multip
  *   2. type-mismatch on a `format: binary` part — any bytes satisfy
  *      the schema; mutation produces 201, not 400.
  *   3. constraint-violation on an array-typed part — array-cardinality
- *      mutations don't translate to multipart `files=...` repetition.
+ *      mutations don't translate to multipart `files=...` repetition —
+ *      or on a field nested inside a part (never verified live).
  *
  * `shouldSkipForMultipart` is the planner-side authority on whether
  * the multipart-adaptation pass should drop a scenario instead of
@@ -101,6 +102,24 @@ describe('shouldSkipForMultipart (#135)', () => {
       type: 'constraint-violation',
       target: 'files',
       requestBody: { files: [] },
+    });
+    expect(shouldSkipForMultipart(s, op)).toBe(true);
+  });
+
+  it('skips constraint-violation on a field nested inside a multipart part (createDocument metadata)', () => {
+    const op = multipartOnlyOp({
+      operationId: 'createDocument',
+      multipartSchema: {
+        type: 'object',
+        properties: {
+          metadata: { type: 'object', properties: { processDefinitionId: { type: 'string' } } },
+        },
+      },
+    });
+    const s = scenario({
+      type: 'constraint-violation',
+      target: 'metadata.processDefinitionId',
+      requestBody: { metadata: { processDefinitionId: '' } },
     });
     expect(shouldSkipForMultipart(s, op)).toBe(true);
   });
