@@ -32,6 +32,8 @@ interface Opts {
    * everywhere: the gate answers 403 for them by design.
    */
   nonScalarKeyOperations?: ReadonlySet<string>;
+  /** Capability-gated field names (#404): an optional gated field is left out of the baseline body. */
+  capabilityGates?: ReadonlyMap<string, unknown>;
 }
 
 const TYPE_MISMATCH_TABLE: Record<string, unknown[]> = {
@@ -49,8 +51,9 @@ export function generateBodyTypeMismatch(ops: OperationModel[], opts: Opts): Val
     if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId)) continue;
     const walk = buildWalk(op);
     if (!walk?.root) continue;
-    const baseline = buildBaselineBody(op);
-    if (!baseline || typeof baseline !== 'object' || Array.isArray(baseline)) continue;
+    const gates = opts.capabilityGates;
+    const opBaseline = buildBaselineBody(op, { gates });
+    if (!opBaseline || typeof opBaseline !== 'object' || Array.isArray(opBaseline)) continue;
     let produced = 0;
     const fields = collectFields(walk.root, []);
     for (const f of fields) {
@@ -62,6 +65,9 @@ export function generateBodyTypeMismatch(ops: OperationModel[], opts: Opts): Val
       // operations listed in nonScalarKeyOperations.
       const isKey = opts.resourceKeyFields?.has(f.path[f.path.length - 1]) ?? false;
       if (isKey && !opts.nonScalarKeyOperations?.has(op.operationId)) continue;
+      // Built for this target: the target stays in even when gated or unsatisfiable.
+      const baseline = buildBaselineBody(op, { gates, keep: f.path });
+      if (!isRecord(baseline)) continue;
       let perField = 0;
       for (const wrong of TYPE_MISMATCH_TABLE[t]) {
         // A key field only gets the object/array values (400); scalars are 403 by design.

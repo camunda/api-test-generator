@@ -5,6 +5,8 @@ import { makeId } from './common.js';
 interface Opts {
   onlyOperations?: Set<string>;
   capPerOperation?: number;
+  /** Capability-gated field names (#404): an optional gated field is left out of the baseline body. */
+  capabilityGates?: ReadonlyMap<string, unknown>;
 }
 
 export function generateAdditionalPropsViolations(
@@ -17,7 +19,7 @@ export function generateAdditionalPropsViolations(
     const schema = op.requestBodySchema;
     if (!schema || schema.type !== 'object') continue;
     if (schema.additionalProperties === false) {
-      const baseline = buildBaselineBody(op);
+      const baseline = buildBaselineBody(op, { gates: opts.capabilityGates });
       if (!baseline || typeof baseline !== 'object' || Array.isArray(baseline)) continue;
       if ((opts.capPerOperation ?? 1) < 1) continue;
       const body = structuredClone(baseline);

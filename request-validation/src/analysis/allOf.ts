@@ -5,6 +5,8 @@ import { makeId } from './common.js';
 interface Opts {
   onlyOperations?: Set<string>;
   capPerOperation?: number;
+  /** Capability-gated field names (#404): an optional gated field is left out of the baseline body. */
+  capabilityGates?: ReadonlyMap<string, unknown>;
 }
 
 type BaselineObject = Record<string, unknown>;
@@ -16,12 +18,13 @@ type BaselineObject = Record<string, unknown>;
  */
 export function allOfMissingRequiredPlan(
   op: OperationModel,
+  gates?: ReadonlyMap<string, unknown>,
 ): { baseline: BaselineObject; targets: string[] } | undefined {
   const root = op.requestBodySchema;
   if (!root) return undefined;
   if (!Array.isArray(root.allOf)) return undefined;
   // Build baseline to anchor other requireds
-  const baseline = buildBaselineBody(op);
+  const baseline = buildBaselineBody(op, { gates });
   if (!baseline || typeof baseline !== 'object' || Array.isArray(baseline)) return undefined;
   // Collect required sets per constituent
   const constituents = root.allOf.filter(
@@ -47,6 +50,7 @@ export function isAllOfMissingRequiredEligible(op: OperationModel): boolean {
  */
 export function allOfConflictPlan(
   op: OperationModel,
+  gates?: ReadonlyMap<string, unknown>,
 ): { baseline: BaselineObject; conflicts: string[] } | undefined {
   const root = op.requestBodySchema;
   if (!root) return undefined;
@@ -67,7 +71,7 @@ export function allOfConflictPlan(
     .filter(([_, set]) => set.size > 1)
     .map(([k]) => k);
   if (!conflicts.length) return undefined;
-  const baseline = buildBaselineBody(op);
+  const baseline = buildBaselineBody(op, { gates });
   if (!baseline || typeof baseline !== 'object' || Array.isArray(baseline)) return undefined;
   return { baseline, conflicts };
 }
@@ -83,7 +87,7 @@ export function generateAllOfMissingRequired(
   const out: ValidationScenario[] = [];
   for (const op of ops) {
     if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId)) continue;
-    const plan = allOfMissingRequiredPlan(op);
+    const plan = allOfMissingRequiredPlan(op, opts.capabilityGates);
     if (!plan) continue;
     for (const r of plan.targets) {
       // Create body missing this required but present others
@@ -112,7 +116,7 @@ export function generateAllOfConflicts(ops: OperationModel[], opts: Opts): Valid
   const out: ValidationScenario[] = [];
   for (const op of ops) {
     if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId)) continue;
-    const plan = allOfConflictPlan(op);
+    const plan = allOfConflictPlan(op, opts.capabilityGates);
     if (!plan) continue;
     for (const prop of plan.conflicts) {
       const body = structuredClone(plan.baseline);

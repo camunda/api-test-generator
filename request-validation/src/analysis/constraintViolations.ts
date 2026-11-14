@@ -48,8 +48,7 @@ export function generateConstraintViolations(
     const walk = buildWalk(op);
     const root = walk?.root;
     if (!root) continue;
-    const baseline = buildBaselineBody(op);
-    if (!baseline) continue;
+    if (!buildBaselineBody(op, { gates: capabilityGates })) continue;
     let produced = 0;
     for (const node of walk.byPointer.values()) {
       const t = Array.isArray(node.type) ? node.type?.[0] : node.type;
@@ -67,6 +66,9 @@ export function generateConstraintViolations(
       // ungated rather than guess.
       const isFilterNested = isNested && path[0] === 'filter';
       const mutations = planConstraintMutations(node.constraints, t);
+      // Built for this target: the target stays in even when gated or unsatisfiable.
+      const baseline = buildBaselineBody(op, { gates: capabilityGates, keep: path });
+      if (!baseline) continue;
       for (const mut of mutations) {
         if (opts.capPerOperation && produced >= opts.capPerOperation) break;
         // #404 — a gated, optional, FLAT field's blank/whitespace-only

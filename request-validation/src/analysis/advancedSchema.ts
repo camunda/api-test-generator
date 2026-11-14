@@ -13,6 +13,8 @@ interface Opts {
    * the outcome). See `RequestValidationConfig.unenforcedStringFormats`.
    */
   unenforcedStringFormats?: string[];
+  /** Capability-gated field names (#404): an optional gated field is left out of the baseline body. */
+  capabilityGates?: ReadonlyMap<string, unknown>;
 }
 
 type JsonObject = Record<string, unknown>;
@@ -31,7 +33,7 @@ export function generateNestedAdditionalProps(
     const walk = buildWalk(op);
     const root = walk?.root;
     if (!root) continue;
-    const baseline = buildBaselineBody(op);
+    const baseline = buildBaselineBody(op, { gates: opts.capabilityGates });
     if (!baseline) continue;
     let produced = 0;
     // naive recursive search for object schema with additionalProperties=false beyond root
@@ -44,7 +46,10 @@ export function generateNestedAdditionalProps(
         node.raw.additionalProperties === false
       ) {
         // inject unexpected at this path
-        const clone = structuredClone(baseline);
+        // Built for this target: the target stays in even when gated or unsatisfiable.
+        const clone = structuredClone(
+          buildBaselineBody(op, { gates: opts.capabilityGates, keep: path }),
+        );
         if (applyAdd(clone, path, '__nestedUnexpected', 'x')) {
           out.push({
             id: makeId([op.operationId, 'nestedAdditionalProp', path.join('.')]),
@@ -82,13 +87,16 @@ export function generateUniqueItemsViolations(
     const walk = buildWalk(op);
     const root = walk?.root;
     if (!root) continue;
-    const baseline = buildBaselineBody(op);
+    const baseline = buildBaselineBody(op, { gates: opts.capabilityGates });
     if (!baseline) continue;
     for (const node of walk.byPointer.values()) {
       if (node.type === 'array' && node.raw && node.raw.uniqueItems) {
         const path = findPath(root, node);
         if (!path) continue;
-        const clone = structuredClone(baseline);
+        // Built for this target: the target stays in even when gated or unsatisfiable.
+        const clone = structuredClone(
+          buildBaselineBody(op, { gates: opts.capabilityGates, keep: path }),
+        );
         // Place the duplicate-array directly at the target path; setAtPath
         // creates any missing intermediates (with array-aware shaping).
         if (setAtPath(clone, path, [1, 1, 1])) {
@@ -123,7 +131,7 @@ export function generateMultipleOfViolations(
     const walk = buildWalk(op);
     const root = walk?.root;
     if (!root) continue;
-    const baseline = buildBaselineBody(op);
+    const baseline = buildBaselineBody(op, { gates: opts.capabilityGates });
     if (!baseline) continue;
     for (const node of walk.byPointer.values()) {
       const raw = node.raw;
@@ -135,7 +143,10 @@ export function generateMultipleOfViolations(
         const path = findPath(root, node);
         if (!path) continue;
         const bad = raw.multipleOf * 2 + 1; // off by one
-        const clone = structuredClone(baseline);
+        // Built for this target: the target stays in even when gated or unsatisfiable.
+        const clone = structuredClone(
+          buildBaselineBody(op, { gates: opts.capabilityGates, keep: path }),
+        );
         if (applySet(clone, path, bad)) {
           out.push({
             id: makeId([op.operationId, 'multipleOf', path.join('_')]),
@@ -171,7 +182,7 @@ export function generateFormatInvalid(ops: OperationModel[], opts: Opts): Valida
     const walk = buildWalk(op);
     const root = walk?.root;
     if (!root) continue;
-    const baseline = buildBaselineBody(op);
+    const baseline = buildBaselineBody(op, { gates: opts.capabilityGates });
     if (!baseline) continue;
     for (const node of walk.byPointer.values()) {
       const raw = node.raw;
@@ -184,7 +195,10 @@ export function generateFormatInvalid(ops: OperationModel[], opts: Opts): Valida
       ) {
         const path = findPath(root, node);
         if (!path) continue;
-        const clone = structuredClone(baseline);
+        // Built for this target: the target stays in even when gated or unsatisfiable.
+        const clone = structuredClone(
+          buildBaselineBody(op, { gates: opts.capabilityGates, keep: path }),
+        );
         if (applySet(clone, path, invalidByFormat[raw.format])) {
           out.push({
             id: makeId([op.operationId, 'formatInvalid', path.join('_')]),

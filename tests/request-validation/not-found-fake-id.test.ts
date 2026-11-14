@@ -324,9 +324,8 @@ describe("request-validation: 404 fake-ID in notFoundMode 'declared'", () => {
       properties: { v: prop },
     });
     const unusable: SchemaFragment[] = [
-      withProp({ type: 'string', pattern: '^[0-9]+$' }), // 'x' is not numeric
-      withProp({ type: 'string', minLength: 5 }),
-      withProp({ type: 'integer', minimum: 10 }), // the builder emits 1
+      // No candidate value matches this pattern, so the required field gets a placeholder.
+      withProp({ type: 'string', pattern: '^\\d{4}-[a-z]+$' }),
       withProp({ type: 'array', minItems: 2, items: { type: 'string' } }), // one item
     ];
     for (const requestBodySchema of unusable) {
@@ -344,6 +343,11 @@ describe("request-validation: 404 fake-ID in notFoundMode 'declared'", () => {
     // stay eligible.
     const usable: SchemaFragment[] = [
       withProp({ type: 'string', minLength: 1, maxLength: 255 }),
+      // The baseline builder gives each field a value its schema accepts (a numeric key, a long
+      // enough string, a number within the range), so these limits no longer make a body unusable.
+      withProp({ type: 'string', pattern: '^[0-9]+$' }),
+      withProp({ type: 'string', minLength: 5 }),
+      withProp({ type: 'integer', minimum: 10 }),
       withProp({ type: 'integer', format: 'int32' }),
       withProp({ type: 'string', format: 'uuid' }),
       withProp({ type: 'string', format: 'email' }),
