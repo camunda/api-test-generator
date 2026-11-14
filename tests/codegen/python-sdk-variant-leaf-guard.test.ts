@@ -120,4 +120,28 @@ describe('python-sdk emitter: a variant fails when its own field is unbound', ()
     );
     expect(renderPythonSuite(collection)).not.toContain(GUARD_PREFIX);
   });
+
+  test('a prerequisite cursor cannot satisfy the guard: the endpoint warm-up clears it first', () => {
+    // A prerequisite on another endpoint also binds endCursorVar. If the
+    // endpoint's own warm-up returns no cursor, extraction keeps the stale
+    // value, so the warm-up must reset the binding before it runs.
+    const prereq: RequestStep = {
+      ...warmUp,
+      operationId: 'searchOther',
+      pathTemplate: '/other/search',
+    };
+    const out = renderPythonSuite(
+      variantCollection([prereq, warmUp, finalStep({ page: { after: '${endCursorVar}' } })], {
+        rootPath: 'page',
+        leafPaths: ['page.after'],
+        leafSemantics: ['EndCursor'],
+      }),
+    );
+    const reset = "    ctx.set('endCursorVar', None)";
+    expect(out).toContain(reset);
+    const resetAt = out.indexOf(reset);
+    expect(resetAt).toBeGreaterThan(out.indexOf('# Step 1:'));
+    expect(resetAt).toBeLessThan(out.indexOf('# Step 2:'));
+    expect(out.indexOf(reset, resetAt + 1)).toBe(-1);
+  });
 });
