@@ -125,13 +125,13 @@ export function generateConstraintViolations(
  * The coverage report's applicability check for `constraint-violation`. A constraint alone is not
  * enough: the generator needs the field in the baseline body, so a limit inside an optional search
  * `page` oneOf (covered by pagination-limit-invalid) never yields a scenario. Asking the generator
- * itself keeps the two from drifting apart.
+ * itself keeps the two from drifting apart; capping it at one scenario stops it at the first hit.
  */
 export function isConstraintViolationEligible(
   op: OperationModel,
   opts: Pick<Opts, 'capabilityGates'>,
 ): boolean {
-  return generateConstraintViolations([op], opts).length > 0;
+  return generateConstraintViolations([op], { ...opts, capPerOperation: 1 }).length > 0;
 }
 
 function planConstraintMutations(
