@@ -753,8 +753,21 @@ export function renderPythonSuite(
       scenario.operations.filter((o) => o.eventuallyConsistent).map((o) => o.operationId),
     );
     const variantGuards = variantLeafBindings(scenario);
+    const finalOperationId = requestPlan[requestPlan.length - 1].operationId;
+    const guardBindings = new Set(variantGuards.map((g) => g.binding));
     for (let i = 0; i < requestPlan.length; i++) {
       const isFinal = i === requestPlan.length - 1;
+      if (!isFinal && requestPlan[i].operationId === finalOperationId) {
+        // The endpoint's own warm-up is the only valid source of a guarded
+        // binding. Clear any value a prerequisite on another endpoint left
+        // behind, so a warm-up response that omits the field leaves it unbound
+        // and the guard fails instead of the variant sending a stale value.
+        for (const extract of requestPlan[i].extract ?? []) {
+          if (guardBindings.has(extract.bind)) {
+            lines.push(`    ctx.set('${extract.bind}', None)`);
+          }
+        }
+      }
       if (isFinal) {
         for (const { leafPath, binding } of variantGuards) {
           lines.push(
