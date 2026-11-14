@@ -269,6 +269,13 @@ interface OperationNode {
   operationId: string;
   method: string;
   path: string;
+  /**
+   * The path item's own OpenAPI `servers` override, when it differs from the
+   * document root server — set by the extractor's `resolveServerOverride` for
+   * the cluster-admin paths, which are served at the API root rather than
+   * under `/v2`.
+   */
+  serverOverride?: string;
   parameters?: ParameterEntry[];
   requestBodySemanticTypes?: SemanticTypeEntry[];
   responseSemanticTypes?: Record<string, SemanticTypeEntry[]>;
@@ -1978,7 +1985,7 @@ describeForThisConfig('bundled-spec invariants: planner variant output (#37)', (
         findOperation(opId).responseSemanticTypes ?? {},
       )) {
         if (!statusCode.startsWith('2') && !statusCode.startsWith('3')) continue;
-        for (const e of entries) out.add(e.semanticType);
+        for (const e of entries) if (e.provider) out.add(e.semanticType);
       }
       return out;
     }
@@ -10982,13 +10989,32 @@ describeForThisConfig('bundled-spec invariants: emitted Python SDK suite (#133)'
     // since a `witness_response_N = await client...` eventual-wait poll call
     // also matches a bare `await client\.\w+\(` scan and would let an
     // aggregate count mask a genuinely missing step N call.
+    //
+    // P3 (eventual-consistency polling) intentionally changed the shape of
+    // eventually-consistent steps: the emitter now lowers them to
+    // `response_N = await await_eventually(` wrapping `lambda: client.<method>(`
+    // instead of a bare `response_N = await client.<method>(`. Both shapes are
+    // accepted here, and both still require the real `client.<method>(` call,
+    // so a step lowered to a comment only is still caught.
     const offenders: string[] = [];
+    let wrappedSteps = 0;
     for (const file of files) {
       const src = readFileSync(join(PYTHON_SDK_DIR, file), 'utf8');
       const stepNumbers = Array.from(src.matchAll(/# Step (\d+):/g)).map((m) => Number(m[1]));
-      const missingSteps = stepNumbers.filter(
-        (n) => !new RegExp(`response_${n} = await client\\.\\w+\\(`).test(src),
-      );
+      const missingSteps: number[] = [];
+      for (const n of stepNumbers) {
+        if (
+          new RegExp(`response_${n} = await await_eventually\\(\\s*lambda: client\\.\\w+\\(`).test(
+            src,
+          )
+        ) {
+          wrappedSteps += 1;
+          continue;
+        }
+        if (!new RegExp(`response_${n} = await client\\.\\w+\\(`).test(src)) {
+          missingSteps.push(n);
+        }
+      }
       if (missingSteps.length > 0) {
         offenders.push(`${file} (missing client call for step(s): ${missingSteps.join(', ')})`);
       }
@@ -10997,6 +11023,14 @@ describeForThisConfig('bundled-spec invariants: emitted Python SDK suite (#133)'
       offenders,
       'Emitted Python SDK test file(s) have step comments with no corresponding client call.',
     ).toEqual([]);
+    // Non-vacuity: the wrapped shape must actually be exercised. Without this,
+    // an emitter rename (or a regex drift) would silently drop every wrapped
+    // step into `missingSteps`... or, worse, a future relaxation could make the
+    // wrapper branch match nothing while the suite still passed on direct calls.
+    expect(
+      wrappedSteps,
+      'Expected at least 100 await_eventually-wrapped Python steps; the wrapper regex may have drifted from the emitter.',
+    ).toBeGreaterThanOrEqual(100);
   });
 
   it('every planned scenario has a materialized Python SDK test file (#133)', () => {
@@ -11040,6 +11074,175 @@ describeForThisConfig('bundled-spec invariants: emitted Python SDK suite (#133)'
       missing,
       'Planned scenarios exist but no Python SDK test file was materialized for these operationIds',
     ).toEqual([]);
+  });
+
+  it('every emitted Python request URL for a serverOverride operation resolves against the API root, not the /v2 base (Item 5A)', () => {
+    if (!existsSync(PYTHON_SDK_DIR)) {
+      throw new Error(
+        `Python SDK output directory not found at ${PYTHON_SDK_DIR}. Run 'npm run codegen:all' (or 'npm run testsuite:generate') first.`,
+      );
+    }
+    const graph = loadGraph();
+    // The set of operations whose path item declares its own OpenAPI
+    // `servers` override (cluster-admin: served at the API root, not under
+    // `/v2`). Derived from the graph, never hardcoded to a path prefix, so a
+    // future path-item override on any operation is covered by the same rule.
+    const overrideOps = new Set(
+      graph.operations.filter((o) => o.serverOverride !== undefined).map((o) => o.operationId),
+    );
+    // Guard against the invariant silently passing because the graph drifted
+    // (e.g. the extractor stopped emitting serverOverride). The bundled spec
+    // has exactly 22 cluster-admin operations.
+    expect(
+      overrideOps.size,
+      'Expected the bundled spec to carry serverOverride operations (cluster-admin); the extractor may have stopped emitting the field.',
+    ).toBeGreaterThan(0);
+
+    const files = readdirSync(PYTHON_SDK_DIR).filter(
+      (f) => f.startsWith('test_') && f.endsWith('.py'),
+    );
+    // Per file, walk the `# Step N: <opId>` comments and the `url_N = f'...'`
+    // assignment that follows each, and assert the base matches the operation's
+    // override status. An override op MUST be absolute (`{root_base_url()}`);
+    // a non-override op MUST NOT be (catches over-application, which would
+    // send ordinary `/v2` requests to the root and 404 them).
+    const offenders: string[] = [];
+    let checkedOverrideSteps = 0;
+    for (const file of files) {
+      const src = readFileSync(join(PYTHON_SDK_DIR, file), 'utf8');
+      const stepOp = new Map<number, string>();
+      for (const m of src.matchAll(/# Step (\d+): (\S+)/g)) {
+        stepOp.set(Number(m[1]), String(m[2]));
+      }
+      for (const m of src.matchAll(/url_(\d+) = f'([^']*)'/g)) {
+        const n = Number(m[1]);
+        const urlExpr = String(m[2]);
+        const opId = stepOp.get(n);
+        if (opId === undefined) continue;
+        const isAbsolute = urlExpr.startsWith('{root_base_url()}');
+        if (overrideOps.has(opId)) {
+          checkedOverrideSteps += 1;
+          if (!isAbsolute) {
+            offenders.push(
+              `${file} url_${n} (${opId}): serverOverride operation emitted relative to the /v2 base — '${urlExpr}'`,
+            );
+          }
+        } else if (isAbsolute) {
+          offenders.push(
+            `${file} url_${n} (${opId}): non-override operation wrongly emitted against the API root — '${urlExpr}'`,
+          );
+        }
+      }
+      // A file that routes any step to the root must import the helper, else
+      // the emitted NameError would fail every test in it at runtime.
+      if (
+        src.includes('{root_base_url()}') &&
+        !src.includes('from support.base_url import root_base_url')
+      ) {
+        offenders.push(`${file}: uses root_base_url() but does not import it`);
+      }
+    }
+    expect(
+      checkedOverrideSteps,
+      'Expected at least one emitted serverOverride request step to check; the emitter may have stopped emitting cluster-admin URLs.',
+    ).toBeGreaterThan(0);
+    expect(
+      offenders,
+      'Python request URLs must resolve against the API root exactly for serverOverride operations (Item 5A)',
+    ).toEqual([]);
+  });
+
+  it('no emitted Python request body can serialise an explicit JSON null from an unbound placeholder (Item 6a)', () => {
+    if (!existsSync(PYTHON_SDK_DIR)) {
+      throw new Error(
+        `Python SDK output directory not found at ${PYTHON_SDK_DIR}. Run 'npm run codegen:all' (or 'npm run testsuite:generate') first.`,
+      );
+    }
+    // The defect CLASS, not the cursor instance: a whole-string `${var}` body
+    // placeholder renders inline as a bare `ctx.get('var')`, which is None when
+    // the binding was never produced — and None serialises to an explicit JSON
+    // null. The broker treats an explicit null as a *present but unusable*
+    // value, not an absent one: `{"page":{"after":null}}` is 400 "At least one
+    // of [from, after, before, limit] is required", and so is `{"page":{}}`,
+    // while `{}` is 200. So the emitted literal must be wrapped in
+    // `prune_nulls(...)`, which drops the null AND any container it thereby
+    // emptied. Asserted for EVERY body/data assignment in EVERY suite, so a
+    // regression on any binding (cursor, key, tenant, …) is caught — not just
+    // on `page.after`.
+    //
+    // The concatenated placeholder form is deliberately excluded: it renders as
+    // `(str(ctx.get('x')) if ctx.get('x') is not None else '')`, which degrades
+    // to '' and can never be None. Those occurrences of `ctx.get(` are stripped
+    // first so they cannot be mistaken for a bare binding.
+    const CONCATENATED_GUARD_RE =
+      /\(str\(ctx\.get\('[^']*'\)\) if ctx\.get\('[^']*'\) is not None else ''\)/g;
+    const ASSIGNMENT_RE = /^\s+(body|data)_(\d+) = (.*)$/;
+    const files = readdirSync(PYTHON_SDK_DIR).filter(
+      (f) => f.startsWith('test_') && f.endsWith('.py'),
+    );
+    const offenders: string[] = [];
+    let wrappedBodies = 0;
+    let cursorBodies = 0;
+    for (const file of files) {
+      const src = readFileSync(join(PYTHON_SDK_DIR, file), 'utf8');
+      for (const line of src.split('\n')) {
+        const m = ASSIGNMENT_RE.exec(line);
+        if (m === null) continue;
+        const kind = String(m[1]);
+        const num = String(m[2]);
+        const rhs = String(m[3]);
+        const isWrapped = rhs.startsWith('prune_nulls(');
+        if (isWrapped) {
+          wrappedBodies += 1;
+          if (/'page': \{'(?:after|before)':/.test(rhs)) cursorBodies += 1;
+        }
+        // Strip the concatenated guard, then any surviving `ctx.get(` is a bare
+        // whole-string binding that can resolve to None.
+        const bare = rhs.replaceAll(CONCATENATED_GUARD_RE, '');
+        if (bare.includes('ctx.get(') && !isWrapped) {
+          offenders.push(
+            `${file} ${kind}_${num}: an inline ctx.get() binding can serialise an explicit JSON null but the body is not wrapped in prune_nulls() — ${rhs.trim()}`,
+          );
+        }
+        // Over-application is a defect too: wrapping a literal with no bare
+        // binding is dead code that churns the diff and obscures the real wraps.
+        if (isWrapped && !bare.includes('ctx.get(')) {
+          offenders.push(
+            `${file} ${kind}_${num}: wrapped in prune_nulls() but no inline binding can be None — ${rhs.trim()}`,
+          );
+        }
+      }
+      // Import/wrap consistency: a wrap without the import is a runtime
+      // NameError that fails every test in the file; an import without a wrap
+      // is dead code.
+      const uses = src.includes('prune_nulls(');
+      const imports = src.includes('from support.prune import prune_nulls');
+      if (uses && !imports) {
+        offenders.push(`${file}: uses prune_nulls() but does not import it`);
+      }
+      if (imports && !uses) {
+        offenders.push(`${file}: imports prune_nulls but never uses it`);
+      }
+    }
+    // Offenders first: on a real regression the list names the exact file and
+    // body, which is the useful signal. The non-vacuity guards below then catch
+    // the opposite failure — the invariant passing because there is nothing
+    // left to check (e.g. the planner stopped emitting cursor variants).
+    expect(
+      offenders,
+      'Every emitted Python body whose inline binding can resolve to None must be wrapped in prune_nulls(), and no body that cannot must be (Item 6a)',
+    ).toEqual([]);
+    // Non-vacuity: the bundled spec's cursor variants must actually exercise
+    // this. If the planner stopped emitting `${endCursorVar}`/`${startCursorVar}`
+    // bodies the invariant would pass while guarding nothing.
+    expect(
+      cursorBodies,
+      'Expected emitted cursor bodies (page.after/page.before) to check; the planner may have stopped emitting cursor variants.',
+    ).toBeGreaterThan(0);
+    expect(
+      wrappedBodies,
+      'Expected at least one prune_nulls-wrapped body; the emitter may have stopped wrapping null-capable placeholders.',
+    ).toBeGreaterThan(0);
   });
 });
 
@@ -11524,5 +11727,77 @@ describeForThisConfig('bundled-spec invariants: capability-gated fields (#404)',
         'expectDetailContains',
       );
     }
+  });
+});
+
+describeForThisConfig('python-sdk variants fail when their own field is unbound', () => {
+  it('every variant whose final body carries its leaf as a ${var} placeholder asserts that binding before the final request', async () => {
+    const { pythonSuiteFileName } = await import('../../materializer/src/python-sdk/emitter.ts');
+    // A variant exists to send one optional field. When the producer step yields
+    // no value, the binding is None and prune_nulls drops the field, so without
+    // this guard the test passes without exercising what it is named for.
+    const valueAt = (root: unknown, leafPath: string): unknown => {
+      let cursor = root;
+      for (const segment of leafPath.split('.')) {
+        const isArray = segment.endsWith('[]');
+        if (cursor === null || typeof cursor !== 'object' || Array.isArray(cursor))
+          return undefined;
+        cursor = Object.entries(cursor).find(
+          ([k]) => k === (isArray ? segment.slice(0, -2) : segment),
+        )?.[1];
+        if (isArray) cursor = Array.isArray(cursor) ? cursor[0] : undefined;
+      }
+      return cursor;
+    };
+    const offenders: string[] = [];
+    let checked = 0;
+    for (const f of readdirSync(VARIANT_SCENARIOS_DIR)) {
+      if (!f.endsWith('-scenarios.json')) continue;
+      // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+      const collection = JSON.parse(readFileSync(join(VARIANT_SCENARIOS_DIR, f), 'utf8')) as {
+        endpoint: { operationId: string; method: string; path: string };
+        requiredSemanticTypes: string[];
+        optionalSemanticTypes: string[];
+        scenarios?: {
+          populatesSubShape?: { leafPaths?: string[] };
+          requestPlan?: { bodyKind?: string; bodyTemplate?: unknown }[];
+        }[];
+      };
+      const expected = new Map<string, number>();
+      for (const s of collection.scenarios ?? []) {
+        const plan = s.requestPlan ?? [];
+        const final = plan[plan.length - 1];
+        if (final?.bodyKind !== 'json') continue;
+        for (const leafPath of s.populatesSubShape?.leafPaths ?? []) {
+          const value = valueAt(final.bodyTemplate, leafPath);
+          const whole = typeof value === 'string' ? /^\$\{([^}]+)\}$/.exec(value) : null;
+          if (whole === null || whole[1] === 'RANDOM') continue;
+          expected.set(whole[1], (expected.get(whole[1]) ?? 0) + 1);
+        }
+      }
+      if (expected.size === 0) continue;
+      const pyFile = join(
+        PYTHON_SDK_DIR,
+        pythonSuiteFileName({ ...collection, scenarios: [] }, 'variant'),
+      );
+      if (!existsSync(pyFile)) {
+        offenders.push(`${f}: python variant suite ${basename(pyFile)} not found`);
+        continue;
+      }
+      const src = readFileSync(pyFile, 'utf8');
+      for (const [binding, count] of expected) {
+        checked += count;
+        const actual =
+          src.split(`assert ctx.get('${binding}') is not None, (\n        "variant field unbound`)
+            .length - 1;
+        if (actual !== count) {
+          offenders.push(`${basename(pyFile)}: ${binding} guarded ${actual}x, expected ${count}x`);
+        }
+      }
+    }
+    expect(checked, 'non-vacuity: expected variant leaf bindings to be checked').toBeGreaterThan(
+      50,
+    );
+    expect(offenders, offenders.slice(0, 10).join('\n')).toEqual([]);
   });
 });
