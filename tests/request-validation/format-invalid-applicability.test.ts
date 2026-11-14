@@ -52,4 +52,12 @@ describe('format-invalid applicability matches what the generator builds', () =>
       false,
     );
   });
+
+  it('keeps every eligible field when generation runs with its production cap', () => {
+    const ids = Array.from({ length: 21 }, (_, i) => `id${i}`);
+    const props = Object.fromEntries(ids.map((id) => [id, { type: 'string', format: 'uuid' }]));
+    const o = op(props, ids);
+    expect(generateFormatInvalid([o], { capPerOperation: 20 })).toHaveLength(21);
+    expect(isFormatInvalidEligible(o, {})).toBe(true);
+  });
 });

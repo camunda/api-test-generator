@@ -13,6 +13,11 @@ interface Opts {
    * the outcome). See `RequestValidationConfig.unenforcedStringFormats`.
    */
   unenforcedStringFormats?: string[];
+  /**
+   * Stop each operation after its first scenario. Only the coverage report's eligibility probe sets
+   * this; generation leaves it unset so every eligible field still gets its scenario.
+   */
+  stopAtFirst?: boolean;
 }
 
 type JsonObject = Record<string, unknown>;
@@ -171,13 +176,13 @@ export function generateMultipleOfViolations(
  * The coverage report's applicability check for `format-invalid`. A `format` alone is not enough: the
  * generator only breaks string formats it has an invalid value for, skips unenforced formats, and needs
  * the field in the baseline body. Asking the generator itself keeps the two from drifting apart;
- * capping it at one scenario stops it at the first hit.
+ * the probe stops at the first scenario.
  */
 export function isFormatInvalidEligible(
   op: OperationModel,
   opts: Pick<Opts, 'unenforcedStringFormats'>,
 ): boolean {
-  return generateFormatInvalid([op], { ...opts, capPerOperation: 1 }).length > 0;
+  return generateFormatInvalid([op], { ...opts, stopAtFirst: true }).length > 0;
 }
 
 export function generateFormatInvalid(ops: OperationModel[], opts: Opts): ValidationScenario[] {
@@ -197,7 +202,7 @@ export function generateFormatInvalid(ops: OperationModel[], opts: Opts): Valida
     if (!baseline) continue;
     let produced = 0;
     for (const node of walk.byPointer.values()) {
-      if (opts.capPerOperation && produced >= opts.capPerOperation) break;
+      if (opts.stopAtFirst && produced > 0) break;
       const raw = node.raw;
       if (
         node.type === 'string' &&
