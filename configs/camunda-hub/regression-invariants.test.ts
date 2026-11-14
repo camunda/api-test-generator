@@ -5,10 +5,14 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   getActiveConfigName,
+  getFeatureOutputDir,
   getPlaywrightSuiteDir,
   getRequestValidationSuiteDir,
+  getScenariosDir,
   getSpecBundleDir,
+  getVariantOutputDir,
 } from '../../path-analyser/src/configResolver.js';
+import { deriveGlobalContextSeedsViews } from '../../path-analyser/src/ontology/loader.js';
 import { loadOptionalFields } from '../../path-analyser/src/optionalFields.js';
 import { deriveOptionalFields } from '../../path-analyser/src/optionalFieldsDerive.js';
 import {
@@ -16,6 +20,7 @@ import {
   findSearchOperations,
   loadSearchPaging,
 } from '../../path-analyser/src/searchPaging.js';
+import { checkLoweringContract } from '../../tests/regression/lowering-contract.ts';
 
 /**
  * Bundled-spec invariants — Layer 3, camunda-hub config (#128).
@@ -1094,5 +1099,24 @@ describeForThisConfig('camunda-hub bundled-spec invariants (#128)', () => {
     } finally {
       rmSync(out, { recursive: true, force: true });
     }
+  });
+});
+
+// Emitter lowering contract (#812): SDK adapters render `lowerScenario()`
+// output and trust that every binding a step reads is set by then.
+describeForThisConfig('hub invariants: emitter lowering contract (#812)', () => {
+  const result = checkLoweringContract(
+    [getScenariosDir(REPO_ROOT), getFeatureOutputDir(REPO_ROOT), getVariantOutputDir(REPO_ROOT)],
+    deriveGlobalContextSeedsViews(REPO_ROOT)?.globalContextSeeds ?? [],
+  );
+
+  it('lowers every planned scenario (no embedded placeholders, no mixed server overrides)', () => {
+    expect(result.scenarios).toBeGreaterThan(0);
+    expect(result.loweringErrors).toEqual([]);
+  });
+
+  it('every binding a lowered step reads is seeded or extracted by an earlier step', () => {
+    expect(result.steps).toBeGreaterThan(0);
+    expect(result.unboundReads).toEqual([]);
   });
 });

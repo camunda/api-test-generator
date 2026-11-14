@@ -37,6 +37,32 @@ export type {
   GlobalContextSeed,
 } from 'path-analyser/types';
 
+export type {
+  LoweredBody,
+  LoweredExtract,
+  LoweredPathParam,
+  LoweredScenario,
+  LoweredStep,
+  LoweredValue,
+  LoweredWait,
+  LowerScenarioOptions,
+  PlanSeedingOptions,
+  SeedingGlobal,
+  SeedOp,
+} from './lowering.js';
+export {
+  camelCase,
+  computeUniqueBindings,
+  eventuallyConsistentOps,
+  fieldPathSegments,
+  lowerPathParams,
+  lowerScenario,
+  lowerValue,
+  pathParamBinding,
+  planCtxSeeding,
+  resolveScenarioServerOverride,
+  stepNeedsAwaitForOp,
+} from './lowering.js';
 export {
   _resetRegistriesForTests,
   getEmitter,

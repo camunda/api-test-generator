@@ -14,6 +14,11 @@ dispatch), see [`materializer/README.md`](../materializer/README.md).
 For the role-template subsystem, see
 [`materializer/src/ROLES.md`](../materializer/src/ROLES.md).
 
+**Writing an SDK emitter?** Render `lowerScenario()` output rather than the
+raw scenario JSON. It makes the language-neutral decisions (seeding, path
+bindings, eventual-consistency polling, typed body values) so your emitter
+only renders them. See [`docs/sdk-emitters.md`](../docs/sdk-emitters.md).
+
 > **Stability.** The exported types in this package are the stable
 > contract surface. Any breaking change to them requires a package
 > version bump (see [`package.json`](package.json) `version`). Adding

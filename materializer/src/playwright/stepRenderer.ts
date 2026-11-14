@@ -1,4 +1,12 @@
+import { camelCase } from '@camunda8/emitter-sdk';
 import type { EventualWaitSpec, RequestStep } from 'path-analyser/types';
+
+// Language-neutral decisions shared with the SDK emitters (#812).
+export {
+  camelCase,
+  resolveScenarioServerOverride,
+  stepNeedsAwaitForOp,
+} from '@camunda8/emitter-sdk';
 
 /**
  * Shared per-step rendering primitives consumed by both the per-endpoint
@@ -42,50 +50,6 @@ export function buildUrlExpression(pathTemplate: string): string {
   );
 }
 
-/**
- * Decide whether an emitted test's single `baseUrl` constant should resolve
- * against the API root instead of the runtime's default base — e.g. the
- * Orchestration Cluster REST API's cluster-admin operations, served at
- * `{host}:{port}/cluster/v2/...` outside the default `/v2` base (see
- * `OperationRef.serverOverride`).
- *
- * Every emitted test hoists exactly ONE `baseUrl` for all of its steps
- * (`renderInlineStepLines` and friends all reference that single variable),
- * so this only works while a scenario never mixes operations with
- * different overrides — including a mix of "has an override" and "uses the
- * default base": picking the override for the whole test would send the
- * default-base steps to the wrong host just as surely as picking between
- * two different overrides would. Nothing in the current spec does —
- * cluster-admin operations take no producers and are consumed by nothing
- * downstream, so they only ever appear as a scenario's sole step — but if a
- * future spec change did mix them, silently picking one base would send
- * some of the scenario's requests to the wrong host. Fail loudly instead.
- */
-export function resolveScenarioServerOverride(
-  operations: readonly { serverOverride?: string }[],
-): string | undefined {
-  // `!== undefined`, not a truthiness check: an OpenAPI `servers[].url` can
-  // legitimately be the empty string (relative to the current host), which
-  // is a real override and must not be conflated with "no override".
-  const withOverride = operations.filter((o) => o.serverOverride !== undefined);
-  const withoutOverride = operations.filter((o) => o.serverOverride === undefined);
-  const overrides = new Set(withOverride.map((o) => o.serverOverride));
-  if (overrides.size > 1 || (overrides.size === 1 && withoutOverride.length > 0)) {
-    const labels = [...overrides];
-    if (withoutOverride.length > 0) labels.push('<default>');
-    throw new Error(
-      `Scenario mixes operations with different server overrides (${labels.join(', ')}) — ` +
-        'per-step base-URL resolution is not implemented; every request in one emitted test ' +
-        'currently shares a single baseUrl.',
-    );
-  }
-  return overrides.size === 1 ? [...overrides][0] : undefined;
-}
-
-export function camelCase(s: string): string {
-  return s.charAt(0).toLowerCase() + s.slice(1);
-}
-
 export function escapeQuotes(s: string): string {
   // Escape for embedding in a single-quoted TS string literal: backslashes
   // first (otherwise they'd swallow the apostrophe-escaping backslash we
@@ -113,27 +77,6 @@ export function toOptionalAccessor(fieldPath: string): string {
       return `?.['${p.replace(/'/g, "\\'")}']`;
     })
     .join('');
-}
-
-/**
- * Predicate-only EC wrap decision. A step is wrappable iff:
- *   1. its `operationId` is in `ecOps` (the planner-derived set of
- *      operations marked `x-eventually-consistent`);
- *   2. it is a read shape — `GET` or `POST .../search` (writes return
- *      quickly even when EC; the lag manifests on the next read);
- *   3. it expects a `200` (we never poll an error scenario).
- *
- * Returning `boolean` (instead of a Set of step indices) makes the
- * predicate uniformly usable from both emitters, regardless of how they
- * carry the EC set on the scenario object.
- */
-export function stepNeedsAwaitForOp(step: RequestStep, ecOps: ReadonlySet<string>): boolean {
-  if (!ecOps.has(step.operationId)) return false;
-  if (step.expect.status !== 200) return false;
-  const method = step.method.toUpperCase();
-  const isReadShape =
-    method === 'GET' || (method === 'POST' && /\/search\/?$/.test(step.pathTemplate));
-  return isReadShape;
 }
 
 /**
