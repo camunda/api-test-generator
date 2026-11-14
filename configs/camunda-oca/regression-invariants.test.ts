@@ -10733,8 +10733,13 @@ describeForThisConfig(
         const resolved = resolveSpecNode(schema, spec, new Set());
         if (!resolved) return;
         const ownEnum = effectiveEnumFromSpec(resolved, spec, new Set());
-        if (ownEnum && ownEnum.length > 0 && prefix.length > 0 && !out.has(prefix)) {
-          out.set(prefix, ownEnum);
+        if (ownEnum && ownEnum.length > 0 && prefix.length > 0) {
+          // Union across oneOf alternatives: each branch may constrain the same
+          // path to a different enum (e.g. a `kind` discriminator), so a value is
+          // valid if ANY branch admits it. Keeping only the first branch's enum
+          // would reject bodies that select a later alternative.
+          const existing = out.get(prefix) ?? [];
+          out.set(prefix, [...existing, ...ownEnum.filter((v) => !existing.includes(v))]);
         }
         if (resolved.type === 'array' && resolved.items) {
           collectEnumPathsDeep(resolved.items, `${prefix}[]`, out, depth + 1);
