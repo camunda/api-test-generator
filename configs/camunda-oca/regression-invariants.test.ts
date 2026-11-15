@@ -11101,36 +11101,46 @@ describeForThisConfig('bundled-spec invariants: emitted Python SDK suite (#133)'
     const files = readdirSync(PYTHON_SDK_DIR).filter(
       (f) => f.startsWith('test_') && f.endsWith('.py'),
     );
-    // Per file, walk the `# Step N: <opId>` comments and the `url_N = f'...'`
-    // assignment that follows each, and assert the base matches the operation's
-    // override status. An override op MUST be absolute (`{root_base_url()}`);
-    // a non-override op MUST NOT be (catches over-application, which would
-    // send ordinary `/v2` requests to the root and 404 them).
+    // Per file, walk each test function separately: step numbers restart at 1
+    // in every `async def test_...`, so a file-wide step map would let a later
+    // scenario's `# Step 1: opB` overwrite an earlier scenario's `# Step 1:
+    // opA` and validate that scenario's url_1 against the wrong operation.
+    // Within one function, walk the `# Step N: <opId>` comments and the
+    // `url_N = f'...'` assignment that follows each, and assert the base
+    // matches the operation's override status. An override op MUST be
+    // absolute (`{root_base_url()}`); a non-override op MUST NOT be (catches
+    // over-application, which would send ordinary `/v2` requests to the root
+    // and 404 them).
     const offenders: string[] = [];
     let checkedOverrideSteps = 0;
     for (const file of files) {
       const src = readFileSync(join(PYTHON_SDK_DIR, file), 'utf8');
-      const stepOp = new Map<number, string>();
-      for (const m of src.matchAll(/# Step (\d+): (\S+)/g)) {
-        stepOp.set(Number(m[1]), String(m[2]));
-      }
-      for (const m of src.matchAll(/url_(\d+) = f'([^']*)'/g)) {
-        const n = Number(m[1]);
-        const urlExpr = String(m[2]);
-        const opId = stepOp.get(n);
-        if (opId === undefined) continue;
-        const isAbsolute = urlExpr.startsWith('{root_base_url()}');
-        if (overrideOps.has(opId)) {
-          checkedOverrideSteps += 1;
-          if (!isAbsolute) {
+      // Split into per-function chunks, keeping the leading preamble (imports,
+      // helpers) as chunk 0 — it has no steps, so it contributes nothing.
+      const chunks = src.split(/(?=^async def test_)/m);
+      for (const chunk of chunks) {
+        const stepOp = new Map<number, string>();
+        for (const m of chunk.matchAll(/# Step (\d+): (\S+)/g)) {
+          stepOp.set(Number(m[1]), String(m[2]));
+        }
+        for (const m of chunk.matchAll(/url_(\d+) = f'([^']*)'/g)) {
+          const n = Number(m[1]);
+          const urlExpr = String(m[2]);
+          const opId = stepOp.get(n);
+          if (opId === undefined) continue;
+          const isAbsolute = urlExpr.startsWith('{root_base_url()}');
+          if (overrideOps.has(opId)) {
+            checkedOverrideSteps += 1;
+            if (!isAbsolute) {
+              offenders.push(
+                `${file} url_${n} (${opId}): serverOverride operation emitted relative to the /v2 base — '${urlExpr}'`,
+              );
+            }
+          } else if (isAbsolute) {
             offenders.push(
-              `${file} url_${n} (${opId}): serverOverride operation emitted relative to the /v2 base — '${urlExpr}'`,
+              `${file} url_${n} (${opId}): non-override operation wrongly emitted against the API root — '${urlExpr}'`,
             );
           }
-        } else if (isAbsolute) {
-          offenders.push(
-            `${file} url_${n} (${opId}): non-override operation wrongly emitted against the API root — '${urlExpr}'`,
-          );
         }
       }
       // A file that routes any step to the root must import the helper, else
