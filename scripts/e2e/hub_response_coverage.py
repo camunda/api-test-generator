@@ -492,6 +492,9 @@ def build(args):
         'codeGaps': {b: sum(1 for r in rows if r['cells'].get(b) == 'gap') for b in BUCKETS},
         'areaResponseGaps': dict(
             collections.Counter(r['area'] for r in rows if any(v == 'gap' for v in r['cells'].values()))),
+        # The live rolling tracking issue (the per-endpoint index), passed in by the workflow. The page
+        # links it from each gap card so the card never points at a stale/closed issue; empty locally.
+        'trackingUrl': args.tracking_url,
     }
     return summary, rows
 
