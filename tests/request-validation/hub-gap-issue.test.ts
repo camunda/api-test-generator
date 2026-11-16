@@ -735,11 +735,12 @@ describe('weekly Slack message', () => {
       }),
       null,
     );
+    // Tracked no-test endpoints stay on a calm line, each with its tracking issue linked.
     expect(text).toContain(
-      'No test at all: `a` (known, tracked: <https://github.com/camunda/camunda-hub/issues/25907|camunda-hub#25907>, <https://github.com/camunda/camunda-hub/issues/26448|camunda-hub#26448>)',
+      'Known, no test (tracked): `a` (known, tracked: <https://github.com/camunda/camunda-hub/issues/25907|camunda-hub#25907>, <https://github.com/camunda/camunda-hub/issues/26448|camunda-hub#26448>), `b` (known, tracked)',
     );
-    // tracked but no URL on record, and not tracked at all
-    expect(text).toContain('`b` (known, tracked), `c`');
+    // The untracked one (c) is escalated to its own red alert line, with no tracking note.
+    expect(text).toContain(':red_circle: *No test at all* — no tracking issue: `c`');
     expect(text).not.toContain('`c` (');
   });
 
@@ -799,6 +800,87 @@ describe('weekly Slack message pings only on a regression', () => {
 
   it('never pings when the workflow passes no handle, even on a clear regression', () => {
     expect(pinged(baseSummary({ fullyAsserted: 7 }), baseSummary(), '')).toBe(false);
+  });
+});
+
+describe('weekly Slack trend + no-test escalation', () => {
+  const trendLine = (history: Record<string, string>[], s: Record<string, unknown>): string => {
+    const code = [
+      'import sys, json, importlib.util',
+      `spec = importlib.util.spec_from_file_location('h', ${JSON.stringify(script)})`,
+      'h = importlib.util.module_from_spec(spec); spec.loader.exec_module(h)',
+      'd = json.load(sys.stdin)',
+      "sys.stdout.write(h.trend_line(d['h'], d['s']))",
+    ].join('\n');
+    return execFileSync('python3', ['-B', '-c', code], {
+      input: JSON.stringify({ h: history, s }),
+      encoding: 'utf8',
+    });
+  };
+
+  it('summarises the trend over recent reports once there are at least two', () => {
+    expect(
+      trendLine(
+        [
+          { fullyAsserted: '54', zeroTestOperations: '2' },
+          { fullyAsserted: '56', zeroTestOperations: '2' },
+        ],
+        { fullyAsserted: 58, zeroTestOperations: ['x'] },
+      ),
+    ).toMatch(/Trend .*fully tested 54 → 58.*no test 2 → 1/);
+  });
+
+  it('shows nothing until a second report exists', () => {
+    expect(
+      trendLine([{ fullyAsserted: '58', zeroTestOperations: '1' }], {
+        fullyAsserted: 58,
+        zeroTestOperations: [],
+      }),
+    ).toBe('');
+  });
+
+  it('omits a metric the baseline row never recorded, rather than crashing', () => {
+    const line = trendLine([{ zeroTestOperations: '3' }, { zeroTestOperations: '2' }], {
+      fullyAsserted: 58,
+      zeroTestOperations: ['a'],
+    });
+    expect(line).toMatch(/no test 3 → 1/);
+    expect(line).not.toContain('fully tested');
+  });
+
+  it('escalates an untracked no-test endpoint to a red alert and pings once', () => {
+    const over = {
+      operationIds: ['a', 'b', 'newGap'],
+      zeroTestOperations: ['newGap'],
+      trackedOperations: [],
+    };
+    const m = slackText(baseSummary(over), baseSummary(over), '<!subteam^X>');
+    expect(m).toMatch(/:red_circle:.*No test at all.*newGap/);
+    expect((m.match(/<!subteam\^X>/g) || []).length).toBe(1);
+  });
+
+  it('stays calm and pings nobody when every no-test endpoint is tracked', () => {
+    const over = {
+      operationIds: ['a', 'b', 'known'],
+      zeroTestOperations: ['known'],
+      trackedOperations: ['known'],
+    };
+    const t = slackText(baseSummary(over), baseSummary(over), '<!subteam^X>');
+    expect(t).toContain(':warning: No test at all');
+    expect(t).not.toContain('<!subteam^X>');
+    expect(t).not.toContain(':red_circle:');
+  });
+
+  it('pings once when an untracked no-test endpoint coincides with a regression', () => {
+    const cur = baseSummary({
+      fullyAsserted: 7,
+      operationIds: ['a', 'b', 'newGap'],
+      zeroTestOperations: ['newGap'],
+      trackedOperations: [],
+    });
+    const prev = baseSummary({ fullyAsserted: 8 });
+    const m = slackText(cur, prev, '<!subteam^X>');
+    expect((m.match(/<!subteam\^X>/g) || []).length).toBe(1);
   });
 });
 

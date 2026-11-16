@@ -551,6 +551,34 @@ def regressed(s, prev):
     return False
 
 
+def read_history(path):
+    """Rows of the previous run's history.csv (str->str dicts), or [] when there is none."""
+    if not path or not os.path.exists(path):
+        return []
+    with open(path, newline='') as f:
+        return list(csv.DictReader(f))
+
+
+def trend_line(history, s):
+    """A one-line Slack summary of the trajectory over the last few reports, or '' with fewer than two
+    history rows. The baseline is up to four reports back (clamped to the oldest row). A column a
+    baseline row never recorded (an older header) is skipped, never guessed."""
+    if len(history) < 2:
+        return ''
+    back = min(4, len(history))
+    base = history[-back]
+    parts = []
+    bf = base.get('fullyAsserted')
+    if bf not in (None, ''):
+        parts.append(f'fully tested {int(bf)} → {s["fullyAsserted"]}')
+    bz = base.get('zeroTestOperations')
+    if bz not in (None, ''):
+        parts.append(f'no test {int(bz)} → {len(s["zeroTestOperations"])}')
+    if not parts:
+        return ''
+    return f':chart_with_upwards_trend: Trend (last {back + 1} reports): ' + ' · '.join(parts)
+
+
 def slack(s, prev, args):
     # Leads with the report's documented main question — does every endpoint test every status code it
     # can return? (2xx/400/401/403/404/409; a documented 500 is not checked) — then the bad-request-kind
@@ -579,14 +607,27 @@ def slack(s, prev, args):
         'endpoints still missing a kind is an upper bound)_',
         '',
     ]
-    # Ping a human (e.g. hub-medic) ONLY when coverage regressed week-over-week — a flat or improving
-    # week posts the same message with no mention, so the weekly report never becomes a page people
-    # learn to ignore. The mention text (a Slack subteam handle) is supplied by the workflow.
+    tl = trend_line(getattr(args, 'history', []), s)
+    if tl:
+        lines.insert(-1, tl)  # before the trailing blank that separates the headline from the gaps
+    # Ping a human (e.g. hub-medic) ONLY on something actionable: coverage regressed week-over-week, or an
+    # endpoint has no test AND no tracking issue (an unexplained gap). A flat/improving week with every
+    # no-test endpoint tracked posts with no mention, so the weekly report never becomes a page people
+    # learn to ignore. Exactly one mention — the untracked alert line below carries none. Handle from the
+    # workflow.
+    tracked = set(s['trackedOperations'])
+    untracked = [o for o in s['zeroTestOperations'] if o not in tracked]
     mention = getattr(args, 'regression_mention', '')
-    if mention and regressed(s, prev):
+    reg = regressed(s, prev)
+    if mention and (reg or untracked):
+        reasons = []
+        if reg:
+            reasons.append('coverage dropped since last week')
+        if untracked:
+            reasons.append(f'{len(untracked)} endpoint(s) have no test and no tracking issue')
         lines.insert(
             0,
-            f':rotating_light: {mention} — Hub API test coverage dropped since last week. Details below.')
+            f':rotating_light: {mention} — Hub API test coverage: {" and ".join(reasons)}. Details below.')
     code_bits = [f'{b} ({s["codeGaps"][b]})' for b in BUCKETS if s['codeGaps'].get(b)]
     lines.append(
         '• Status codes not tested yet: ' + (' · '.join(code_bits) if code_bits else 'none :tada:'))
@@ -605,9 +646,18 @@ def slack(s, prev, args):
         other.append(f'{len(s["shapeUnvalidated"])} response-shape')
     if other:
         lines.append('• Other test gaps: ' + ' · '.join(other))
-    if s['zeroTestOperations']:
-        tracked = set(s['trackedOperations'])
-        urls = s.get('trackedUrls', {})
+    urls = s.get('trackedUrls', {})
+    if untracked:
+        # An endpoint with no test AND no tracking issue is an unexplained gap — escalate it to a red
+        # alert line (the ping is the :rotating_light: line above; this line carries no mention).
+        lines.append(':red_circle: *No test at all* — no tracking issue: '
+                     + ', '.join(f'`{o}`' for o in untracked))
+        tracked_zero = [o for o in s['zeroTestOperations'] if o in tracked]
+        if tracked_zero:
+            lines.append(':warning: Known, no test (tracked): '
+                         + ', '.join(f'`{o}`' + known_note(urls.get(o, [])) for o in tracked_zero))
+    elif s['zeroTestOperations']:
+        # Every no-test endpoint is tracked: stay calm, link the tracking issues, do not page.
         lines.append(':warning: No test at all: ' + ', '.join(
             f'`{o}`' + (known_note(urls.get(o, [])) if o in tracked else '')
             for o in s['zeroTestOperations']))
@@ -820,6 +870,7 @@ def main():
     json.dump(summary, open(f'{args.out}/summary.json', 'w'), indent=2)
     json.dump(rows, open(f'{args.out}/rows.json', 'w'), indent=1)
     open(f'{args.out}/matrix.md', 'w').write(matrix(summary, rows))
+    args.history = read_history(args.previous_history)
     open(f'{args.out}/slack.txt', 'w').write(slack(summary, prev, args))
     open(f'{args.out}/issue.md', 'w').write(issue_body(summary, rows, args))
     os.makedirs(f'{args.out}/endpoints', exist_ok=True)
