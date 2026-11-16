@@ -53,6 +53,12 @@ describe('nested-additional-prop applicability matches what the generator builds
     );
   });
 
+  it('keeps a required strict nested object eligible and generates a scenario for it', () => {
+    const strict = CASES[1][1];
+    expect(isNestedAdditionalPropEligible(strict)).toBe(true);
+    expect(generateNestedAdditionalProps([strict], {}).length).toBeGreaterThan(0);
+  });
+
   it('does not flag an open nested object', () => {
     expect(isNestedAdditionalPropEligible(CASES[0][1])).toBe(false);
   });
