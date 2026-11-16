@@ -708,6 +708,24 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   });
 }
 
+/**
+ * Turns a planned scenario into the ordered request steps the emitters consume.
+ *
+ * Exported for the Layer-2 planner fixtures (see
+ * `tests/fixtures/planner/final-step-by-position.test.ts`). The CLI guard above
+ * keeps importing this module from kicking off the generator pipeline, so the
+ * export is inert outside tests.
+ *
+ * `isFinal` is derived by POSITION, never by comparing `operationId` against the
+ * last operation's id: a chain may repeat an operationId (a prerequisite that is
+ * also the endpoint, a conflict replay, a cursor warm-up), and an identity
+ * comparison would mark EVERY occurrence final — duplicating the replay step,
+ * giving each one the endpoint's body variant and error status, and suppressing
+ * the producer extracts the earlier occurrence exists to supply. The final
+ * position is the last operation unless the scenario names another one
+ * (`finalStepIndex`, or `optionalFields.targetIndex` when a read-back GET
+ * follows the target).
+ */
 export function buildRequestPlan(
   scenario: EndpointScenario,
   resp: ResponseShapeSummary | undefined,
@@ -718,13 +736,14 @@ export function buildRequestPlan(
 ): RequestStep[] {
   const steps: RequestStep[] = [];
   // Each operation becomes a step; final step uses response shape for extraction
-  const lastOpId = scenario.operations[scenario.operations.length - 1].operationId;
   // An optional-fields variant with a read-back ends in a GET after the target; the target is
   // still the logical final step (its body, expected status and oneOf choice are the endpoint's own).
-  const finalIndex = scenario.finalStepIndex ?? scenario.optionalFields?.targetIndex;
-  for (const opRef of scenario.operations) {
-    const isFinal =
-      finalIndex === undefined ? opRef.operationId === lastOpId : steps.length === finalIndex;
+  const finalIndex =
+    scenario.finalStepIndex ??
+    scenario.optionalFields?.targetIndex ??
+    scenario.operations.length - 1;
+  for (const [opIndex, opRef] of scenario.operations.entries()) {
+    const isFinal = opIndex === finalIndex;
     const step: RequestStep = {
       operationId: opRef.operationId,
       method: opRef.method,
@@ -1263,9 +1282,11 @@ type RequestBodyPlan =
  * Item-schema enums are sourced from the bundled spec (#338): top-level
  * array nodes carry an `itemEnum` field captured during canonical-shape
  * walking, and `buildRequestBodyFromCanonical` short-circuits to
- * `[itemEnum[0]]` before delegating to this helper. The helper itself
- * remains enum-unaware for deeper nested arrays — those still seed a
- * `'placeholder'` element, tracked separately.
+ * `[itemEnum[0]]` before delegating to this helper. Scalar leaves are
+ * enum-aware via `scalarSeedLiteral` (it returns `node.enum[0]` when the
+ * leaf declares an enum). Deeper nested arrays of enum primitives remain
+ * enum-unaware — `synthesizeArrayElement` still seeds a `'placeholder'`
+ * element for them, tracked separately.
  */
 export type CanonicalNode = {
   path: string;
@@ -1312,11 +1333,18 @@ function formatSeedLiteral(format: string): string | undefined {
  * or the server rejects the whole body: a `boolean` field seeded with the
  * string `'placeholder'` produced `400 "Request body is not readable"` for
  * `createCluster`'s `license.validLicense` (Gap B). Resolution order:
- *   1. format-valid literal (#397) — e.g. a `uuid`/`date-time` string;
- *   2. type-correct literal — `boolean` → `true`, `integer`/`number` → `1`;
- *   3. generic `'placeholder'` string fallback for plain strings / unknown.
+ *   1. first declared `enum` member — an enum is a closed value set, so any
+ *      non-member is rejected even when it is format-valid or type-correct:
+ *      `createAgentInstance`'s `history[].role` seeded with `'placeholder'`
+ *      produced `400 Unexpected value 'placeholder' for enum field 'role'`;
+ *   2. format-valid literal (#397) — e.g. a `uuid`/`date-time` string;
+ *   3. type-correct literal — `boolean` → `true`, `integer`/`number` → `1`;
+ *   4. generic `'placeholder'` string fallback for plain strings / unknown.
  */
 function scalarSeedLiteral(node: CanonicalNode): unknown {
+  // Step 1 must precede the format check: a format-valid literal that is not an
+  // enum member is still rejected, whereas enum members are authored to be valid.
+  if (Array.isArray(node.enum) && node.enum.length > 0) return node.enum[0];
   if (node.format) {
     const lit = formatSeedLiteral(node.format);
     if (lit !== undefined) return lit;
@@ -1608,7 +1636,7 @@ export function buildRequestBodyFromCanonical(
           if (!scenario.bindings[varName]) scenario.bindings[varName] = PENDING_BINDING;
           template[leaf] = `${'${'}${varName}}`;
         } else if (defaults && Object.hasOwn(defaults, leaf)) {
-          template[leaf] = defaults[leaf];
+          template[leaf] = requestDefaultValue(defaults[leaf]);
         } else if (f.enum?.length) {
           // #338 — schema declares an enum for this required scalar
           // field. Emit the first enum literal instead of seeding a
@@ -1739,7 +1767,26 @@ export function buildRequestBodyFromCanonical(
         if (!suppressBindingFill && scenario.bindings?.[varBase]) {
           template[leaf] = `${'${'}${varBase}}`;
         } else if (defaults && Object.hasOwn(defaults, leaf)) {
-          template[leaf] = defaults[leaf];
+          template[leaf] = requestDefaultValue(defaults[leaf]);
+        }
+      }
+    }
+    // An optional top-level ARRAY field (recorded as `field[]`) has no scalar
+    // binding to fill it from, so the loop above skips it. A request default
+    // declared for this operation fills it instead: e.g. Hub's createCredential
+    // needs a `credentialTemplateSchema` for any credential template Hub cannot
+    // look up (#757). Only `operations.<opId>` defaults apply, not `global`
+    // ones, so a global array default (camunda-oca's `fetchVariable`,
+    // `tenantIds`) is not sent by every operation that declares the field.
+    const operationDefaults = loadRequestDefaults().operations?.[opId];
+    if (operationDefaults) {
+      for (const f of nodes.filter((n) => !n.required && n.path.endsWith('[]'))) {
+        const leaf = f.path.slice(0, -2);
+        if (leaf.includes('[]') || leaf.includes('.')) continue;
+        if (allowedFields && !allowedFields.has(leaf)) continue;
+        if (variantLeafNames?.has(leaf)) continue;
+        if (template[leaf] === undefined && Object.hasOwn(operationDefaults, leaf)) {
+          template[leaf] = requestDefaultValue(operationDefaults[leaf]);
         }
       }
     }
@@ -2171,19 +2218,42 @@ function loadRequestDefaults(): RequestDefaults {
   // candidate is computed lazily because getActiveConfigDir reads
   // configs.json and throws when it is absent (e.g. the parent of the
   // repo root).
+  //
+  // A missing file means "no defaults", but a file that exists and does not
+  // parse is a real misconfiguration: falling back to empty defaults would
+  // silently put the seeded string placeholders back into bodies that need
+  // typed values (Hub's createCredential, #757) and fail at runtime instead.
   const repoRootCandidates = [process.cwd(), path.resolve(process.cwd(), '..')];
   for (const root of repoRootCandidates) {
+    let data: string;
+    let p: string;
     try {
-      const p = path.resolve(getActiveConfigDir(root), 'request-defaults.json');
-      const data = fsSync.readFileSync(p, 'utf8');
+      p = path.resolve(getActiveConfigDir(root), 'request-defaults.json');
+      data = fsSync.readFileSync(p, 'utf8');
+    } catch {
+      continue;
+    }
+    try {
       // biome-ignore lint/plugin: JSON.parse returns `any`; the file shape is the runtime contract for request-defaults.json.
-      const json = JSON.parse(data) as RequestDefaults;
-      requestDefaultsCache = json;
-      return requestDefaultsCache;
-    } catch {}
+      requestDefaultsCache = JSON.parse(data) as RequestDefaults;
+    } catch (err) {
+      throw new Error(
+        `Malformed request-defaults.json at ${p}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+    return requestDefaultsCache;
   }
   requestDefaultsCache = { operations: {}, global: {} };
   return requestDefaultsCache;
+}
+
+/**
+ * A request default as a fresh copy, so a later in-place write into one
+ * generated body (e.g. a variant's `setLeafPlaceholder` filling an array
+ * element) cannot change the cached default every other scenario reads.
+ */
+function requestDefaultValue(value: unknown): unknown {
+  return structuredClone(value);
 }
 function getRequestDefaultsForOperation(opId: string): Record<string, unknown> | undefined {
   const all = loadRequestDefaults();

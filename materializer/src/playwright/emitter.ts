@@ -430,7 +430,12 @@ function buildSuiteSource(collection: EndpointScenarioCollection, opts: EmitOpti
     lines.push("import { attachEvidenceOnFailure } from './support/evidence';");
   }
   lines.push('');
-  lines.push(`initSpecSalt(${JSON.stringify(suiteName)});`);
+  // A variant file gets its own salt: with the bare suite name it would draw the
+  // same seed sequence as the feature file of the same operation, so both would
+  // create a resource with the same client-minted name (a Hub credential name
+  // must be unique in the organization, #757). Feature salts stay the suite name.
+  const specSalt = opts.mode === 'variant' ? `${suiteName}.variant` : suiteName;
+  lines.push(`initSpecSalt(${JSON.stringify(specSalt)});`);
   if (needsValidation) {
     // Resolve responses.json relative to this spec file so the suite is
     // portable regardless of the working directory the test runner uses.
