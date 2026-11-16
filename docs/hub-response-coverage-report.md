@@ -50,9 +50,10 @@ and finally a one-line roll-up of the dimensions outside that question (lifecycl
 response-shape checks) so they stay visible without dominating.
 
 A `:chart_with_upwards_trend: Trend (last N reports)` line shows the **trajectory** — the headline fully-tested
-count and the no-test count now versus a few reports back — once at least two reports exist; the bracketed
-deltas show only the week-over-week step, the trend shows the direction. The same two series are drawn as
-charts at the top of the report page (`page.html`). An endpoint with **no test *and* no tracking issue** is an
+count and the no-test count now versus a few reports back — once at least three reports exist (two earlier
+runs plus the current one); the bracketed deltas show only the week-over-week step, the trend shows the
+direction. The same two series are drawn as charts at the top of the report page (`page.html`), which appear
+from the second report on. An endpoint with **no test *and* no tracking issue** is an
 unexplained gap: it is escalated to a `:red_circle:` alert line and pages `hub-medic`. A known/tracked no-test
 endpoint (like `getClusterUsageMetrics` above) stays on the calm `:warning:` line and pages no one.
 
