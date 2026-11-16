@@ -272,6 +272,7 @@ fi
     endpointIndex: read('endpoint-index.md').trim().split('\n').filter(Boolean),
     endpointIssues: ((raw) => (raw ? JSON.parse(raw) : undefined))(read('endpoint-issues.json')),
     endpointAges: ((raw) => (raw ? JSON.parse(raw) : undefined))(read('endpoint-ages.json')),
+    gapsProgress: ((raw) => (raw ? JSON.parse(raw) : undefined))(read('gaps-progress.json')),
     rendered: read('issue.rendered.md'),
     stderr: res.stderr,
   };
@@ -400,6 +401,20 @@ describe('per-endpoint issue lifecycle (stub gh)', () => {
     );
     // oldGap's issue has existed 42 days; newGap's issue is created this run, so its gap is 0 days old
     expect(r.endpointAges).toEqual({ oldGap: 42, newGap: 0 });
+  });
+
+  it('records this week movement (new and closed gap counts) in gaps-progress.json', () => {
+    const r = runIssueScript(
+      'hub-coverage-endpoint-issues.sh',
+      endpointFiles('newOp', 'stillOpen'),
+      [
+        { number: 5, title: endpointTitle('stillOpen'), state: 'OPEN' },
+        // had a gap before, no longer in endpoints.json this run → closed this week
+        { number: 8, title: endpointTitle('fixedOp'), state: 'OPEN' },
+      ],
+      NO_HUB,
+    );
+    expect(r.gapsProgress).toEqual({ newThisWeek: ['newOp'], closedThisWeek: 1 });
   });
 
   it('assigns a newly created issue to the resolved endpoint author', () => {
@@ -1050,16 +1065,21 @@ describe('lifecycle resources found in the spec', () => {
   });
 });
 
-describe('coverage report page — trend charts', () => {
-  const trendSection = (history: Record<string, string>[]): string => {
+describe("coverage report page — this week's movement", () => {
+  const trendSection = (
+    history: Record<string, string>[],
+    progress: Record<string, unknown> | null = null,
+    ages: Record<string, number> | null = null,
+  ): string => {
     const code = [
       'import sys, json, importlib.util',
       `spec = importlib.util.spec_from_file_location('p', ${JSON.stringify(pageScript)})`,
       'p = importlib.util.module_from_spec(spec); spec.loader.exec_module(p)',
-      'sys.stdout.write(p.trend_section(json.load(sys.stdin)))',
+      'd = json.load(sys.stdin)',
+      "sys.stdout.write(p.trend_section(d['h'], d['p'], d['a']))",
     ].join('\n');
     return execFileSync('python3', ['-B', '-c', code], {
-      input: JSON.stringify(history),
+      input: JSON.stringify({ h: history, p: progress, a: ages }),
       encoding: 'utf8',
     });
   };
@@ -1096,34 +1116,56 @@ describe('coverage report page — trend charts', () => {
     },
   ];
 
-  it('draws a chart per metric once there are at least two reports', () => {
-    const svg = trendSection([
-      { fullyAsserted: '54', operations: '66', zeroTestOperations: '3' },
-      { fullyAsserted: '58', operations: '66', zeroTestOperations: '1' },
+  it('summarises the trajectory with a direction once there are two reports', () => {
+    const html = trendSection([
+      { fullyAsserted: '54', operations: '66' },
+      { fullyAsserted: '58', operations: '66' },
     ]);
-    expect(svg).toContain('Coverage trend');
-    expect((svg.match(/<svg/g) || []).length).toBeGreaterThanOrEqual(2);
-    expect(svg).toContain('no test at all');
+    expect(html).toContain("This week's movement");
+    expect(html).toContain('88%'); // 58/66
+    expect(html).toContain('up'); // 82% -> 88%
   });
 
-  it('shows no trend section until a second report exists', () => {
-    expect(trendSection([{ fullyAsserted: '58', operations: '66', zeroTestOperations: '1' }])).toBe(
-      '',
+  it('shows nothing with no history, no progress and no ages', () => {
+    expect(trendSection([], null, null)).toBe('');
+  });
+
+  it('lists new, closed and stalled gap counts in plain language', () => {
+    const html = trendSection(
+      [],
+      { newThisWeek: ['createFile'], closedThisWeek: 3 },
+      {
+        exportWorkspace: 42,
+        freshGap: 2,
+      },
     );
+    expect(html).toContain('new coverage gap reported this week');
+    expect(html).toContain('<code>createFile</code>');
+    expect(html).toContain('coverage gaps closed this week');
+    expect(html).toContain('<b>3</b>');
+    // open 42 days (>= 4 weeks) is stalled; 2 days is not
+    expect(html).toContain('stalled — open 4+ weeks');
+    expect(html).toContain('<code>exportWorkspace</code>');
+    expect(html).not.toContain('freshGap');
   });
 
-  it('renders the trend charts into the full page when a history.csv is present', () => {
+  it('renders the movement section into the full page from gaps-progress.json', () => {
     const dir = mkdtempSync(join(tmpdir(), 'cov-page-'));
-    writeFileSync(join(dir, 'summary.json'), JSON.stringify(minSummary));
-    writeFileSync(join(dir, 'rows.json'), JSON.stringify(minRows));
-    writeFileSync(
-      join(dir, 'history.csv'),
-      'date,fullyAsserted,operations,zeroTestOperations\n2026-11-01,1,2,1\n2026-11-08,2,2,0\n',
-    );
-    execFileSync('python3', ['-B', pageScript, '--report', dir], { encoding: 'utf8' });
-    const html = readFileSync(join(dir, 'page.html'), 'utf8');
-    expect(html).toContain('Coverage trend');
-    expect((html.match(/<svg/g) || []).length).toBeGreaterThanOrEqual(2);
+    try {
+      writeFileSync(join(dir, 'summary.json'), JSON.stringify(minSummary));
+      writeFileSync(join(dir, 'rows.json'), JSON.stringify(minRows));
+      writeFileSync(
+        join(dir, 'gaps-progress.json'),
+        JSON.stringify({ newThisWeek: ['x'], closedThisWeek: 2 }),
+      );
+      execFileSync('python3', ['-B', pageScript, '--report', dir], { encoding: 'utf8' });
+      const html = readFileSync(join(dir, 'page.html'), 'utf8');
+      expect(html).toContain("This week's movement");
+      expect(html).toContain('new coverage gap reported this week');
+      expect(html).toContain('coverage gaps closed this week');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

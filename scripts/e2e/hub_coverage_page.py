@@ -113,16 +113,20 @@ details.matrix > .tools { margin-top:22px; }
 .method h2 { margin-bottom:12px; }
 .method ul { margin:0; padding-left:1.1em; display:flex; flex-direction:column; gap:7px; color:var(--muted); font-size:.9rem; max-width:80ch; }
 
-.charts { display:grid; grid-template-columns:repeat(auto-fit,minmax(340px,1fr)); gap:18px; }
-.chart { margin:0; background:var(--panel); border:1px solid var(--rule); border-radius:3px; padding:18px 20px 12px; }
-.chart figcaption { font:600 .95rem var(--sans); color:var(--ink); margin-bottom:6px; }
-.chart svg { width:100%; height:auto; display:block; overflow:visible; }
-.chart .axis { stroke:var(--rule); stroke-width:1.5; }
-.chart .series { fill:none; stroke-width:2.5; stroke-linejoin:round; stroke-linecap:round; }
-.chart .area { opacity:.10; }
-.chart text { font:600 .74rem var(--mono); fill:var(--muted); }
-.chart text.last { fill:var(--ink); font-size:.9rem; font-weight:700; }
-.chart text.date { fill:var(--muted); font-size:.72rem; }
+.t-headline { margin:0 0 18px; font-size:1.15rem; color:var(--ink); }
+.t-headline b { font-weight:700; }
+.t-headline .up { color:var(--ok); font-weight:650; }
+.t-headline .down { color:var(--gap); font-weight:650; }
+.t-headline .flat { color:var(--muted); font-weight:650; }
+.activity { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:2px; background:var(--panel); border:1px solid var(--rule); border-radius:3px; }
+.activity li { padding:16px 20px; font-size:1.02rem; border-left:5px solid var(--rule); }
+.activity li + li { border-top:1px solid var(--rule); }
+.activity li b { font-size:1.15rem; }
+.activity code { background:var(--wash); padding:1px 5px; }
+.activity .a-new { border-left-color:var(--focus); }
+.activity .a-closed { border-left-color:var(--ok); }
+.activity .a-stalled { border-left-color:var(--gap); }
+.activity .a-stalled b { color:var(--gap); }
 """
 
 
@@ -251,73 +255,59 @@ def findings(s, ages=None):
     return cards
 
 
-def line_chart(title, dates, values, fmt, color_var):
-    """A readable inline-SVG line chart: a faint area fill, a dot and a value label at every report, the
-    first and last report dates on the x-axis, and the current value emphasised. Colour comes from a CSS
-    var so dark mode works. `fmt(v)` renders a value for the labels. '' with fewer than two points."""
-    if len(values) < 2:
-        return ''
-    w, h, padx, ptop, pbot = 460, 210, 46, 30, 44
-    lo, hi = min(values), max(values)
-    span = (hi - lo) or 1
-    iw, ih = w - 2 * padx, h - ptop - pbot
-    xs = [padx + i * iw / (len(values) - 1) for i in range(len(values))]
-    ys = [ptop + ih - (v - lo) / span * ih for v in values]
-    base = ptop + ih
-    pts = ' '.join(f'{x:.1f},{y:.1f}' for x, y in zip(xs, ys))
-    area = f'{xs[0]:.1f},{base:.1f} {pts} {xs[-1]:.1f},{base:.1f}'
-    dots = ''.join(f'<circle style="fill:var({color_var})" cx="{x:.1f}" cy="{y:.1f}" r="4"></circle>'
-                   for x, y in zip(xs, ys))
-    show = range(len(values)) if len(values) <= 6 else (0, len(values) - 1)
-    labels = ''
-    for i in show:
-        cls = ' class="last"' if i == len(values) - 1 else ''
-        labels += (f'<text{cls} x="{xs[i]:.1f}" y="{ys[i] - 11:.1f}" '
-                   f'text-anchor="middle">{esc(fmt(values[i]))}</text>')
-    axis = ''
-    if dates:
-        axis = (f'<text class="date" x="{xs[0]:.1f}" y="{h - 12}" text-anchor="start">{esc(dates[0])}</text>'
-                f'<text class="date" x="{xs[-1]:.1f}" y="{h - 12}" text-anchor="end">{esc(dates[-1])}</text>')
-    return (
-        f'<figure class="chart"><figcaption>{esc(title)}</figcaption>'
-        f'<svg viewBox="0 0 {w} {h}" role="img" '
-        f'aria-label="{esc(title)}: {esc(fmt(values[0]))} to {esc(fmt(values[-1]))} over {len(values)} reports">'
-        f'<polygon class="area" style="fill:var({color_var})" points="{area}"></polygon>'
-        f'<line class="axis" x1="{xs[0]:.1f}" y1="{base:.1f}" x2="{xs[-1]:.1f}" y2="{base:.1f}"></line>'
-        f'<polyline class="series" style="stroke:var({color_var})" points="{pts}"></polyline>'
-        f'{dots}{labels}{axis}</svg></figure>')
+STALLED_WEEKS = 4  # a gap open this many weeks or longer is "stalled" — nobody is acting on it
 
 
-def trend_section(history):
-    """Two inline-SVG trend charts over the chained history.csv — the % of endpoints tested for every
-    status code, and the count with no test at all. '' with fewer than two reports (one point is not a
-    trend). A column an older history row never recorded is skipped for that chart, not guessed."""
-    if len(history) < 2:
-        return ''
-
-    def short(d):
-        return d[5:] if d and len(d) >= 10 and d[4] == '-' else d
-
-    pct_d, pct_v, nt_d, nt_v = [], [], [], []
+def trend_pct(history):
+    """The % of endpoints tested for every status code, per report, skipping a row that never recorded
+    the columns (an older header). Used for the one-line trajectory."""
+    out = []
     for r in history:
-        d = short(r.get('date', ''))
         fa, ops = r.get('fullyAsserted'), r.get('operations')
         if fa not in (None, '') and ops not in (None, '') and int(ops):
-            pct_d.append(d)
-            pct_v.append(100 * int(fa) / int(ops))
-        z = r.get('zeroTestOperations')
-        if z not in (None, ''):
-            nt_d.append(d)
-            nt_v.append(int(z))
-    charts = (line_chart('% of endpoints tested for every status code', pct_d, pct_v, lambda v: f'{v:.0f}%', '--ok')
-              + line_chart('Endpoints with no test at all', nt_d, nt_v, lambda v: f'{v:.0f}', '--gap'))
-    if not charts:
+            out.append(100 * int(fa) / int(ops))
+    return out
+
+
+def trend_section(history, progress=None, ages=None):
+    """The weekly movement, as three plain lines a manager can read at a glance rather than a chart:
+    new gaps reported this week, gaps closed this week, and gaps that have stalled (open for weeks). Plus
+    a one-line trajectory of the headline % once there are two reports. `progress` is the workflow's
+    gaps-progress.json (newThisWeek, closedThisWeek); `ages` is endpoint-ages.json (operationId -> days
+    open), from which stalled gaps are derived. '' when there is nothing to show (a first local run)."""
+    progress = progress or {}
+    ages = ages or {}
+    pct = trend_pct(history)
+    headline = ''
+    if len(pct) >= 2:
+        d = round(pct[-1] - pct[0])
+        move = (f'<span class="up">&#9650; up {d} pts</span>' if d > 0 else
+                f'<span class="down">&#9660; down {abs(d)} pts</span>' if d < 0 else
+                '<span class="flat">level</span>')
+        headline = (f'<p class="t-headline"><b>{pct[-1]:.0f}%</b> of endpoints are tested for every status '
+                    f'code — {move} over the last {len(pct)} reports.</p>')
+
+    items = []
+    if progress:
+        new = progress.get('newThisWeek') or []
+        closed = progress.get('closedThisWeek') or 0
+        items.append(('new', f'<b>{len(new)}</b> new coverage gap' + ('' if len(new) == 1 else 's')
+                      + ' reported this week' + (f': {names(new)}' if new else '')))
+        items.append(('closed', f'<b>{int(closed)}</b> coverage gap' + ('' if closed == 1 else 's')
+                      + ' closed this week'))
+    if ages:
+        stalled = sorted(o for o, dys in ages.items() if int(dys) >= STALLED_WEEKS * 7)
+        items.append(('stalled', f'<b>{len(stalled)}</b> stalled — open {STALLED_WEEKS}+ weeks'
+                      + (f': {names(stalled)}' if stalled else '')))
+    if not headline and not items:
         return ''
-    return ('<section aria-labelledby="trend"><h2 id="trend">Coverage trend</h2>'
-            f'<div class="charts">{charts}</div></section>')
+    lis = ''.join(f'<li class="a-{cls}">{txt}</li>' for cls, txt in items)
+    activity = f'<ul class="activity">{lis}</ul>' if items else ''
+    return ('<section aria-labelledby="trend"><h2 id="trend">This week\'s movement</h2>'
+            f'{headline}{activity}</section>')
 
 
-def render(s, rows, history=(), ages=None):
+def render(s, rows, history=(), ages=None, progress=None):
     groups = {}
     for r in rows:
         groups.setdefault(r['path'].strip('/').split('/')[0], []).append(r)
@@ -359,7 +349,7 @@ def render(s, rows, history=(), ages=None):
     <p class="lede"><b>{verdict}</b> {c['2xx'][0]} of {c['2xx'][1]} endpoints have a success test, but only {s['fullyAsserted']} of {s['operations']} have a test for every response the spec lists (2xx/400/401/403/404/409; a documented 500 is not checked). {s['opsMissingResponseTest']} endpoints are missing a test for a success, 400, 401, 404 or 409 response, and {len(s['missing']['403'])} have an untested 403.</p>
     <p class="meta"><span>camunda-hub@{esc(ref)}</span><span>{s['operations']} endpoints</span><span>{s['negativeTests']} negative tests</span><span>secured + rbac profiles</span></p>
   </header>
-  {trend_section(history)}
+  {trend_section(history, progress, ages)}
   <section aria-labelledby="codes"><h2 id="codes">Responses tested, out of those the spec lists</h2><ol class="bars">{bars}</ol></section>
   {findings_html}
   <section aria-labelledby="matrix">
@@ -426,8 +416,14 @@ def main():
     if os.path.exists(ages_path):
         with open(ages_path) as f:
             ages = json.load(f)
+    # This week's movement (new/closed gap counts), written by the workflow's endpoint-issues step.
+    progress = {}
+    prog_path = os.path.join(a.report, 'gaps-progress.json')
+    if os.path.exists(prog_path):
+        with open(prog_path) as f:
+            progress = json.load(f)
     out = a.out or os.path.join(a.report, 'page.html')
-    page = render(s, rows, history, ages)
+    page = render(s, rows, history, ages, progress)
     open(out, 'w', encoding='utf-8').write(page if a.fragment else as_document(page))
     print(f'wrote {out}')
 

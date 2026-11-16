@@ -91,6 +91,7 @@ if [ "$(jq 'length' <<< "$existing")" -ge "$lookup_limit" ]; then
   echo "::warning::coverage-issue lookup hit the ${lookup_limit}-result cap; dedup and cleanup may be incomplete — split the search by area or state." >&2
 fi
 new=0
+new_ops=$(mktemp)  # operationId of each endpoint that gets a brand-new issue this run (a "new gap")
 current=$(mktemp)
 # operationId<TAB>issue-number, one line per endpoint that has an issue this run; folded into
 # endpoint-issues.json below.
@@ -114,6 +115,7 @@ while read -r entry; do
     url=$(gh issue create --title "$title" --body-file "$file" \
       --label missing-coverage --label auto-generated --label hub --label team/hub)
     new=$((new + 1))
+    printf '%s\n' "$op" >> "$new_ops"
     assign_owner "${url##*/}" "$op"
     # Freshly opened this run, so its gap is zero days old.
     created="$today"
@@ -147,6 +149,16 @@ jq -R -s 'split("\n") | map(select(length > 0) | split("\t") | {(.[0]): (.[1] | 
 # "open N weeks" labels.
 jq -R -s 'split("\n") | map(select(length > 0) | split("\t") | {(.[0]): (.[1] | tonumber)}) | add // {}' \
   "$ages" > "$REPORT_DIR/endpoint-ages.json"
+
+# This week's movement, for the report page: the brand-new gaps reported this run (ops that got a new
+# issue) and how many gaps were closed. "Closed" = open per-endpoint issues whose endpoint no longer has
+# a gap (title in $existing OPEN but not in $current) — the same set the cleanup loop below closes.
+new_json=$(jq -R -s 'split("\n") | map(select(length > 0))' "$new_ops")
+closed_count=$(jq -r --arg p "$prefix" --arg x "$endpoint_suffix" \
+  '.[] | select(.state == "OPEN" and (.title | startswith($p)) and (.title | endswith($x))) | .title' \
+  <<< "$existing" | grep -cxvF -f "$current" 2>/dev/null || true)
+jq -n --argjson new "$new_json" --argjson closed "${closed_count:-0}" \
+  '{newThisWeek: $new, closedThisWeek: $closed}' > "$REPORT_DIR/gaps-progress.json"
 
 # Close open per-endpoint issues whose endpoint no longer has a gap (the singular "test" suffix matches
 # only the per-endpoint issues, never the plural-"tests" summary or the old per-area issues).
