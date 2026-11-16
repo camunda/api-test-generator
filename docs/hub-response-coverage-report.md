@@ -20,7 +20,7 @@ Workflow: [`hub-response-coverage.yml`](../.github/workflows/hub-response-covera
 
 The report job starts at 05:00 UTC on Monday, and the Slack message and issues appear when it finishes. The coverage-fix agent starts after that.
 
-**Who acts.** The Hub team. The tracking issue and the per-endpoint issues carry the `team/hub` label, so — once the Hub project has an auto-add rule on `label:team/hub` — they land on the Hub team board automatically and stay there until closed, rather than depending on someone noticing the Monday message. **Each per-endpoint issue is assigned to whoever added the endpoint** (git-blame of the operation's spec line; an `@camunda/hub` mention when no author resolves), so every gap has a DRI — the 2026-10-28 handover decision. `hub-medic` is **@-mentioned only when coverage regressed since last week** (fewer endpoints fully tested, fewer with all bad-request kinds, more endpoints with no test, or a new endpoint shipped untested); on a flat or improving week the message posts with no mention. The agent's draft PRs are listed in the thread under the weekly message as before.
+**Who acts.** The Hub team. The tracking issue and the per-endpoint issues carry the `team/hub` label, so — once the Hub project has an auto-add rule on `label:team/hub` — they land on the Hub team board automatically and stay there until closed, rather than depending on someone noticing the Monday message. **Each per-endpoint issue is assigned to whoever added the endpoint** (git-blame of the operation's spec line; an `@camunda/hub` mention when no author resolves), so every gap has a DRI — the 2026-10-28 handover decision. `hub-medic` is **@-mentioned on something actionable** — coverage regressed since last week (fewer endpoints fully tested, fewer with all bad-request kinds, more endpoints with no test, or a new endpoint shipped untested), **or** an endpoint has no test and no tracking issue; on a flat or improving week with every no-test endpoint tracked the message posts with no mention. There is exactly one mention per message. The agent's draft PRs are listed in the thread under the weekly message as before.
 
 > **One-time board setup (project admin).** The workflow adds the `team/hub` label, but the board auto-add is a GitHub Project setting it cannot flip. To route these issues onto the Hub team board, open the Hub team **GitHub Project → Settings → Workflows → "Auto-add to project"**, enable it, and set the filter to `is:issue label:team/hub` scoped to `camunda/api-test-generator`. Until this is set, the issues carry the label but do not appear on the board — nothing breaks, they just stay in the repo's issue list. (A single rule on `label:team/hub` is enough; do **not** filter on the broad `hub` label, which also tags test-automation's own generator work.)
 
@@ -33,6 +33,7 @@ Hub API test coverage (weekly) · camunda-hub@abc1234 · 66 endpoints
 Two angles: does each endpoint test every status code it can return, and does it reject every kind of bad request?
 57 of 66 endpoints are tested for every status code they can return (+2). Counts 2xx/400/401/403/404/409; a documented 500 is not checked. A bracketed number is the change since the last report.
 • Invalid-request coverage: 32 of 64 endpoints are tested with every kind of bad request that applies (may be understated: some flagged kinds cannot be generated yet, so the count of endpoints still missing a kind is an upper bound)
+:chart_with_upwards_trend: Trend (last 5 reports): fully tested 53 → 57 · no test 2 → 1
 
 • Status codes not tested yet: 403 (1) · 404 (2) · 409 (3)
 • Where those gaps are (by area): Project Snapshot 2 · File 1 · Member 1
@@ -47,6 +48,13 @@ return?* (the 2xx/400/401/403/404/409 the spec lists; a documented 500 is delibe
 shows the bad-request-kind axis on its own line, the actionable gaps grouped by status code and by API area,
 and finally a one-line roll-up of the dimensions outside that question (lifecycle tests, optional-field tests,
 response-shape checks) so they stay visible without dominating.
+
+A `:chart_with_upwards_trend: Trend (last N reports)` line shows the **trajectory** — the headline fully-tested
+count and the no-test count now versus a few reports back — once at least two reports exist; the bracketed
+deltas show only the week-over-week step, the trend shows the direction. The same two series are drawn as
+charts at the top of the report page (`page.html`). An endpoint with **no test *and* no tracking issue** is an
+unexplained gap: it is escalated to a `:red_circle:` alert line and pages `hub-medic`. A known/tracked no-test
+endpoint (like `getClusterUsageMetrics` above) stays on the calm `:warning:` line and pages no one.
 
 When the coverage-fix agent has pull requests waiting for review, a reply appears **in the thread** of this message (a week without any such pull requests has no reply):
 
