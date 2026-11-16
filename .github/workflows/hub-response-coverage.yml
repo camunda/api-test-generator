@@ -141,6 +141,7 @@ jobs:
             --out coverage-report \
             --previous previous/summary.json \
             --previous-history previous/history.csv \
+            --previous-endpoint-issues previous/endpoint-issues.json \
             --spec-ref "${{ steps.hub-sha.outputs.sha }}" \
             --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
             --regression-mention '<!subteam^S014VK4482H|hub-medic>'
@@ -325,7 +326,7 @@ jobs:
         continue-on-error: true
         env:
           SLACK_BOT_TOKEN: ${{ steps.slack.outputs.SLACK_BOT_TOKEN }}
-          CHANNEL: ${{ steps.slack-notify.outputs.channel }}
+          CHANNEL: ${{ steps.slack-notify.outputs.channel_id || steps.slack-notify.outputs.channel }}
           THREAD_TS: ${{ steps.slack-notify.outputs.ts }}
         run: bash .github/scripts/hub-coverage-upload-page.sh coverage-report/page.html
 

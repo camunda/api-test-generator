@@ -337,13 +337,14 @@ describe('summary issue lifecycle (stub gh)', () => {
     expect(r.calls.some((c) => c.includes('issue create'))).toBe(false);
   });
 
-  it('closes the open issue when nothing is missing, and still records its link', () => {
+  it('closes the open issue when nothing is missing, and writes no link to the closed issue', () => {
     const r = runIssueScript('hub-coverage-summary-issue.sh', { 'issue.md': '' }, [
       { number: 7, title: SUMMARY, state: 'OPEN' },
     ]);
     expect(r.calls).toHaveLength(1);
     expect(r.calls[0]).toContain('issue close 7');
-    expect(r.issueUrl).toBe('https://example.test/issues/7');
+    // no issue-url.txt on close, so neither the page nor Slack links a now-closed index issue
+    expect(r.issueUrl).toBe('');
   });
 
   it('does nothing when nothing is missing and no issue is open', () => {
@@ -648,17 +649,18 @@ function slackText(
   summary: Record<string, unknown>,
   prev: Record<string, unknown> | null,
   mention = '',
+  prevIssueOps: string[] = [],
 ): string {
   const code = [
     'import sys, json, types, importlib.util',
     `spec = importlib.util.spec_from_file_location('h', ${JSON.stringify(script)})`,
     'h = importlib.util.module_from_spec(spec); spec.loader.exec_module(h)',
     'd = json.load(sys.stdin)',
-    "args = types.SimpleNamespace(spec_ref='abcdef1234', run_url='http://run', tracking_url='http://track', regression_mention=d['m'])",
+    "args = types.SimpleNamespace(spec_ref='abcdef1234', run_url='http://run', tracking_url='http://track', regression_mention=d['m'], prev_issue_ops=set(d['pio']))",
     "sys.stdout.write(h.slack(d['s'], d['p'], args))",
   ].join('\n');
   return execFileSync('python3', ['-B', '-c', code], {
-    input: JSON.stringify({ s: summary, p: prev, m: mention }),
+    input: JSON.stringify({ s: summary, p: prev, m: mention, pio: prevIssueOps }),
     encoding: 'utf8',
   });
 }
@@ -900,6 +902,20 @@ describe('weekly Slack trend + no-test escalation', () => {
     expect(t).toContain(':warning: No test, tracked');
     expect(t).not.toContain('<!subteam^X>');
     expect(t).not.toContain(':red_circle:');
+  });
+
+  it('treats an endpoint that already had a coverage issue last run as tracked, not untracked', () => {
+    const over = {
+      operationIds: ['a', 'b', 'hadIssue'],
+      zeroTestOperations: ['hadIssue'],
+      trackedOperations: [],
+    };
+    // hadIssue is not suppressed, but it had a per-endpoint coverage issue last run → tracked now, so it
+    // stays on the calm line and does not re-page every week.
+    const t = slackText(baseSummary(over), baseSummary(over), '<!subteam^X>', ['hadIssue']);
+    expect(t).toContain(':warning: No test, tracked');
+    expect(t).not.toContain(':red_circle:');
+    expect(t).not.toContain('<!subteam^X>');
   });
 
   it('pings once when an untracked no-test endpoint coincides with a regression', () => {
@@ -1206,13 +1222,13 @@ describe('coverage report page — gap-card issue links', () => {
     const html = findingsHtml(
       gappySummary({ zeroTestOperations: ['g', 'h'], trackedOperations: ['h'] }),
     );
-    // the untracked (serious) gap is the red alert card
+    // g has no tracking issue (no age, not suppressed) → red alert card
     expect(html).toContain('<article class="finding alert">');
     expect(html).toContain('No test at all, and no tracking issue');
     expect(html).toContain('<code>g</code>');
-    // the known/tracked gap is a separate amber (warn) card
+    // h is suppressed/known → amber (warn) card
     expect(html).toContain('<article class="finding warn">');
-    expect(html).toContain('No test at all, tracked elsewhere');
+    expect(html).toContain('No test at all, but tracked by an issue');
     expect(html).toContain('<code>h</code>');
   });
 
@@ -1304,6 +1320,50 @@ describe('coverage report page — gap-card issue links', () => {
       });
       const html = readFileSync(join(dir, 'page.html'), 'utf8');
       expect(html).toContain('<code>g</code> <span class="age">(open 6 weeks)</span>');
+      // g has an age ⇒ it has a tracking issue ⇒ amber "tracked" card, not the red "no tracking issue"
+      // one — so the page never says "no issue tracks the gap" next to "open 6 weeks".
+      expect(html).toContain('No test at all, but tracked by an issue');
+      expect(html).not.toContain('No test at all, and no tracking issue');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps the tracking link when only bad-request-kind gaps remain (no finding cards)', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cov-nocards-'));
+    try {
+      const B = ['2xx', '400', '401', '403', '404', '409'];
+      // everything findings() cares about is clean (no response/optional/shape/no-test gaps), but the
+      // index issue is still open because only bad-request-kind checks are missing.
+      const summary = {
+        specHash: 'sha256:abc',
+        specRef: 'abc',
+        operations: 1,
+        negativeTests: 1,
+        opsMissingResponseTest: 0,
+        fullyAsserted: 1,
+        codes: Object.fromEntries(B.map((b) => [b, [1, 1]])),
+        missing: Object.fromEntries(B.map((b) => [b, []])),
+        heldCells: Object.fromEntries(B.map((b) => [b, []])),
+        optionalFields: [1, 1],
+        optionalMissing: {},
+        shapeUnvalidated: [],
+        zeroTestOperations: [],
+        trackedOperations: [],
+      };
+      writeFileSync(join(dir, 'summary.json'), JSON.stringify(summary));
+      writeFileSync(join(dir, 'rows.json'), JSON.stringify([]));
+      writeFileSync(
+        join(dir, 'issue-url.txt'),
+        'https://github.com/camunda/api-test-generator/issues/700\n',
+      );
+      execFileSync('python3', ['-B', pageScript, '--report', dir, '--fragment'], {
+        encoding: 'utf8',
+      });
+      const html = readFileSync(join(dir, 'page.html'), 'utf8');
+      expect(html).toContain('Where the gaps are');
+      expect(html).toContain('issues/700');
+      expect(html).toContain('bad-request-kind checks');
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

@@ -628,8 +628,10 @@ def slack(s, prev, args):
         lines.append('Other: ' + ' · '.join(other))
 
     # No-test endpoints: an untracked one is an unexplained gap (escalated, newly-shipped ones flagged); a
-    # tracked one stays calm with its issue linked. The ping below carries the only mention.
-    tracked = set(s['trackedOperations'])
+    # tracked one stays calm with its issue linked. The ping below carries the only mention. "Tracked" =
+    # a known/suppressed issue (trackedOperations) OR an endpoint that already had a per-endpoint coverage
+    # issue last run (prev_issue_ops), so a no-test endpoint only pages the first week, not every week.
+    tracked = set(s['trackedOperations']) | getattr(args, 'prev_issue_ops', set())
     untracked = [o for o in s['zeroTestOperations'] if o not in tracked]
     tracked_zero = [o for o in s['zeroTestOperations'] if o in tracked]
     urls = s.get('trackedUrls', {})
@@ -845,6 +847,10 @@ def main():
     ap.add_argument('--out', required=True)
     ap.add_argument('--previous')
     ap.add_argument('--previous-history', help='history.csv from the previous scheduled report')
+    ap.add_argument('--previous-endpoint-issues',
+                    help='endpoint-issues.json from the previous scheduled report. An endpoint that '
+                         'already had a per-endpoint coverage issue last run counts as tracked, so a '
+                         'no-test endpoint is only flagged "untracked" (and pages) the first week.')
     ap.add_argument('--spec-ref', default='')
     ap.add_argument('--run-url', default='')
     ap.add_argument('--tracking-url', default='')
@@ -865,6 +871,15 @@ def main():
     json.dump(rows, open(f'{args.out}/rows.json', 'w'), indent=1)
     open(f'{args.out}/matrix.md', 'w').write(matrix(summary, rows))
     args.history = read_history(args.previous_history)
+    # Endpoints that already had a per-endpoint coverage issue last run — they are tracked, so the Slack
+    # message does not re-page about them as "no tracking issue". (The audit runs before this run's issues
+    # are reconciled, so it uses the previous run's map, which the workflow downloads with the artifact.)
+    args.prev_issue_ops = set()
+    if args.previous_endpoint_issues and os.path.exists(args.previous_endpoint_issues):
+        try:
+            args.prev_issue_ops = set(json.load(open(args.previous_endpoint_issues)))
+        except ValueError:
+            args.prev_issue_ops = set()
     open(f'{args.out}/slack.txt', 'w').write(slack(summary, prev, args))
     open(f'{args.out}/issue.md', 'w').write(issue_body(summary, rows, args))
     os.makedirs(f'{args.out}/endpoints', exist_ok=True)

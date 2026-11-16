@@ -75,6 +75,7 @@ h3 { margin:0; font-size:1.02rem; letter-spacing:-.005em; }
 .finding.warn h3::before { content:"\\25C7  "; }
 .h2link { margin-left:12px; font:400 .72rem var(--mono); text-transform:none; letter-spacing:0; }
 .h2link a { color:var(--focus); }
+.gaps-note { margin:0; color:var(--muted); font-size:.95rem; }
 
 .tools { display:flex; flex-wrap:wrap; gap:14px 28px; align-items:center; justify-content:space-between; margin-bottom:14px; }
 .legend { display:flex; flex-wrap:wrap; gap:6px 20px; font-size:.84rem; color:var(--muted); }
@@ -243,15 +244,19 @@ def findings(s, ages=None):
     # No test at all, split by severity: an untracked gap is unexplained (red); a known/tracked gap is
     # expected and parked (amber). Colour carries the distinction so the serious one is obvious.
     if s['zeroTestOperations']:
-        tracked = set(s['trackedOperations'])
-        untracked = [o for o in s['zeroTestOperations'] if o not in tracked]
-        known = [o for o in s['zeroTestOperations'] if o in tracked]
+        # "Tracked" = the gap has an issue tracking it: a per-endpoint coverage issue (the endpoint has an
+        # age, so it has an open issue this run) or a known/suppressed issue (trackedOperations). Only an
+        # endpoint with no issue at all is untracked (red) — otherwise the red "nothing tracks the gap"
+        # would contradict the "open N weeks" age, which comes from that very issue.
+        has_issue = set(s['trackedOperations']) | set(ages)
+        untracked = [o for o in s['zeroTestOperations'] if o not in has_issue]
+        tracked = [o for o in s['zeroTestOperations'] if o in has_issue]
         if untracked:
             cards += ('<article class="finding alert"><h3>No test at all, and no tracking issue</h3>'
-                      f'<p>Nothing tests these endpoints and nothing tracks the gap: {names_aged(untracked, ages)}.</p></article>')
-        if known:
-            cards += ('<article class="finding warn"><h3>No test at all, tracked elsewhere</h3>'
-                      f'<p>No test yet, but the gap is known and tracked: {names_aged(known, ages)}.</p></article>')
+                      f'<p>Nothing tests these endpoints and no issue tracks the gap: {names_aged(untracked, ages)}.</p></article>')
+        if tracked:
+            cards += ('<article class="finding warn"><h3>No test at all, but tracked by an issue</h3>'
+                      f'<p>No test yet; the gap has a tracking issue: {names_aged(tracked, ages)}.</p></article>')
     return cards
 
 
@@ -339,8 +344,16 @@ def render(s, rows, history=(), ages=None, progress=None):
     t_ref = tracking_ref(s)
     # One tracking-issue link for the whole section, on the heading — not the same number on every card.
     gap_link = f'<span class="h2link">tracked in {t_ref}</span>' if t_ref else ''
+    if fnd:
+        inner = f'<div class="findings">{fnd}</div>'
+    elif t_ref:
+        # An open tracking issue but no cards: only bad-request-kind gaps remain (findings covers response
+        # codes, optional fields, response shape and no-test, not the per-kind checks). Keep the link.
+        inner = '<p class="gaps-note">The remaining gaps are bad-request-kind checks — see the tracking issue.</p>'
+    else:
+        inner = ''
     findings_html = (f'<section aria-labelledby="gaps"><h2 id="gaps">Where the gaps are{gap_link}</h2>'
-                     f'<div class="findings">{fnd}</div></section>') if fnd else ''
+                     f'{inner}</section>') if (fnd or t_ref) else ''
     return f"""<title>Hub Endpoint Coverage</title>
 <style>{CSS}</style>
 <main>
