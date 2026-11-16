@@ -32,6 +32,11 @@ The emitter maps `operationId` values to SDK methods using a mapping loaded from
 `No published C# SDK method mapping found for operationId ...` error rather than guessing a method
 name that may not exist on the real SDK client.
 
+The generated `csharp-sdk/examples/sdk-client-methods.json` manifest is produced by the reflection
+tool under `csharp-sdk/tools/reflect-sdk-methods`. Regenerate it whenever the
+`Camunda.Orchestration.Sdk` package version changes so the emitter's request, consistency, and
+time-window tables stay synchronized with the installed SDK surface.
+
 ## Running the tests
 
 ```bash
