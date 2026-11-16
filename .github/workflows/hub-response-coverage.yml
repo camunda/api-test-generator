@@ -316,6 +316,19 @@ jobs:
               "mrkdwn": true
             }
 
+      # Upload the rendered report page into the weekly message's thread, so people can open the full
+      # report from the channel without downloading a CI artifact. Best-effort: the script logs a warning
+      # and still exits 0 on any Slack-side problem (needs the files:write scope), so it never fails the run.
+      - name: Upload the report page into the Slack thread
+        id: slack-page
+        if: always() && steps.slack-notify.outputs.ts != '' && steps.slack.outputs.SLACK_BOT_TOKEN != ''
+        continue-on-error: true
+        env:
+          SLACK_BOT_TOKEN: ${{ steps.slack.outputs.SLACK_BOT_TOKEN }}
+          CHANNEL: ${{ steps.slack-notify.outputs.channel }}
+          THREAD_TS: ${{ steps.slack-notify.outputs.ts }}
+        run: bash .github/scripts/hub-coverage-upload-page.sh coverage-report/page.html
+
       # The coverage-fix agent's run reports in this message's thread. It starts later and elsewhere, so the message
       # id is kept with this run as a small artifact of its own. If it cannot be saved the run fails, like any silent Slack failure here, because the coverage-fix report could then not reply in the thread.
       - name: Save the Slack message id
@@ -343,4 +356,4 @@ jobs:
         if: always()
         uses: ./.github/actions/fail-if-slack-failed
         with:
-          outcomes: "${{ (steps.slack.outcome == 'success' && steps.slack.outputs.SLACK_BOT_TOKEN == '') && 'failure' || steps.slack.outcome }} ${{ steps.message.outcome }} ${{ steps.slack-notify.outcome }} ${{ steps.slack-agent-prs.outcome }} ${{ steps.slack-ts.outcome }} ${{ steps.slack-ts-upload.outcome }}"
+          outcomes: "${{ (steps.slack.outcome == 'success' && steps.slack.outputs.SLACK_BOT_TOKEN == '') && 'failure' || steps.slack.outcome }} ${{ steps.message.outcome }} ${{ steps.slack-notify.outcome }} ${{ steps.slack-agent-prs.outcome }} ${{ steps.slack-page.outcome }} ${{ steps.slack-ts.outcome }} ${{ steps.slack-ts-upload.outcome }}"
