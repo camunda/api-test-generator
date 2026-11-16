@@ -1019,3 +1019,85 @@ describe('lifecycle resources found in the spec', () => {
     }
   });
 });
+
+const pageScript = join(
+  dirname(fileURLToPath(import.meta.url)),
+  '../../scripts/e2e/hub_coverage_page.py',
+);
+
+describe('coverage report page — trend charts', () => {
+  const trendSection = (history: Record<string, string>[]): string => {
+    const code = [
+      'import sys, json, importlib.util',
+      `spec = importlib.util.spec_from_file_location('p', ${JSON.stringify(pageScript)})`,
+      'p = importlib.util.module_from_spec(spec); spec.loader.exec_module(p)',
+      'sys.stdout.write(p.trend_section(json.load(sys.stdin)))',
+    ].join('\n');
+    return execFileSync('python3', ['-B', '-c', code], {
+      input: JSON.stringify(history),
+      encoding: 'utf8',
+    });
+  };
+
+  const B = ['2xx', '400', '401', '403', '404', '409'];
+  const minSummary = {
+    specHash: 'sha256:abcdef0',
+    specRef: 'abcdef1234567',
+    operations: 1,
+    negativeTests: 5,
+    fullyAsserted: 1,
+    opsMissingResponseTest: 0,
+    codes: Object.fromEntries(B.map((b) => [b, [1, 1]])),
+    missing: Object.fromEntries(B.map((b) => [b, []])),
+    heldCells: Object.fromEntries(B.map((b) => [b, []])),
+    optionalFields: [0, 0],
+    optionalMissing: {},
+    shapeUnvalidated: [],
+    zeroTestOperations: [],
+    trackedOperations: [],
+  };
+  const minRows = [
+    {
+      method: 'GET',
+      operationId: 'listA',
+      path: '/a',
+      cells: Object.fromEntries(B.map((b) => [b, 'ok'])),
+      shape: 'ok',
+      optionalSent: 0,
+      optionalTotal: 0,
+      notes: [],
+      fullyTestedExcept403: true,
+      codeGap: 0,
+    },
+  ];
+
+  it('draws a chart per metric once there are at least two reports', () => {
+    const svg = trendSection([
+      { fullyAsserted: '54', operations: '66', zeroTestOperations: '3' },
+      { fullyAsserted: '58', operations: '66', zeroTestOperations: '1' },
+    ]);
+    expect(svg).toContain('Coverage trend');
+    expect((svg.match(/<svg/g) || []).length).toBeGreaterThanOrEqual(2);
+    expect(svg).toContain('no test at all');
+  });
+
+  it('shows no trend section until a second report exists', () => {
+    expect(trendSection([{ fullyAsserted: '58', operations: '66', zeroTestOperations: '1' }])).toBe(
+      '',
+    );
+  });
+
+  it('renders the trend charts into the full page when a history.csv is present', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cov-page-'));
+    writeFileSync(join(dir, 'summary.json'), JSON.stringify(minSummary));
+    writeFileSync(join(dir, 'rows.json'), JSON.stringify(minRows));
+    writeFileSync(
+      join(dir, 'history.csv'),
+      'date,fullyAsserted,operations,zeroTestOperations\n2026-11-01,1,2,1\n2026-11-08,2,2,0\n',
+    );
+    execFileSync('python3', ['-B', pageScript, '--report', dir], { encoding: 'utf8' });
+    const html = readFileSync(join(dir, 'page.html'), 'utf8');
+    expect(html).toContain('Coverage trend');
+    expect((html.match(/<svg/g) || []).length).toBeGreaterThanOrEqual(2);
+  });
+});

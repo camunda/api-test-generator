@@ -9,6 +9,7 @@ Claude page by hand.
   hub_coverage_page.py --report DIR [--out FILE]
 """
 import argparse
+import csv
 import html
 import json
 import os
@@ -98,6 +99,15 @@ td.frac span { font:700 .8rem var(--mono); font-variant-numeric:tabular-nums; }
 table.only-gaps tr[data-gap="0"] { display:none; }
 .method h2 { margin-bottom:12px; }
 .method ul { margin:0; padding-left:1.1em; display:flex; flex-direction:column; gap:7px; color:var(--muted); font-size:.9rem; max-width:80ch; }
+
+.charts { display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:18px; }
+.chart { margin:0; background:var(--panel); border:1px solid var(--rule); padding:16px 18px; }
+.chart figcaption { font:600 .9rem var(--sans); margin-bottom:10px; }
+.chart svg { width:100%; height:auto; display:block; overflow:visible; }
+.chart .axis { stroke:var(--rule); stroke-width:1; }
+.chart .series { fill:none; stroke-width:2; stroke-linejoin:round; stroke-linecap:round; }
+.chart text { font:600 .62rem var(--mono); fill:var(--muted); }
+.chart text.last { fill:var(--ink); font-size:.82rem; }
 """
 
 
@@ -175,7 +185,55 @@ def findings(s):
                    for t, ref, txt in out)
 
 
-def render(s, rows):
+def line_chart(title, values, fmt, color_var):
+    """A small self-contained inline-SVG line chart: a polyline over `values`, a baseline axis, the
+    min/max called out on the left, and the latest value labelled. Stroke colour comes from a CSS var so
+    dark mode works. `fmt(v)` renders a value for the labels. '' with fewer than two points."""
+    if len(values) < 2:
+        return ''
+    w, h, pad = 320, 120, 26
+    lo, hi = min(values), max(values)
+    span = (hi - lo) or 1
+    iw, ih = w - 2 * pad, h - 2 * pad
+    xy = [(pad + i * iw / (len(values) - 1), h - pad - (v - lo) / span * ih) for i, v in enumerate(values)]
+    pts = ' '.join(f'{x:.1f},{y:.1f}' for x, y in xy)
+    lx, ly = xy[-1]
+    return (
+        f'<figure class="chart"><figcaption>{esc(title)}</figcaption>'
+        f'<svg viewBox="0 0 {w} {h}" role="img" '
+        f'aria-label="{esc(title)}: {esc(fmt(values[0]))} to {esc(fmt(values[-1]))} over {len(values)} reports">'
+        f'<line class="axis" x1="{pad}" y1="{h - pad}" x2="{w - pad}" y2="{h - pad}"></line>'
+        f'<polyline class="series" style="stroke:var({color_var})" points="{pts}"></polyline>'
+        f'<circle style="fill:var({color_var})" cx="{lx:.1f}" cy="{ly:.1f}" r="3"></circle>'
+        f'<text x="{pad}" y="{pad - 10}">{esc(fmt(hi))}</text>'
+        f'<text x="{pad}" y="{h - pad + 15}">{esc(fmt(lo))}</text>'
+        f'<text class="last" x="{lx:.1f}" y="{ly - 8:.1f}" text-anchor="end">{esc(fmt(values[-1]))}</text>'
+        f'</svg></figure>')
+
+
+def trend_section(history):
+    """Two inline-SVG trend charts over the chained history.csv — the % of endpoints tested for every
+    status code, and the count with no test at all. '' with fewer than two reports (one point is not a
+    trend). A column an older history row never recorded is skipped for that chart, not guessed."""
+    if len(history) < 2:
+        return ''
+    pct, notest = [], []
+    for r in history:
+        fa, ops = r.get('fullyAsserted'), r.get('operations')
+        if fa not in (None, '') and ops not in (None, '') and int(ops):
+            pct.append(100 * int(fa) / int(ops))
+        z = r.get('zeroTestOperations')
+        if z not in (None, ''):
+            notest.append(int(z))
+    charts = (line_chart('% of endpoints tested for every status code', pct, lambda v: f'{v:.0f}%', '--ok')
+              + line_chart('Endpoints with no test at all', notest, lambda v: f'{v:.0f}', '--gap'))
+    if not charts:
+        return ''
+    return ('<section aria-labelledby="trend"><h2 id="trend">Coverage trend</h2>'
+            f'<div class="charts">{charts}</div></section>')
+
+
+def render(s, rows, history=()):
     groups = {}
     for r in rows:
         groups.setdefault(r['path'].strip('/').split('/')[0], []).append(r)
@@ -213,6 +271,7 @@ def render(s, rows):
     <p class="lede"><b>{verdict}</b> {c['2xx'][0]} of {c['2xx'][1]} endpoints have a success test, but only {s['fullyAsserted']} of {s['operations']} have a test for every response the spec lists (2xx/400/401/403/404/409; a documented 500 is not checked). {s['opsMissingResponseTest']} endpoints are missing a test for a success, 400, 401, 404 or 409 response, and {len(s['missing']['403'])} have an untested 403.</p>
     <p class="meta"><span>camunda-hub@{esc(ref)}</span><span>{s['operations']} endpoints</span><span>{s['negativeTests']} negative tests</span><span>secured + rbac profiles</span><span>tracked in <a href="{ISSUES}{EPIC}" rel="noopener">#{EPIC}</a></span></p>
   </header>
+  {trend_section(history)}
   <section aria-labelledby="codes"><h2 id="codes">Responses tested, out of those the spec lists</h2><ol class="bars">{bars}</ol></section>
   {findings_html}
   <section aria-labelledby="matrix">
@@ -258,8 +317,13 @@ def main():
     a = ap.parse_args()
     s = json.load(open(os.path.join(a.report, 'summary.json')))
     rows = json.load(open(os.path.join(a.report, 'rows.json')))
+    hist_path = os.path.join(a.report, 'history.csv')
+    history = []
+    if os.path.exists(hist_path):
+        with open(hist_path, newline='') as f:
+            history = list(csv.DictReader(f))
     out = a.out or os.path.join(a.report, 'page.html')
-    page = render(s, rows)
+    page = render(s, rows, history)
     open(out, 'w', encoding='utf-8').write(page if a.fragment else as_document(page))
     print(f'wrote {out}')
 
