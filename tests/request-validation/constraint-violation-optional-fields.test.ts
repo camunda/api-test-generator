@@ -99,3 +99,39 @@ describe('constraint-violation on an optional field that the baseline body leave
     expect(scenarios.get('filter.someKey:patternMismatch')).toBeDefined();
   });
 });
+
+describe('values built to reach the target satisfy their own constraints', () => {
+  const arrayOf = (array: SchemaFragment): OperationModel =>
+    op({ type: 'object', properties: { ids: array } });
+
+  it('fills an oversized array with items that meet the item minLength', () => {
+    const o = arrayOf({ type: 'array', maxItems: 3, items: { type: 'string', minLength: 2 } });
+    expect(byKind(o).get('ids:aboveMaxItems')).toEqual({ ids: ['aa', 'aa', 'aa', 'aa'] });
+  });
+
+  it('fills an oversized uniqueItems array with distinct items', () => {
+    const o = arrayOf({
+      type: 'array',
+      maxItems: 2,
+      uniqueItems: true,
+      items: { type: 'string', pattern: '^[a-z]+$' },
+    });
+    const body = byKind(o).get('ids:aboveMaxItems');
+    const ids = body && typeof body === 'object' && 'ids' in body ? body.ids : undefined;
+    expect(Array.isArray(ids) && ids.length === 3 && new Set(ids).size === 3).toBe(true);
+  });
+
+  it('builds a missing array with minItems items before breaking one of them', () => {
+    const o = arrayOf({
+      type: 'array',
+      minItems: 2,
+      items: { type: 'integer', minimum: 5, maximum: 9 },
+    });
+    expect(byKind(o).get('ids.0:aboveMaximum')).toEqual({ ids: [10, 5] });
+  });
+
+  it('skips a mutation when no valid value can be built for the rest of the array', () => {
+    const o = arrayOf({ type: 'array', maxItems: 1, items: { type: 'string', pattern: '^Z{3}$' } });
+    expect(byKind(o).has('ids:aboveMaxItems')).toBe(false);
+  });
+});
