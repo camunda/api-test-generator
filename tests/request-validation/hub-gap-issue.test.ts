@@ -702,73 +702,59 @@ const baseSummary = (over: Record<string, unknown> = {}) => ({
 describe('weekly Slack message', () => {
   // Note: the weekly report pings hub-medic ONLY on a week-over-week regression — that behaviour
   // is covered by the 'weekly Slack message pings only on a regression' describe block below.
-  it('leads with the documented main question — endpoints tested for every status code', () => {
+  it('leads with both headline angles on one compact line', () => {
     const text = slackText(baseSummary(), null);
-    expect(text).toContain('*8 of 10 endpoints are tested for every status code they can return*');
-    // The two-angle intro frames the headline and the invalid-request line.
-    expect(text).toContain('Two angles:');
+    expect(text).toContain('8/10 tested for every status code');
+    expect(text).toContain('5/10 reject every bad-request kind');
+    // the long inline framing/caveats moved to the Guide to keep the message scannable
+    expect(text).not.toContain('Two angles');
+    expect(text).not.toContain('a documented 500 is not checked');
+    expect(text).not.toContain('upper bound');
   });
 
-  it('notes that a documented 500 is not counted, so the headline is not over-claimed', () => {
-    const text = slackText(baseSummary(), null);
-    expect(text).toContain('a documented 500 is not checked');
-    expect(text).toContain('2xx/400/401/403/404/409');
-  });
-
-  it('shows the bad-request-kind axis on its own line, flagged as possibly understated', () => {
-    const text = slackText(baseSummary(), null);
-    expect(text).toContain(
-      'Invalid-request coverage: 5 of 10 endpoints are tested with every kind of bad request that applies',
-    );
-    // The caveat now names the direction: the covered count may be understated; the missing count is the bound.
-    expect(text).toContain('may be understated');
-    expect(text).toContain('upper bound');
-  });
-
-  it('lists status codes not tested yet, omitting codes with no gap', () => {
-    const text = slackText(baseSummary(), null);
-    // baseSummary codeGaps: 400:1, 403:2, 404:1, 409:2 ; 2xx and 401 are 0, so omitted
-    expect(text).toContain('Status codes not tested yet: 400 (1) · 403 (2) · 404 (1) · 409 (2)');
-    const clean = slackText(
-      baseSummary({ codeGaps: { '2xx': 0, '400': 0, '401': 0, '403': 0, '404': 0, '409': 0 } }),
-      null,
-    );
-    expect(clean).toContain('Status codes not tested yet: none');
-  });
-
-  it('lists where the response gaps are, by area, most first', () => {
+  it('lists the gaps by status code and by area on one line, most first', () => {
     const text = slackText(
       baseSummary({ areaResponseGaps: { File: 2, Project: 1, Catalog: 2 } }),
       null,
     );
-    // sorted by count desc then name: Catalog 2, File 2, Project 1
-    expect(text).toContain('Where those gaps are (by area): Catalog 2 · File 2 · Project 1');
+    // codeGaps 400:1,403:2,404:1,409:2 (2xx/401 omitted); areas sorted by count desc then name
+    expect(text).toContain('Gaps by code: 400 (1) · 403 (2) · 404 (1) · 409 (2)');
+    expect(text).toContain('by area: Catalog 2 · File 2 · Project 1');
+  });
+
+  it('says none with a tada when no status code has a gap', () => {
+    const clean = slackText(
+      baseSummary({ codeGaps: { '2xx': 0, '400': 0, '401': 0, '403': 0, '404': 0, '409': 0 } }),
+      null,
+    );
+    expect(clean).toContain('Gaps by code: none');
   });
 
   it('rolls up the out-of-scope dimensions on one line so they stay visible', () => {
     const text = slackText(baseSummary(), null);
     // lifecycle missing 2+1+1=4 ; optional fields 9-6=3 ; response-shape 3
-    expect(text).toContain('Other test gaps: 4 lifecycle · 3 optional fields · 3 response-shape');
+    expect(text).toContain('Other: 4 lifecycle · 3 optional fields · 3 response-shape');
   });
 
-  it('shows the change in brackets on the headline and on the kind line', () => {
+  it('shows the change in brackets on each headline angle', () => {
     const text = slackText(
       baseSummary({ fullyAsserted: 8, requestChecks: [5, 10] }),
       baseSummary({ fullyAsserted: 7, requestChecks: [7, 10] }),
     );
-    expect(text).toContain('they can return* (+1).');
-    expect(text).toContain('every kind of bad request that applies (-2)');
+    expect(text).toContain('tested for every status code (+1)');
+    expect(text).toContain('reject every bad-request kind (-2)');
   });
 
   it('shows no change figures at all for the first report', () => {
     const text = slackText(baseSummary(), null);
-    expect(text).toContain('they can return*. _Counts');
+    expect(text).toContain('8/10 tested for every status code');
     expect(text).not.toMatch(/\([+-]\d+\)/);
   });
 
-  it('links the tracking issues next to an endpoint with no test at all', () => {
+  it('splits no-test endpoints into an untracked red line and a tracked calm line', () => {
     const text = slackText(
       baseSummary({
+        operationIds: ['a', 'b', 'c'],
         zeroTestOperations: ['a', 'b', 'c'],
         trackedOperations: ['a', 'b'],
         trackedUrls: {
@@ -780,12 +766,12 @@ describe('weekly Slack message', () => {
       }),
       null,
     );
-    // Tracked no-test endpoints stay on a calm line, each with its tracking issue linked.
+    // tracked no-test endpoints stay calm, each with its tracking issue linked (b has none)
     expect(text).toContain(
-      'Known, no test (tracked): `a` (known, tracked: <https://github.com/camunda/camunda-hub/issues/25907|camunda-hub#25907>, <https://github.com/camunda/camunda-hub/issues/26448|camunda-hub#26448>), `b` (known, tracked)',
+      ':warning: No test, tracked: `a` (<https://github.com/camunda/camunda-hub/issues/25907|camunda-hub#25907>, <https://github.com/camunda/camunda-hub/issues/26448|camunda-hub#26448>), `b`',
     );
-    // The untracked one (c) is escalated to its own red alert line, with no tracking note.
-    expect(text).toContain(':red_circle: *No test at all* — no tracking issue: `c`');
+    // the untracked one (c) is escalated to its own red line, with no tracking note
+    expect(text).toContain(':red_circle: No test, untracked: `c`');
     expect(text).not.toContain('`c` (');
   });
 
@@ -872,7 +858,7 @@ describe('weekly Slack trend + no-test escalation', () => {
         ],
         { fullyAsserted: 58, zeroTestOperations: ['x'] },
       ),
-    ).toMatch(/Trend .*fully tested 54 → 58.*no test 2 → 1/);
+    ).toMatch(/last \d+ reports: tested 54→58 · no-test 2→1/);
   });
 
   it('shows nothing until a second report exists', () => {
@@ -889,8 +875,8 @@ describe('weekly Slack trend + no-test escalation', () => {
       fullyAsserted: 58,
       zeroTestOperations: ['a'],
     });
-    expect(line).toMatch(/no test 3 → 1/);
-    expect(line).not.toContain('fully tested');
+    expect(line).toMatch(/no-test 3→1/);
+    expect(line).not.toContain('tested ');
   });
 
   it('escalates an untracked no-test endpoint to a red alert and pings once', () => {
@@ -900,7 +886,7 @@ describe('weekly Slack trend + no-test escalation', () => {
       trackedOperations: [],
     };
     const m = slackText(baseSummary(over), baseSummary(over), '<!subteam^X>');
-    expect(m).toMatch(/:red_circle:.*No test at all.*newGap/);
+    expect(m).toMatch(/:red_circle: No test, untracked:.*newGap/);
     expect((m.match(/<!subteam\^X>/g) || []).length).toBe(1);
   });
 
@@ -911,7 +897,7 @@ describe('weekly Slack trend + no-test escalation', () => {
       trackedOperations: ['known'],
     };
     const t = slackText(baseSummary(over), baseSummary(over), '<!subteam^X>');
-    expect(t).toContain(':warning: No test at all');
+    expect(t).toContain(':warning: No test, tracked');
     expect(t).not.toContain('<!subteam^X>');
     expect(t).not.toContain(':red_circle:');
   });

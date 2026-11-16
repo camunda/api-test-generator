@@ -524,11 +524,11 @@ def change(now, before):
 
 
 def known_note(urls):
-    """' (known, tracked: camunda-hub#25907, ...)' with each issue linked, or ' (known, tracked)' when there is no URL."""
+    """' (camunda-hub#25907, ...)' with each issue linked, or '' when there is no URL."""
     def label(u):
         m = re.search(r'github\.com/[^/]+/([^/]+)/(?:issues|pull)/(\d+)', u)
         return f'<{u}|{m.group(1)}#{m.group(2)}>' if m else f'<{u}|issue>'
-    return f' (known, tracked: {", ".join(label(u) for u in urls)})' if urls else ' (known, tracked)'
+    return f' ({", ".join(label(u) for u in urls)})' if urls else ''
 
 
 def regressed(s, prev):
@@ -570,13 +570,13 @@ def trend_line(history, s):
     parts = []
     bf = base.get('fullyAsserted')
     if bf not in (None, ''):
-        parts.append(f'fully tested {int(bf)} → {s["fullyAsserted"]}')
+        parts.append(f'tested {int(bf)}→{s["fullyAsserted"]}')
     bz = base.get('zeroTestOperations')
     if bz not in (None, ''):
-        parts.append(f'no test {int(bz)} → {len(s["zeroTestOperations"])}')
+        parts.append(f'no-test {int(bz)}→{len(s["zeroTestOperations"])}')
     if not parts:
         return ''
-    return f':chart_with_upwards_trend: Trend (last {back + 1} reports): ' + ' · '.join(parts)
+    return f':chart_with_upwards_trend: last {back + 1} reports: ' + ' · '.join(parts)
 
 
 def slack(s, prev, args):
@@ -592,48 +592,28 @@ def slack(s, prev, args):
     pf = prev['fullyAsserted'] if prev else None
     kind_ok, kind_total = s['requestChecks']
     kind_before = prev['requestChecks'][0] if prev and 'requestChecks' in prev else None
+    new_ops = set(s['operationIds']) - set(prev.get('operationIds', [])) if prev else set()
 
+    # Both headline angles on one line; the caveats (a documented 500 is not checked; the bad-request
+    # "applies" count is an upper bound) live in the Guide, not inline, to keep the message scannable.
     lines = [
         f':bar_chart: *Hub API test coverage* (weekly) · {ref} · {n} endpoints',
-        '_Two angles: does each endpoint test every status code it can return, '
-        'and does it reject every kind of bad request?_',
-        f'*{s["fullyAsserted"]} of {n} endpoints are tested for every status code they can return*'
-        f'{change(s["fullyAsserted"], pf)}.'
-        ' _Counts 2xx/400/401/403/404/409; a documented 500 is not checked. '
-        'A bracketed number is the change since the last report._',
-        f'• Invalid-request coverage: {kind_ok} of {kind_total} endpoints are tested with every kind '
-        f'of bad request that applies{change(kind_ok, kind_before)}'
-        ' _(may be understated: some flagged kinds cannot be generated yet, so the count of '
-        'endpoints still missing a kind is an upper bound)_',
-        '',
+        f'{s["fullyAsserted"]}/{n} tested for every status code{change(s["fullyAsserted"], pf)}'
+        f'  ·  {kind_ok}/{kind_total} reject every bad-request kind{change(kind_ok, kind_before)}',
     ]
     tl = trend_line(getattr(args, 'history', []), s)
     if tl:
-        lines.insert(-1, tl)  # before the trailing blank that separates the headline from the gaps
-    # Ping a human (e.g. hub-medic) ONLY on something actionable: coverage regressed week-over-week, or an
-    # endpoint has no test AND no tracking issue (an unexplained gap). A flat/improving week with every
-    # no-test endpoint tracked posts with no mention, so the weekly report never becomes a page people
-    # learn to ignore. Exactly one mention — the untracked alert line below carries none. Handle from the
-    # workflow.
-    tracked = set(s['trackedOperations'])
-    untracked = [o for o in s['zeroTestOperations'] if o not in tracked]
-    mention = getattr(args, 'regression_mention', '')
-    reg = regressed(s, prev)
-    if mention and (reg or untracked):
-        reasons = []
-        if reg:
-            reasons.append('coverage dropped since last week')
-        if untracked:
-            reasons.append(f'{len(untracked)} endpoint(s) have no test and no tracking issue')
-        lines.insert(
-            0,
-            f':rotating_light: {mention} — Hub API test coverage: {" and ".join(reasons)}. Details below.')
+        lines.append(tl)
+    lines.append('')
+
+    # The gaps by status code and by API area, on one line.
     code_bits = [f'{b} ({s["codeGaps"][b]})' for b in BUCKETS if s['codeGaps'].get(b)]
-    lines.append(
-        '• Status codes not tested yet: ' + (' · '.join(code_bits) if code_bits else 'none :tada:'))
+    gaps = 'Gaps by code: ' + (' · '.join(code_bits) if code_bits else 'none :tada:')
     areas = sorted(s['areaResponseGaps'].items(), key=lambda kv: (-kv[1], kv[0]))
-    lines.append(
-        '• Where those gaps are (by area): ' + (' · '.join(f'{a} {c}' for a, c in areas) if areas else 'none'))
+    if areas:
+        gaps += '      by area: ' + ' · '.join(f'{a} {c}' for a, c in areas)
+    lines.append(gaps)
+
     other = []
     lc = s['lifecycle']
     lc_missing = len(lc['createMissing']) + len(lc['restoreMissing']) + len(lc['edgeMissing'])
@@ -645,26 +625,40 @@ def slack(s, prev, args):
     if s['shapeUnvalidated']:
         other.append(f'{len(s["shapeUnvalidated"])} response-shape')
     if other:
-        lines.append('• Other test gaps: ' + ' · '.join(other))
+        lines.append('Other: ' + ' · '.join(other))
+
+    # No-test endpoints: an untracked one is an unexplained gap (escalated, newly-shipped ones flagged); a
+    # tracked one stays calm with its issue linked. The ping below carries the only mention.
+    tracked = set(s['trackedOperations'])
+    untracked = [o for o in s['zeroTestOperations'] if o not in tracked]
+    tracked_zero = [o for o in s['zeroTestOperations'] if o in tracked]
     urls = s.get('trackedUrls', {})
+    no_test = []
     if untracked:
-        # An endpoint with no test AND no tracking issue is an unexplained gap — escalate it to a red
-        # alert line (the ping is the :rotating_light: line above; this line carries no mention).
-        lines.append(':red_circle: *No test at all* — no tracking issue: '
-                     + ', '.join(f'`{o}`' for o in untracked))
-        tracked_zero = [o for o in s['zeroTestOperations'] if o in tracked]
-        if tracked_zero:
-            lines.append(':warning: Known, no test (tracked): '
-                         + ', '.join(f'`{o}`' + known_note(urls.get(o, [])) for o in tracked_zero))
-    elif s['zeroTestOperations']:
-        # Every no-test endpoint is tracked: stay calm, link the tracking issues, do not page.
-        lines.append(':warning: No test at all: ' + ', '.join(
-            f'`{o}`' + (known_note(urls.get(o, [])) if o in tracked else '')
-            for o in s['zeroTestOperations']))
-    if prev:
-        new = sorted(set(s['operationIds']) - set(prev.get('operationIds', [])))
-        if new:
-            lines.append('New endpoints since last report: ' + ', '.join(f'`{o}`' for o in new))
+        no_test.append(':red_circle: No test, untracked: ' + ', '.join(
+            f'`{o}`' + (' (new this week)' if o in new_ops else '') for o in untracked))
+    if tracked_zero:
+        no_test.append(':warning: No test, tracked: '
+                       + ', '.join(f'`{o}`' + known_note(urls.get(o, [])) for o in tracked_zero))
+    if no_test:
+        lines.append('')
+        lines += no_test
+
+    # Ping (one mention max) ONLY on something actionable: coverage regressed week-over-week, or an
+    # endpoint has no test AND no tracking issue. A flat/improving week with every no-test endpoint tracked
+    # posts with no mention, so the weekly report never becomes a page people learn to ignore.
+    mention = getattr(args, 'regression_mention', '')
+    reg = regressed(s, prev)
+    if mention and (reg or untracked):
+        reasons = []
+        if reg:
+            reasons.append('coverage dropped since last week')
+        if untracked:
+            reasons.append(f'{len(untracked)} endpoint(s) have no test and no tracking issue')
+        lines.insert(
+            0,
+            f':rotating_light: {mention} — Hub API test coverage: {" and ".join(reasons)}. Details below.')
+
     links = []
     if args.run_url:
         links.append(f'<{args.run_url}|Full table>')

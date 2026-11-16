@@ -30,24 +30,24 @@ The numbers below are an example.
 
 ```
 Hub API test coverage (weekly) · camunda-hub@abc1234 · 66 endpoints
-Two angles: does each endpoint test every status code it can return, and does it reject every kind of bad request?
-57 of 66 endpoints are tested for every status code they can return (+2). Counts 2xx/400/401/403/404/409; a documented 500 is not checked. A bracketed number is the change since the last report.
-• Invalid-request coverage: 32 of 64 endpoints are tested with every kind of bad request that applies (may be understated: some flagged kinds cannot be generated yet, so the count of endpoints still missing a kind is an upper bound)
-:chart_with_upwards_trend: Trend (last 5 reports): fully tested 53 → 57 · no test 2 → 1
+57/66 tested for every status code (+2)  ·  32/64 reject every bad-request kind (-1)
+:chart_with_upwards_trend: last 5 reports: tested 53→57 · no-test 2→1
 
-• Status codes not tested yet: 403 (1) · 404 (2) · 409 (3)
-• Where those gaps are (by area): Project Snapshot 2 · File 1 · Member 1
-• Other test gaps: 5 optional fields
-:warning: No test at all: getClusterUsageMetrics (known, tracked: camunda-hub#25907, camunda-hub#26448)
+Gaps by code: 403 (1) · 404 (2) · 409 (3)      by area: Project Snapshot 2 · File 1 · Member 1
+Other: 5 optional fields
+
+:red_circle: No test, untracked: exportWorkspace (new this week)
+:warning: No test, tracked: getClusterUsageMetrics (camunda-hub#25907, camunda-hub#26448)
 
 Full table · Tracking issue · Guide
 ```
 
-The message answers the report's main question first — *does every endpoint test every status code it can
-return?* (the 2xx/400/401/403/404/409 the spec lists; a documented 500 is deliberately not counted) — then
-shows the bad-request-kind axis on its own line, the actionable gaps grouped by status code and by API area,
-and finally a one-line roll-up of the dimensions outside that question (lifecycle tests, optional-field tests,
-response-shape checks) so they stay visible without dominating.
+The message is compact so it reads at a glance: one headline line with both angles — *does every endpoint test
+every status code it can return?* (the 2xx/400/401/403/404/409 the spec lists; a documented 500 is deliberately
+not counted) and *does it reject every applicable kind of bad request?* (an upper bound) — each with its
+bracketed change since the last report; then the actionable gaps by status code and by API area on one line,
+a one-line roll-up of the other dimensions (lifecycle, optional-field, response-shape), and the no-test lines.
+The caveats live in the Guide rather than inline.
 
 A `:chart_with_upwards_trend: Trend (last N reports)` line shows the **trajectory** — the headline fully-tested
 count and the no-test count now versus a few reports back — once at least three reports exist (two earlier
