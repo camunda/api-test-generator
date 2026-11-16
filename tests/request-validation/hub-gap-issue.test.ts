@@ -18,6 +18,11 @@ const script = join(
   '../../scripts/e2e/hub_response_coverage.py',
 );
 
+const pageScript = join(
+  dirname(fileURLToPath(import.meta.url)),
+  '../../scripts/e2e/hub_coverage_page.py',
+);
+
 type Row = {
   operationId: string;
   area?: string;
@@ -1020,11 +1025,6 @@ describe('lifecycle resources found in the spec', () => {
   });
 });
 
-const pageScript = join(
-  dirname(fileURLToPath(import.meta.url)),
-  '../../scripts/e2e/hub_coverage_page.py',
-);
-
 describe('coverage report page — trend charts', () => {
   const trendSection = (history: Record<string, string>[]): string => {
     const code = [
@@ -1099,5 +1099,130 @@ describe('coverage report page — trend charts', () => {
     const html = readFileSync(join(dir, 'page.html'), 'utf8');
     expect(html).toContain('Coverage trend');
     expect((html.match(/<svg/g) || []).length).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe('coverage report page — gap-card issue links', () => {
+  // Minimal summary with one gap in every category findings() can render.
+  const gappySummary = (over: Record<string, unknown> = {}) => ({
+    missing: { '2xx': [], '400': ['a'], '401': [], '403': ['b'], '404': ['c'], '409': ['d'] },
+    codes: {
+      '2xx': [1, 1],
+      '400': [0, 1],
+      '401': [1, 1],
+      '403': [0, 1],
+      '404': [0, 1],
+      '409': [0, 1],
+    },
+    heldCells: { '2xx': [], '400': [], '401': [], '403': [], '404': [], '409': [] },
+    optionalFields: [1, 2],
+    optionalMissing: { e: ['field'] },
+    shapeUnvalidated: ['f'],
+    zeroTestOperations: ['g'],
+    trackedOperations: [],
+    ...over,
+  });
+
+  const findingsHtml = (summary: Record<string, unknown>): string =>
+    execFileSync(
+      'python3',
+      [
+        '-B',
+        '-c',
+        [
+          'import sys, json, importlib.util',
+          `spec = importlib.util.spec_from_file_location('h', ${JSON.stringify(pageScript)})`,
+          'h = importlib.util.module_from_spec(spec); spec.loader.exec_module(h)',
+          'sys.stdout.write(h.findings(json.load(sys.stdin)))',
+        ].join('\n'),
+      ],
+      { input: JSON.stringify(summary), encoding: 'utf8' },
+    );
+
+  const track = 'https://github.com/camunda/api-test-generator/issues/700';
+
+  it('links the live tracking issue, never a hardcoded issue number', () => {
+    const html = findingsHtml(gappySummary({ trackingUrl: track }));
+    // the live rolling index issue, shown as #700
+    expect(html).toContain('href="https://github.com/camunda/api-test-generator/issues/700"');
+    expect(html).toContain('#700');
+    // the old hardcoded epic (#618) and its sub-issues (#619–#627) must be gone
+    for (const dead of [618, 619, 620, 621, 622, 623, 624, 625, 626, 627]) {
+      expect(html).not.toContain(`/issues/${dead}"`);
+    }
+  });
+
+  it('every gap card points at the same live tracking issue, none hardcodes one', () => {
+    const html = findingsHtml(gappySummary({ trackingUrl: track }));
+    const cards = html.match(/<article class="finding">/g) ?? [];
+    const links =
+      html.match(/href="https:\/\/github\.com\/camunda\/api-test-generator\/issues\/700"/g) ?? [];
+    // one link per card: the single live index issue, nothing else
+    expect(cards.length).toBeGreaterThan(1);
+    expect(links.length).toBe(cards.length);
+    expect(html).not.toMatch(/\/issues\/6(1[89]|2[0-7])"/);
+  });
+
+  it('omits the issue tag on a local run with no tracking issue', () => {
+    const html = findingsHtml(gappySummary());
+    expect(html).toContain('<article class="finding">');
+    expect(html).not.toContain('/issues/');
+    expect(html).not.toContain('class="tag"');
+  });
+
+  // Integration: the workflow writes the live tracking URL into the report dir as issue-url.txt
+  // (the same file the Slack link reads). The page's main() must pick it up from there — it is
+  // never passed on the summary, because the audit that writes summary.json runs before the issue
+  // exists.
+  const renderReport = (withUrl: boolean): string => {
+    const dir = mkdtempSync(join(tmpdir(), 'cov-page-'));
+    try {
+      const summary = {
+        ...gappySummary(),
+        specHash: 'sha256:abc',
+        specRef: '63a4765abc',
+        operations: 1,
+        negativeTests: 10,
+        opsMissingResponseTest: 1,
+        fullyAsserted: 0,
+      };
+      const rows = [
+        {
+          operationId: 'createProject',
+          area: 'projects',
+          method: 'POST',
+          path: '/projects',
+          cells: { '2xx': 'ok', '409': 'gap' },
+          shape: 'ok',
+          optionalSent: 0,
+          optionalTotal: 0,
+          notes: [],
+          codeGap: true,
+          fullyTestedExcept403: false,
+        },
+      ];
+      writeFileSync(join(dir, 'summary.json'), JSON.stringify(summary));
+      writeFileSync(join(dir, 'rows.json'), JSON.stringify(rows));
+      if (withUrl) writeFileSync(join(dir, 'issue-url.txt'), `${track}\n`);
+      execFileSync('python3', ['-B', pageScript, '--report', dir, '--fragment'], {
+        encoding: 'utf8',
+      });
+      return readFileSync(join(dir, 'page.html'), 'utf8');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  };
+
+  it('reads the live tracking URL from issue-url.txt in the report dir', () => {
+    const html = renderReport(true);
+    expect(html).toContain('href="https://github.com/camunda/api-test-generator/issues/700"');
+    expect(html).toContain('#700');
+  });
+
+  it('renders no issue tag when the report dir has no issue-url.txt', () => {
+    const html = renderReport(false);
+    expect(html).toContain('<article class="finding">');
+    expect(html).not.toContain('/issues/');
+    expect(html).not.toContain('class="tag"');
   });
 });

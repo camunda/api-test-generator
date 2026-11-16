@@ -14,8 +14,6 @@ import html
 import json
 import os
 
-ISSUES = 'https://github.com/camunda/api-test-generator/issues/'
-EPIC = 618
 BUCKETS = (
     ('2xx', 'Success path'), ('400', 'Validation'), ('401', 'Authentication'),
     ('404', 'Resource not found'), ('403', 'Forbidden'), ('409', 'Conflict'),
@@ -115,8 +113,19 @@ def esc(x):
     return html.escape(str(x))
 
 
-def issue(*nums):
-    return ', '.join(f'<a href="{ISSUES}{n}" rel="noopener">#{n}</a>' for n in nums)
+def tracking_ref(s):
+    """Link to the live rolling tracking issue the weekly report maintains — open while any gap
+    exists, closed when none do. main() reads its URL from the report dir's issue-url.txt (written
+    by the workflow's summary-issue step, the same file the Slack link uses) into
+    summary['trackingUrl']. Empty on a local or dry run, where there is no issue to point at. Never
+    a hardcoded number: the old per-category epic issues were a one-time backlog that has since been
+    closed, so linking them pointed every gap card at a dead ticket."""
+    url = s.get('trackingUrl')
+    if not url:
+        return ''
+    num = url.rstrip('/').rsplit('/', 1)[-1]
+    label = f'#{num}' if num.isdigit() else 'tracking issue'
+    return f'<a href="{esc(url)}" rel="noopener">{label}</a>'
 
 
 def names(ops, limit=6):
@@ -155,34 +164,38 @@ def bar(b, label, got, doc, note):
 def findings(s):
     m, out = s['missing'], []
     if m['404']:
-        out.append(('Not found (404)', issue(619),
+        out.append(('Not found (404)',
                     f'Of the {s["codes"]["404"][1]} "not found" responses the spec lists, {len(m["404"])} have no test. Test generation '
                     f'only covers "not found" for GET requests. Untested: {names(m["404"])}.'))
     if m['409']:
-        out.append(('Conflict (409)', issue(620, 621),
+        out.append(('Conflict (409)',
                     f'{len(m["409"])} of {s["codes"]["409"][1]} endpoints that list a 409 (conflict) response have no test for it: {names(m["409"])}.'))
     if m['403']:
-        out.append(('Forbidden (403) on writes', issue(622),
+        out.append(('Forbidden (403) on writes',
                     f'A 403 is tested for {s["codes"]["403"][0]} of {s["codes"]["403"][1]} endpoints that list one. '
                     f'Hub checks 400, then 404, then 403, so a forbidden write test needs a real resource and a valid body.'))
     open400 = [o for o in m['400'] if o not in set(s['heldCells']['400'])]
     if open400:
-        out.append(('Bad request (400) with no test', issue(627),
+        out.append(('Bad request (400) with no test',
                     f'{names(open400)} list a 400 response that no test triggers.'))
     o_sent, o_total = s['optionalFields']
     if o_sent < o_total:
         fields = [f'{op}.{f}' for op, fs in sorted(s['optionalMissing'].items()) for f in fs]
-        out.append(('Optional request fields', issue(623, 624, 625),
+        out.append(('Optional request fields',
                     f'Success-path tests send {o_sent} of {o_total} optional body fields. Never sent: {names(fields, 8)}.'))
     if s['shapeUnvalidated']:
-        out.append(('Success response not checked', issue(626),
+        out.append(('Success response not checked',
                     f'{len(s["shapeUnvalidated"])} endpoints check the success status but never check the response body against '
                     f'its schema: {names(s["shapeUnvalidated"])}.'))
     if s['zeroTestOperations']:
-        out.append(('Endpoints with no test at all', issue(EPIC),
+        out.append(('Endpoints with no test at all',
                     f'{names([o + (" (known, tracked)" if o in set(s["trackedOperations"]) else "") for o in s["zeroTestOperations"]])}.'))
-    return ''.join(f'<article class="finding"><header><h3>{esc(t)}</h3><span class="tag">{ref}</span></header><p>{txt}</p></article>'
-                   for t, ref, txt in out)
+    # Every card points at the one live rolling tracking issue (open iff a gap exists), so the page can
+    # never link a closed ticket. Empty on a local run, where the tag is omitted entirely.
+    ref = tracking_ref(s)
+    tag = f'<span class="tag">{ref}</span>' if ref else ''
+    return ''.join(f'<article class="finding"><header><h3>{esc(t)}</h3>{tag}</header><p>{txt}</p></article>'
+                   for t, txt in out)
 
 
 def line_chart(title, values, fmt, color_var):
@@ -263,13 +276,15 @@ def render(s, rows, history=()):
     verdict = 'Every response the spec lists is tested for every endpoint (2xx/400/401/403/404/409; a documented 500 is not checked).' if s['fullyAsserted'] == s['operations'] else 'Not full.'
     fnd = findings(s)
     findings_html = f'<section aria-labelledby="gaps"><h2 id="gaps">Where the gaps are</h2><div class="findings">{fnd}</div></section>' if fnd else ''
+    t_ref = tracking_ref(s)
+    tracked = f'<span>tracked in {t_ref}</span>' if t_ref else ''
     return f"""<title>Hub Endpoint Coverage</title>
 <style>{CSS}</style>
 <main>
   <header>
     <h1>Hub endpoint coverage</h1>
     <p class="lede"><b>{verdict}</b> {c['2xx'][0]} of {c['2xx'][1]} endpoints have a success test, but only {s['fullyAsserted']} of {s['operations']} have a test for every response the spec lists (2xx/400/401/403/404/409; a documented 500 is not checked). {s['opsMissingResponseTest']} endpoints are missing a test for a success, 400, 401, 404 or 409 response, and {len(s['missing']['403'])} have an untested 403.</p>
-    <p class="meta"><span>camunda-hub@{esc(ref)}</span><span>{s['operations']} endpoints</span><span>{s['negativeTests']} negative tests</span><span>secured + rbac profiles</span><span>tracked in <a href="{ISSUES}{EPIC}" rel="noopener">#{EPIC}</a></span></p>
+    <p class="meta"><span>camunda-hub@{esc(ref)}</span><span>{s['operations']} endpoints</span><span>{s['negativeTests']} negative tests</span><span>secured + rbac profiles</span>{tracked}</p>
   </header>
   {trend_section(history)}
   <section aria-labelledby="codes"><h2 id="codes">Responses tested, out of those the spec lists</h2><ol class="bars">{bars}</ol></section>
@@ -322,6 +337,13 @@ def main():
     if os.path.exists(hist_path):
         with open(hist_path, newline='') as f:
             history = list(csv.DictReader(f))
+    # The live rolling tracking issue, written by the workflow's summary-issue step into the same
+    # report dir and used for the Slack link too, so the page and Slack point at the same issue.
+    # Absent on a local or dry run (no issue), where the gap cards carry no issue tag.
+    url_path = os.path.join(a.report, 'issue-url.txt')
+    if os.path.exists(url_path):
+        with open(url_path) as f:
+            s['trackingUrl'] = f.read().strip()
     out = a.out or os.path.join(a.report, 'page.html')
     page = render(s, rows, history)
     open(out, 'w', encoding='utf-8').write(page if a.fragment else as_document(page))
