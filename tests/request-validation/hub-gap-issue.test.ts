@@ -193,7 +193,12 @@ const SUMMARY = '[hub-response-coverage] Endpoints missing response or bad-reque
 const areaTitle = (a: string) =>
   `[hub-response-coverage] ${a}: missing response or bad-request tests`;
 
-type Existing = { number: number; title: string; state: 'OPEN' | 'CLOSED' };
+type Existing = {
+  number: number;
+  title: string;
+  state: 'OPEN' | 'CLOSED';
+  createdAt?: string;
+};
 
 /** Runs one of the issue scripts with a stub gh that records every call; returns calls + outputs. */
 function runIssueScript(
@@ -266,6 +271,7 @@ fi
     issueUrl: read('issue-url.txt').trim(),
     endpointIndex: read('endpoint-index.md').trim().split('\n').filter(Boolean),
     endpointIssues: ((raw) => (raw ? JSON.parse(raw) : undefined))(read('endpoint-issues.json')),
+    endpointAges: ((raw) => (raw ? JSON.parse(raw) : undefined))(read('endpoint-ages.json')),
     rendered: read('issue.rendered.md'),
     stderr: res.stderr,
   };
@@ -375,6 +381,25 @@ describe('per-endpoint issue lifecycle (stub gh)', () => {
       NO_HUB,
     );
     expect(r.endpointIssues).toEqual({ newOp: 101, openOp: 5, shutOp: 6 });
+  });
+
+  it('records how long each gap has been open in endpoint-ages.json', () => {
+    const daysAgo = (n: number) => new Date(Date.now() - n * 86_400_000).toISOString().slice(0, 10);
+    const r = runIssueScript(
+      'hub-coverage-endpoint-issues.sh',
+      endpointFiles('oldGap', 'newGap'),
+      [
+        {
+          number: 9,
+          title: endpointTitle('oldGap'),
+          state: 'OPEN',
+          createdAt: `${daysAgo(42)}T00:00:00Z`,
+        },
+      ],
+      NO_HUB,
+    );
+    // oldGap's issue has existed 42 days; newGap's issue is created this run, so its gap is 0 days old
+    expect(r.endpointAges).toEqual({ oldGap: 42, newGap: 0 });
   });
 
   it('assigns a newly created issue to the resolved endpoint author', () => {
@@ -1228,5 +1253,31 @@ describe('coverage report page — gap-card issue links', () => {
     expect(html).toContain('<details class="matrix">');
     // the summary names the full endpoint count so a reader knows the table is complete when opened
     expect(html).toMatch(/show all \d+ endpoints/);
+  });
+
+  it('shows how long each no-test gap has been open from endpoint-ages.json', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cov-age-'));
+    try {
+      const summary = {
+        ...gappySummary({ zeroTestOperations: ['g'], trackedOperations: [] }),
+        specHash: 'sha256:abc',
+        specRef: 'abc',
+        operations: 1,
+        negativeTests: 1,
+        opsMissingResponseTest: 0,
+        fullyAsserted: 0,
+      };
+      writeFileSync(join(dir, 'summary.json'), JSON.stringify(summary));
+      writeFileSync(join(dir, 'rows.json'), JSON.stringify([]));
+      // 42 days open → "open 6 weeks"; a gap opened this run (0) would read "new this week"
+      writeFileSync(join(dir, 'endpoint-ages.json'), JSON.stringify({ g: 42 }));
+      execFileSync('python3', ['-B', pageScript, '--report', dir, '--fragment'], {
+        encoding: 'utf8',
+      });
+      const html = readFileSync(join(dir, 'page.html'), 'utf8');
+      expect(html).toContain('<code>g</code> <span class="age">(open 6 weeks)</span>');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

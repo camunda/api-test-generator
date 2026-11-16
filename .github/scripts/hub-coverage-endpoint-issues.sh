@@ -86,7 +86,7 @@ assign_owner() {
 # warn loudly rather than degrade silently. (COVERAGE_ISSUE_LOOKUP_LIMIT lets a test force the cap.)
 lookup_limit="${COVERAGE_ISSUE_LOOKUP_LIMIT:-1000}"
 existing=$(gh issue list --state all --limit "$lookup_limit" --search "in:title \"$prefix\"" \
-  --json number,title,state)
+  --json number,title,state,createdAt)
 if [ "$(jq 'length' <<< "$existing")" -ge "$lookup_limit" ]; then
   echo "::warning::coverage-issue lookup hit the ${lookup_limit}-result cap; dedup and cleanup may be incomplete — split the search by area or state." >&2
 fi
@@ -95,13 +95,16 @@ current=$(mktemp)
 # operationId<TAB>issue-number, one line per endpoint that has an issue this run; folded into
 # endpoint-issues.json below.
 pairs=$(mktemp)
+# operationId<TAB>days-open, folded into endpoint-ages.json below so the page can show how long each
+# gap has been open (from its tracking issue's creation date).
+ages=$(mktemp)
 while read -r entry; do
   title=$(jq -r '.title' <<< "$entry")
   file=$(jq -r '.file' <<< "$entry")
   op=$(jq -r '.operationId' <<< "$entry")
   area=$(jq -r '.area' <<< "$entry")
   echo "$title" >> "$current"
-  found=$(jq -r --arg t "$title" '[.[] | select(.title == $t)] | sort_by(.state != "OPEN") | first // empty | "\(.number) \(.state)"' <<< "$existing")
+  found=$(jq -r --arg t "$title" '[.[] | select(.title == $t)] | sort_by(.state != "OPEN") | first // empty | "\(.number)\t\(.state)\t\(.createdAt)"' <<< "$existing")
   if [ -z "$found" ]; then
     if [ "$new" -ge "${MAX_NEW_ENDPOINT_ISSUES:-40}" ]; then
       echo "Cap reached: '$title' will be opened on a later run."
@@ -112,9 +115,10 @@ while read -r entry; do
       --label missing-coverage --label auto-generated --label hub --label team/hub)
     new=$((new + 1))
     assign_owner "${url##*/}" "$op"
+    # Freshly opened this run, so its gap is zero days old.
+    created="$today"
   else
-    num=${found% *}
-    state=${found#* }
+    IFS=$'\t' read -r num state created <<< "$found"
     [ "$state" = "OPEN" ] || gh issue reopen "$num"
     # Add team/hub on the edit path too, so a pre-existing open endpoint issue also lands on the Hub board.
     gh issue edit "$num" --body-file "$file" --add-label team/hub
@@ -123,11 +127,26 @@ while read -r entry; do
   fi
   printf -- '- [ ] #%s `%s` — %s\n' "${url##*/}" "$op" "$area" >> "$REPORT_DIR/endpoint-index.md"
   printf '%s\t%s\n' "$op" "${url##*/}" >> "$pairs"
+  # Days this endpoint's gap has been open, from its issue's creation date (0 for one opened this run).
+  # Robust to a bad/absent date: skip the age rather than fail the run.
+  created_day=${created%%T*}
+  c_epoch=$(date -u -d "${created_day:-$today}" +%s 2>/dev/null || true)
+  t_epoch=$(date -u -d "$today" +%s 2>/dev/null || true)
+  if [ -n "$c_epoch" ] && [ -n "$t_epoch" ]; then
+    days=$(( (t_epoch - c_epoch) / 86400 ))
+    [ "$days" -lt 0 ] && days=0
+    printf '%s\t%s\n' "$op" "$days" >> "$ages"
+  fi
 done < <(jq -c '.[]' "$REPORT_DIR/endpoints.json")
 
 # Fold the operationId -> issue-number pairs into endpoint-issues.json (an empty object when none).
 jq -R -s 'split("\n") | map(select(length > 0) | split("\t") | {(.[0]): (.[1] | tonumber)}) | add // {}' \
   "$pairs" > "$REPORT_DIR/endpoint-issues.json"
+
+# Fold operationId -> days-open into endpoint-ages.json (an empty object when none), for the page's
+# "open N weeks" labels.
+jq -R -s 'split("\n") | map(select(length > 0) | split("\t") | {(.[0]): (.[1] | tonumber)}) | add // {}' \
+  "$ages" > "$REPORT_DIR/endpoint-ages.json"
 
 # Close open per-endpoint issues whose endpoint no longer has a gap (the singular "test" suffix matches
 # only the per-endpoint issues, never the plural-"tests" summary or the old per-area issues).

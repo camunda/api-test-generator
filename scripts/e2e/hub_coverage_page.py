@@ -66,6 +66,7 @@ h3 { margin:0; font-size:1.02rem; letter-spacing:-.005em; }
 .finding { background:var(--panel); border:1px solid var(--rule); border-radius:3px; padding:20px 22px; display:flex; flex-direction:column; gap:10px; }
 .finding p { margin:0; color:var(--ink); font-size:.94rem; max-width:62ch; }
 .finding code { background:var(--wash); padding:1px 5px; }
+.finding .age { color:var(--muted); font-size:.85em; white-space:nowrap; }
 .finding.alert { border:1px solid var(--gap); border-left:5px solid var(--gap); background:var(--gap-wash); }
 .finding.alert h3 { color:var(--gap); }
 .finding.alert h3::before { content:"\\26A0  "; }
@@ -149,6 +150,32 @@ def names(ops, limit=6):
     return shown + (f' and {len(ops) - limit} more' if len(ops) > limit else '')
 
 
+def age_text(days):
+    """'open 6 weeks' / 'open 3 days' / 'new this week' from a day count, or '' when the age is unknown.
+    The manager question is how long a gap has sat unaddressed, so weeks are the unit once it is a week
+    old. `days` is how long the endpoint's tracking issue has been open (0 for one opened this run)."""
+    if days is None:
+        return ''
+    days = int(days)
+    if days >= 14:
+        return f'open {days // 7} weeks'
+    if days >= 7:
+        return 'open 1 week'
+    if days > 0:
+        return f'open {days} day' + ('s' if days != 1 else '')
+    return 'new this week'
+
+
+def names_aged(ops, ages, limit=6):
+    """Like names(), but annotates each endpoint with how long its gap has been open (from `ages`, an
+    operationId -> days-open map), so a stale gap is obvious next to a fresh one."""
+    def one(o):
+        lab = age_text(ages.get(o))
+        return f'<code>{esc(o)}</code>' + (f' <span class="age">({lab})</span>' if lab else '')
+    shown = ', '.join(one(o) for o in ops[:limit])
+    return shown + (f' and {len(ops) - limit} more' if len(ops) > limit else '')
+
+
 def cell(kind, tip):
     return f'<td class="c {kind}" title="{esc(tip)}"><span aria-label="{LABEL[kind]}">{GLYPH[kind]}</span></td>'
 
@@ -177,7 +204,8 @@ def bar(b, label, got, doc, note):
             f'<span class="bnum"><b>{got}</b> / {doc}</span></li>')
 
 
-def findings(s):
+def findings(s, ages=None):
+    ages = ages or {}
     m, out = s['missing'], []
     if m['404']:
         out.append(('Not found (404)',
@@ -216,10 +244,10 @@ def findings(s):
         known = [o for o in s['zeroTestOperations'] if o in tracked]
         if untracked:
             cards += ('<article class="finding alert"><h3>No test at all, and no tracking issue</h3>'
-                      f'<p>Nothing tests these endpoints and nothing tracks the gap: {names(untracked)}.</p></article>')
+                      f'<p>Nothing tests these endpoints and nothing tracks the gap: {names_aged(untracked, ages)}.</p></article>')
         if known:
             cards += ('<article class="finding warn"><h3>No test at all, tracked elsewhere</h3>'
-                      f'<p>No test yet, but the gap is known and tracked: {names(known)}.</p></article>')
+                      f'<p>No test yet, but the gap is known and tracked: {names_aged(known, ages)}.</p></article>')
     return cards
 
 
@@ -289,7 +317,7 @@ def trend_section(history):
             f'<div class="charts">{charts}</div></section>')
 
 
-def render(s, rows, history=()):
+def render(s, rows, history=(), ages=None):
     groups = {}
     for r in rows:
         groups.setdefault(r['path'].strip('/').split('/')[0], []).append(r)
@@ -317,7 +345,7 @@ def render(s, rows, history=()):
     bars = ''.join(bar(b, label, c[b][0], c[b][1], bar_note(b, s)) for b, label in BUCKETS)
     ref = (s.get('specRef') or '')[:7] or s['specHash'].replace('sha256:', '')[:7]
     verdict = 'Every response the spec lists is tested for every endpoint (2xx/400/401/403/404/409; a documented 500 is not checked).' if s['fullyAsserted'] == s['operations'] else 'Not full.'
-    fnd = findings(s)
+    fnd = findings(s, ages)
     t_ref = tracking_ref(s)
     # One tracking-issue link for the whole section, on the heading — not the same number on every card.
     gap_link = f'<span class="h2link">tracked in {t_ref}</span>' if t_ref else ''
@@ -391,8 +419,15 @@ def main():
     if os.path.exists(url_path):
         with open(url_path) as f:
             s['trackingUrl'] = f.read().strip()
+    # How long each endpoint's gap has been open (operationId -> days), written by the workflow's
+    # endpoint-issues step from each tracking issue's creation date. Absent on a local or dry run.
+    ages = {}
+    ages_path = os.path.join(a.report, 'endpoint-ages.json')
+    if os.path.exists(ages_path):
+        with open(ages_path) as f:
+            ages = json.load(f)
     out = a.out or os.path.join(a.report, 'page.html')
-    page = render(s, rows, history)
+    page = render(s, rows, history, ages)
     open(out, 'w', encoding='utf-8').write(page if a.fragment else as_document(page))
     print(f'wrote {out}')
 
