@@ -99,6 +99,13 @@ td.c { text-align:center; width:64px; font:700 1.1rem var(--mono); padding:13px 
 td.c.ok { color:var(--ok); } td.c.gap { color:var(--gap); background:var(--gap-wash); } td.c.hold { color:var(--hold); } td.c.na { color:var(--rule); font-weight:400; }
 td.frac span { font:700 .8rem var(--mono); font-variant-numeric:tabular-nums; }
 table.only-gaps tr[data-gap="0"] { display:none; }
+details.matrix > summary { cursor:pointer; list-style:none; display:flex; flex-wrap:wrap; align-items:baseline; gap:6px 14px; padding-bottom:12px; border-bottom:1px solid var(--ink); }
+details.matrix > summary::-webkit-details-marker { display:none; }
+details.matrix > summary::before { content:"\\25B8"; color:var(--muted); font-size:.72rem; margin-right:4px; }
+details.matrix[open] > summary::before { content:"\\25BE"; }
+details.matrix > summary .sumh { font:650 .78rem var(--sans); letter-spacing:.14em; text-transform:uppercase; color:var(--muted); }
+details.matrix > summary:hover .h2link a, details.matrix > summary .h2link { color:var(--focus); }
+details.matrix > .tools { margin-top:22px; }
 .method h2 { margin-bottom:12px; }
 .method ul { margin:0; padding-left:1.1em; display:flex; flex-direction:column; gap:7px; color:var(--muted); font-size:.9rem; max-width:80ch; }
 
@@ -324,12 +331,14 @@ def render(s, rows, history=()):
   <section aria-labelledby="codes"><h2 id="codes">Responses tested, out of those the spec lists</h2><ol class="bars">{bars}</ol></section>
   {findings_html}
   <section aria-labelledby="matrix">
-    <h2 id="matrix">Every endpoint</h2>
-    <div class="tools">
-      <div class="legend"><span><i class="k ok">●</i> tested</span><span><i class="k gap">×</i> in the spec, but no test</span><span><i class="k hold">◇</i> known and tracked elsewhere</span><span><i class="k na">n/a</i> the spec does not list it for this endpoint</span></div>
-      <label class="toggle"><input type="checkbox" id="onlygaps"> Only endpoints missing a response test (ignoring 403)</label>
-    </div>
-    <div class="scroll"><table id="mx"><thead><tr><th>Operation</th><th title="Success-path test">Success</th><th title="A test checks the success response against its schema">Response checked</th><th title="Optional request fields a success test sends">Optional fields</th><th title="Bad request">400</th><th title="Not authenticated">401</th><th title="Forbidden">403</th><th title="Not found">404</th><th title="Conflict">409</th></tr></thead>{''.join(body)}</table></div>
+    <details class="matrix">
+      <summary><span class="sumh">Every endpoint</span><span class="h2link">show all {s['operations']} endpoints and their per-code status</span></summary>
+      <div class="tools">
+        <div class="legend"><span><i class="k ok">●</i> tested</span><span><i class="k gap">×</i> in the spec, but no test</span><span><i class="k hold">◇</i> known and tracked elsewhere</span><span><i class="k na">n/a</i> the spec does not list it for this endpoint</span></div>
+        <label class="toggle"><input type="checkbox" id="onlygaps"> Only endpoints missing a response test (ignoring 403)</label>
+      </div>
+      <div class="scroll"><table id="mx"><thead><tr><th>Operation</th><th title="Success-path test">Success</th><th title="A test checks the success response against its schema">Response checked</th><th title="Optional request fields a success test sends">Optional fields</th><th title="Bad request">400</th><th title="Not authenticated">401</th><th title="Forbidden">403</th><th title="Not found">404</th><th title="Conflict">409</th></tr></thead>{''.join(body)}</table></div>
+    </details>
   </section>
   <section class="method" aria-labelledby="how">
     <h2 id="how">How this was measured</h2>

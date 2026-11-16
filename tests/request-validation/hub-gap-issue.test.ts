@@ -1221,4 +1221,11 @@ describe('coverage report page — gap-card issue links', () => {
     expect(html).toContain('Where the gaps are');
     expect(html).not.toContain('/issues/');
   });
+
+  it('collapses the full per-endpoint table behind a details toggle naming the count', () => {
+    const html = renderReport(true);
+    expect(html).toContain('<details class="matrix">');
+    // the summary names the full endpoint count so a reader knows the table is complete when opened
+    expect(html).toMatch(/show all \d+ endpoints/);
+  });
 });
