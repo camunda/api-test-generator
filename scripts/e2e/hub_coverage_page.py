@@ -23,19 +23,19 @@ LABEL = {'ok': 'tested', 'gap': 'in the spec, but no test', 'hold': 'known and t
 CSS = """
 :root {
   --ground:#F4F7F8; --panel:#FFFFFF; --ink:#12232B; --muted:#566872; --rule:#D6DFE3; --wash:#EAF0F2;
-  --ok:#0B7A75; --gap:#B83A2B; --hold:#8A5E00; --gap-wash:#FBEDEA; --focus:#1F5FBF;
+  --ok:#0B7A75; --gap:#B83A2B; --hold:#8A5E00; --gap-wash:#FBEDEA; --hold-wash:#FBF3DF; --focus:#1F5FBF;
   --sans:"Avenir Next","Segoe UI",system-ui,-apple-system,"Helvetica Neue",sans-serif;
   --mono:ui-monospace,"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     --ground:#0E181D; --panel:#14232A; --ink:#E3ECEF; --muted:#8FA3AC; --rule:#26383F; --wash:#1A2D35;
-    --ok:#46C2B8; --gap:#F0806F; --hold:#E0B04A; --gap-wash:#2A1D1C; --focus:#7AA8F0;
+    --ok:#46C2B8; --gap:#F0806F; --hold:#E0B04A; --gap-wash:#2A1D1C; --hold-wash:#2A2512; --focus:#7AA8F0;
   }
 }
 :root[data-theme="dark"] {
   --ground:#0E181D; --panel:#14232A; --ink:#E3ECEF; --muted:#8FA3AC; --rule:#26383F; --wash:#1A2D35;
-  --ok:#46C2B8; --gap:#F0806F; --hold:#E0B04A; --gap-wash:#2A1D1C; --focus:#7AA8F0;
+  --ok:#46C2B8; --gap:#F0806F; --hold:#E0B04A; --gap-wash:#2A1D1C; --hold-wash:#2A2512; --focus:#7AA8F0;
 }
 * { box-sizing:border-box; }
 body { margin:0; background:var(--ground); color:var(--ink); font:16px/1.55 var(--sans); }
@@ -69,6 +69,9 @@ h3 { margin:0; font-size:1.02rem; letter-spacing:-.005em; }
 .finding.alert { border:1px solid var(--gap); border-left:5px solid var(--gap); background:var(--gap-wash); }
 .finding.alert h3 { color:var(--gap); }
 .finding.alert h3::before { content:"\\26A0  "; }
+.finding.warn { border:1px solid var(--hold); border-left:5px solid var(--hold); background:var(--hold-wash); }
+.finding.warn h3 { color:var(--hold); }
+.finding.warn h3::before { content:"\\25C7  "; }
 .h2link { margin-left:12px; font:400 .72rem var(--mono); text-transform:none; letter-spacing:0; }
 .h2link a { color:var(--focus); }
 
@@ -205,17 +208,18 @@ def findings(s):
     # serious gap, so it carries an alert style instead of blending in with the rest.
     cards = ''.join(f'<article class="finding"><h3>{esc(t)}</h3><p>{txt}</p></article>'
                     for t, txt in out)
+    # No test at all, split by severity: an untracked gap is unexplained (red); a known/tracked gap is
+    # expected and parked (amber). Colour carries the distinction so the serious one is obvious.
     if s['zeroTestOperations']:
         tracked = set(s['trackedOperations'])
         untracked = [o for o in s['zeroTestOperations'] if o not in tracked]
         known = [o for o in s['zeroTestOperations'] if o in tracked]
-        body = ''
         if untracked:
-            body += f'<strong>No test and no tracking issue:</strong> {names(untracked)}.'
+            cards += ('<article class="finding alert"><h3>No test at all, and no tracking issue</h3>'
+                      f'<p>Nothing tests these endpoints and nothing tracks the gap: {names(untracked)}.</p></article>')
         if known:
-            body += (' ' if body else '') + f'Known, tracked elsewhere: {names(known)}.'
-        cards += (f'<article class="finding alert"><h3>Endpoints with no test at all</h3>'
-                  f'<p>{body}</p></article>')
+            cards += ('<article class="finding warn"><h3>No test at all, tracked elsewhere</h3>'
+                      f'<p>No test yet, but the gap is known and tracked: {names(known)}.</p></article>')
     return cards
 
 

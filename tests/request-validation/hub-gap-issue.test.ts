@@ -1149,16 +1149,17 @@ describe('coverage report page — gap-card issue links', () => {
     expect(html).not.toMatch(/\/issues\/6(1[89]|2[0-7])/);
   });
 
-  it('flags the no-test card as an alert and names untracked vs tracked endpoints', () => {
+  it('splits no-test endpoints into a red untracked card and an amber tracked card', () => {
     const html = findingsHtml(
       gappySummary({ zeroTestOperations: ['g', 'h'], trackedOperations: ['h'] }),
     );
+    // the untracked (serious) gap is the red alert card
     expect(html).toContain('<article class="finding alert">');
-    expect(html).toContain('Endpoints with no test at all');
-    // the untracked endpoint is the serious one; the tracked one is named separately and calmly
-    expect(html).toContain('No test and no tracking issue:');
+    expect(html).toContain('No test at all, and no tracking issue');
     expect(html).toContain('<code>g</code>');
-    expect(html).toContain('Known, tracked elsewhere:');
+    // the known/tracked gap is a separate amber (warn) card
+    expect(html).toContain('<article class="finding warn">');
+    expect(html).toContain('No test at all, tracked elsewhere');
     expect(html).toContain('<code>h</code>');
   });
 
