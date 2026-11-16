@@ -10,7 +10,7 @@
   },
   "optionalFieldsSent": 71,
   "requestChecksCovered": 38,
-  "fullyAssertedOperations": 61,
+  "fullyAssertedOperations": 62,
   "lifecycleCreateCovered": 6,
   "lifecycleRestoreCovered": 4,
   "lifecycleEdgeCovered": 1,
