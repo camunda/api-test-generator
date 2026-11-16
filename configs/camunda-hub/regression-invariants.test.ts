@@ -617,11 +617,14 @@ describeForThisConfig('camunda-hub bundled-spec invariants (#128)', () => {
         if (!isRecord(step) || !isRecord(step.body)) continue;
         for (const [field, value] of Object.entries(step.body)) {
           const ref = typeof value === 'string' ? /^\$\{(\w+)\}$/.exec(value) : null;
-          const rendered = ref ? `ctx.${ref[1]}` : JSON.stringify(value).replaceAll('"', "'");
-          expect(
-            sequenceTest.replaceAll('"', "'"),
-            `${id}: the ${String(step.operationId)} body override ${field} is not in the generated request`,
-          ).toContain(`${field}: ${rendered}`);
+          const message = `${id}: the ${String(step.operationId)} body override ${field} is not in the generated request`;
+          if (ref) {
+            expect(sequenceTest, message).toContain(`${field}: ctx.${ref[1]}`);
+          } else {
+            // Same normalization as chainBodies: a long value (a template's JSON content) may be
+            // wrapped onto its own line and emitted with escaped quotes.
+            expect(assignsValue(sequenceTest, field, value), message).toBe(true);
+          }
         }
       }
     }
