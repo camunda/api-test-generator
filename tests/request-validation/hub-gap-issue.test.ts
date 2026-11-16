@@ -1141,33 +1141,25 @@ describe('coverage report page — gap-card issue links', () => {
 
   const track = 'https://github.com/camunda/api-test-generator/issues/700';
 
-  it('links the live tracking issue, never a hardcoded issue number', () => {
+  it('gap cards carry no per-card issue link (the link lives once on the section heading)', () => {
     const html = findingsHtml(gappySummary({ trackingUrl: track }));
-    // the live rolling index issue, shown as #700
-    expect(html).toContain('href="https://github.com/camunda/api-test-generator/issues/700"');
-    expect(html).toContain('#700');
-    // the old hardcoded epic (#618) and its sub-issues (#619–#627) must be gone
-    for (const dead of [618, 619, 620, 621, 622, 623, 624, 625, 626, 627]) {
-      expect(html).not.toContain(`/issues/${dead}"`);
-    }
-  });
-
-  it('every gap card points at the same live tracking issue, none hardcodes one', () => {
-    const html = findingsHtml(gappySummary({ trackingUrl: track }));
-    const cards = html.match(/<article class="finding">/g) ?? [];
-    const links =
-      html.match(/href="https:\/\/github\.com\/camunda\/api-test-generator\/issues\/700"/g) ?? [];
-    // one link per card: the single live index issue, nothing else
-    expect(cards.length).toBeGreaterThan(1);
-    expect(links.length).toBe(cards.length);
-    expect(html).not.toMatch(/\/issues\/6(1[89]|2[0-7])"/);
-  });
-
-  it('omits the issue tag on a local run with no tracking issue', () => {
-    const html = findingsHtml(gappySummary());
-    expect(html).toContain('<article class="finding">');
+    expect(html).toContain('<article class="finding"');
+    // no issue number is repeated on the cards, and the old hardcoded epic must never appear
     expect(html).not.toContain('/issues/');
-    expect(html).not.toContain('class="tag"');
+    expect(html).not.toMatch(/\/issues\/6(1[89]|2[0-7])/);
+  });
+
+  it('flags the no-test card as an alert and names untracked vs tracked endpoints', () => {
+    const html = findingsHtml(
+      gappySummary({ zeroTestOperations: ['g', 'h'], trackedOperations: ['h'] }),
+    );
+    expect(html).toContain('<article class="finding alert">');
+    expect(html).toContain('Endpoints with no test at all');
+    // the untracked endpoint is the serious one; the tracked one is named separately and calmly
+    expect(html).toContain('No test and no tracking issue:');
+    expect(html).toContain('<code>g</code>');
+    expect(html).toContain('Known, tracked elsewhere:');
+    expect(html).toContain('<code>h</code>');
   });
 
   // Integration: the workflow writes the live tracking URL into the report dir as issue-url.txt
@@ -1213,16 +1205,20 @@ describe('coverage report page — gap-card issue links', () => {
     }
   };
 
-  it('reads the live tracking URL from issue-url.txt in the report dir', () => {
+  it('links the live tracking issue once, on the gaps heading, never a hardcoded one', () => {
     const html = renderReport(true);
-    expect(html).toContain('href="https://github.com/camunda/api-test-generator/issues/700"');
+    const links =
+      html.match(/href="https:\/\/github\.com\/camunda\/api-test-generator\/issues\/700"/g) ?? [];
+    // exactly one link for the whole section, not one per card
+    expect(links.length).toBe(1);
+    expect(html).toContain('Where the gaps are');
     expect(html).toContain('#700');
+    expect(html).not.toMatch(/\/issues\/6(1[89]|2[0-7])/);
   });
 
-  it('renders no issue tag when the report dir has no issue-url.txt', () => {
+  it('omits the tracking link when the report dir has no issue-url.txt', () => {
     const html = renderReport(false);
-    expect(html).toContain('<article class="finding">');
+    expect(html).toContain('Where the gaps are');
     expect(html).not.toContain('/issues/');
-    expect(html).not.toContain('class="tag"');
   });
 });

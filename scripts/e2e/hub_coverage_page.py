@@ -62,12 +62,15 @@ h3 { margin:0; font-size:1.02rem; letter-spacing:-.005em; }
 .bnum b { color:var(--ink); font-size:1.05rem; }
 @media (max-width:720px) { .bar { grid-template-columns:44px 1fr 70px; } .track { grid-column:1 / -1; order:5; } }
 
-.findings { display:grid; grid-template-columns:repeat(auto-fit,minmax(340px,1fr)); gap:18px; }
-.finding { background:var(--panel); border:1px solid var(--rule); padding:20px 22px; display:flex; flex-direction:column; gap:10px; }
-.finding header { display:flex; justify-content:space-between; align-items:baseline; gap:12px; }
+.findings { display:grid; grid-template-columns:repeat(auto-fit,minmax(320px,1fr)); gap:18px; }
+.finding { background:var(--panel); border:1px solid var(--rule); border-radius:3px; padding:20px 22px; display:flex; flex-direction:column; gap:10px; }
 .finding p { margin:0; color:var(--ink); font-size:.94rem; max-width:62ch; }
 .finding code { background:var(--wash); padding:1px 5px; }
-.tag { font:.7rem var(--mono); letter-spacing:.05em; text-transform:uppercase; color:var(--muted); white-space:nowrap; border:1px solid var(--rule); padding:2px 7px; }
+.finding.alert { border:1px solid var(--gap); border-left:5px solid var(--gap); background:var(--gap-wash); }
+.finding.alert h3 { color:var(--gap); }
+.finding.alert h3::before { content:"\\26A0  "; }
+.h2link { margin-left:12px; font:400 .72rem var(--mono); text-transform:none; letter-spacing:0; }
+.h2link a { color:var(--focus); }
 
 .tools { display:flex; flex-wrap:wrap; gap:14px 28px; align-items:center; justify-content:space-between; margin-bottom:14px; }
 .legend { display:flex; flex-wrap:wrap; gap:6px 20px; font-size:.84rem; color:var(--muted); }
@@ -81,31 +84,34 @@ h3 { margin:0; font-size:1.02rem; letter-spacing:-.005em; }
 table { width:100%; border-collapse:collapse; min-width:860px; }
 thead th { position:sticky; top:0; background:var(--panel); z-index:2; font:650 .72rem var(--mono); letter-spacing:.06em; text-transform:uppercase; color:var(--muted); padding:12px 8px; text-align:center; border-bottom:1px solid var(--ink); }
 thead th:first-child { text-align:left; padding-left:20px; }
-tbody th[scope=row] { text-align:left; font-weight:400; padding:9px 12px 9px 20px; }
+tbody th[scope=row] { text-align:left; font-weight:400; padding:13px 12px 13px 20px; }
+tbody tr:hover th[scope=row], tbody tr:hover td.c:not(.gap) { background:var(--wash); }
 .opc { display:flex; flex-wrap:wrap; align-items:baseline; gap:2px 10px; }
 tr { border-top:1px solid var(--rule); }
-.grp td { background:var(--wash); padding:9px 20px; font-size:.82rem; border-top:1px solid var(--rule); }
-.gname { font:650 .88rem var(--mono); margin-right:14px; }
-.gcount { color:var(--muted); }
+.grp td { background:var(--wash); padding:11px 20px; border-top:2px solid var(--ink); }
+.gname { font:700 .92rem var(--mono); color:var(--ink); margin-right:14px; }
+.gcount { color:var(--muted); font-size:.82rem; }
 .m { font:700 .64rem var(--mono); letter-spacing:.04em; color:var(--muted); width:44px; }
-.op { font-weight:600; font-size:.88rem; }
+.op { font-weight:600; font-size:.9rem; }
 .path { font:.74rem var(--mono); color:var(--muted); flex-basis:100%; padding-left:54px; }
 .note { flex-basis:100%; padding-left:54px; font-size:.76rem; color:var(--hold); }
-td.c { text-align:center; width:64px; font:700 1rem var(--mono); }
+td.c { text-align:center; width:64px; font:700 1.1rem var(--mono); padding:13px 8px; }
 td.c.ok { color:var(--ok); } td.c.gap { color:var(--gap); background:var(--gap-wash); } td.c.hold { color:var(--hold); } td.c.na { color:var(--rule); font-weight:400; }
 td.frac span { font:700 .8rem var(--mono); font-variant-numeric:tabular-nums; }
 table.only-gaps tr[data-gap="0"] { display:none; }
 .method h2 { margin-bottom:12px; }
 .method ul { margin:0; padding-left:1.1em; display:flex; flex-direction:column; gap:7px; color:var(--muted); font-size:.9rem; max-width:80ch; }
 
-.charts { display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:18px; }
-.chart { margin:0; background:var(--panel); border:1px solid var(--rule); padding:16px 18px; }
-.chart figcaption { font:600 .9rem var(--sans); margin-bottom:10px; }
+.charts { display:grid; grid-template-columns:repeat(auto-fit,minmax(340px,1fr)); gap:18px; }
+.chart { margin:0; background:var(--panel); border:1px solid var(--rule); border-radius:3px; padding:18px 20px 12px; }
+.chart figcaption { font:600 .95rem var(--sans); color:var(--ink); margin-bottom:6px; }
 .chart svg { width:100%; height:auto; display:block; overflow:visible; }
-.chart .axis { stroke:var(--rule); stroke-width:1; }
-.chart .series { fill:none; stroke-width:2; stroke-linejoin:round; stroke-linecap:round; }
-.chart text { font:600 .62rem var(--mono); fill:var(--muted); }
-.chart text.last { fill:var(--ink); font-size:.82rem; }
+.chart .axis { stroke:var(--rule); stroke-width:1.5; }
+.chart .series { fill:none; stroke-width:2.5; stroke-linejoin:round; stroke-linecap:round; }
+.chart .area { opacity:.10; }
+.chart text { font:600 .74rem var(--mono); fill:var(--muted); }
+.chart text.last { fill:var(--ink); font-size:.9rem; font-weight:700; }
+.chart text.date { fill:var(--muted); font-size:.72rem; }
 """
 
 
@@ -138,19 +144,19 @@ def cell(kind, tip):
 
 
 def bar_note(b, s):
+    """One line under each status-code bar, naming the endpoints that are missing it (not just a count),
+    so the bar is actionable at a glance. Tracked/suppressed endpoints are named separately."""
     miss, held = s['missing'][b], set(s['heldCells'][b])
     tracked = [o for o in miss if o in held]
     open_ = [o for o in miss if o not in held]
     if not miss:
-        return 'Every response the spec lists is tested.'
-    if b in ('404', '403', '409'):
-        return f'{len(miss)} of {s["codes"][b][1]} endpoints that list a {b} have no test for it.'
+        return 'Every endpoint that can return this is tested.'
     parts = []
     if open_:
-        parts.append('Untested: ' + names(open_, 3) + '.')
+        parts.append('Untested: ' + names(open_))
     if tracked:
-        parts.append('Suppressed or excluded: ' + names(tracked, 3) + '.')
-    return ' '.join(parts)
+        parts.append('Suppressed or excluded: ' + names(tracked))
+    return ' · '.join(parts)
 
 
 def bar(b, label, got, doc, note):
@@ -187,41 +193,60 @@ def findings(s):
         out.append(('Success response not checked',
                     f'{len(s["shapeUnvalidated"])} endpoints check the success status but never check the response body against '
                     f'its schema: {names(s["shapeUnvalidated"])}.'))
+    # The single live tracking issue is linked once on the section heading (see render), not on every
+    # card — one link, not the same number repeated down the page. The "no test at all" card is the most
+    # serious gap, so it carries an alert style instead of blending in with the rest.
+    cards = ''.join(f'<article class="finding"><h3>{esc(t)}</h3><p>{txt}</p></article>'
+                    for t, txt in out)
     if s['zeroTestOperations']:
-        out.append(('Endpoints with no test at all',
-                    f'{names([o + (" (known, tracked)" if o in set(s["trackedOperations"]) else "") for o in s["zeroTestOperations"]])}.'))
-    # Every card points at the one live rolling tracking issue (open iff a gap exists), so the page can
-    # never link a closed ticket. Empty on a local run, where the tag is omitted entirely.
-    ref = tracking_ref(s)
-    tag = f'<span class="tag">{ref}</span>' if ref else ''
-    return ''.join(f'<article class="finding"><header><h3>{esc(t)}</h3>{tag}</header><p>{txt}</p></article>'
-                   for t, txt in out)
+        tracked = set(s['trackedOperations'])
+        untracked = [o for o in s['zeroTestOperations'] if o not in tracked]
+        known = [o for o in s['zeroTestOperations'] if o in tracked]
+        body = ''
+        if untracked:
+            body += f'<strong>No test and no tracking issue:</strong> {names(untracked)}.'
+        if known:
+            body += (' ' if body else '') + f'Known, tracked elsewhere: {names(known)}.'
+        cards += (f'<article class="finding alert"><h3>Endpoints with no test at all</h3>'
+                  f'<p>{body}</p></article>')
+    return cards
 
 
-def line_chart(title, values, fmt, color_var):
-    """A small self-contained inline-SVG line chart: a polyline over `values`, a baseline axis, the
-    min/max called out on the left, and the latest value labelled. Stroke colour comes from a CSS var so
-    dark mode works. `fmt(v)` renders a value for the labels. '' with fewer than two points."""
+def line_chart(title, dates, values, fmt, color_var):
+    """A readable inline-SVG line chart: a faint area fill, a dot and a value label at every report, the
+    first and last report dates on the x-axis, and the current value emphasised. Colour comes from a CSS
+    var so dark mode works. `fmt(v)` renders a value for the labels. '' with fewer than two points."""
     if len(values) < 2:
         return ''
-    w, h, pad = 320, 120, 26
+    w, h, padx, ptop, pbot = 460, 210, 46, 30, 44
     lo, hi = min(values), max(values)
     span = (hi - lo) or 1
-    iw, ih = w - 2 * pad, h - 2 * pad
-    xy = [(pad + i * iw / (len(values) - 1), h - pad - (v - lo) / span * ih) for i, v in enumerate(values)]
-    pts = ' '.join(f'{x:.1f},{y:.1f}' for x, y in xy)
-    lx, ly = xy[-1]
+    iw, ih = w - 2 * padx, h - ptop - pbot
+    xs = [padx + i * iw / (len(values) - 1) for i in range(len(values))]
+    ys = [ptop + ih - (v - lo) / span * ih for v in values]
+    base = ptop + ih
+    pts = ' '.join(f'{x:.1f},{y:.1f}' for x, y in zip(xs, ys))
+    area = f'{xs[0]:.1f},{base:.1f} {pts} {xs[-1]:.1f},{base:.1f}'
+    dots = ''.join(f'<circle style="fill:var({color_var})" cx="{x:.1f}" cy="{y:.1f}" r="4"></circle>'
+                   for x, y in zip(xs, ys))
+    show = range(len(values)) if len(values) <= 6 else (0, len(values) - 1)
+    labels = ''
+    for i in show:
+        cls = ' class="last"' if i == len(values) - 1 else ''
+        labels += (f'<text{cls} x="{xs[i]:.1f}" y="{ys[i] - 11:.1f}" '
+                   f'text-anchor="middle">{esc(fmt(values[i]))}</text>')
+    axis = ''
+    if dates:
+        axis = (f'<text class="date" x="{xs[0]:.1f}" y="{h - 12}" text-anchor="start">{esc(dates[0])}</text>'
+                f'<text class="date" x="{xs[-1]:.1f}" y="{h - 12}" text-anchor="end">{esc(dates[-1])}</text>')
     return (
         f'<figure class="chart"><figcaption>{esc(title)}</figcaption>'
         f'<svg viewBox="0 0 {w} {h}" role="img" '
         f'aria-label="{esc(title)}: {esc(fmt(values[0]))} to {esc(fmt(values[-1]))} over {len(values)} reports">'
-        f'<line class="axis" x1="{pad}" y1="{h - pad}" x2="{w - pad}" y2="{h - pad}"></line>'
+        f'<polygon class="area" style="fill:var({color_var})" points="{area}"></polygon>'
+        f'<line class="axis" x1="{xs[0]:.1f}" y1="{base:.1f}" x2="{xs[-1]:.1f}" y2="{base:.1f}"></line>'
         f'<polyline class="series" style="stroke:var({color_var})" points="{pts}"></polyline>'
-        f'<circle style="fill:var({color_var})" cx="{lx:.1f}" cy="{ly:.1f}" r="3"></circle>'
-        f'<text x="{pad}" y="{pad - 10}">{esc(fmt(hi))}</text>'
-        f'<text x="{pad}" y="{h - pad + 15}">{esc(fmt(lo))}</text>'
-        f'<text class="last" x="{lx:.1f}" y="{ly - 8:.1f}" text-anchor="end">{esc(fmt(values[-1]))}</text>'
-        f'</svg></figure>')
+        f'{dots}{labels}{axis}</svg></figure>')
 
 
 def trend_section(history):
@@ -230,16 +255,23 @@ def trend_section(history):
     trend). A column an older history row never recorded is skipped for that chart, not guessed."""
     if len(history) < 2:
         return ''
-    pct, notest = [], []
+
+    def short(d):
+        return d[5:] if d and len(d) >= 10 and d[4] == '-' else d
+
+    pct_d, pct_v, nt_d, nt_v = [], [], [], []
     for r in history:
+        d = short(r.get('date', ''))
         fa, ops = r.get('fullyAsserted'), r.get('operations')
         if fa not in (None, '') and ops not in (None, '') and int(ops):
-            pct.append(100 * int(fa) / int(ops))
+            pct_d.append(d)
+            pct_v.append(100 * int(fa) / int(ops))
         z = r.get('zeroTestOperations')
         if z not in (None, ''):
-            notest.append(int(z))
-    charts = (line_chart('% of endpoints tested for every status code', pct, lambda v: f'{v:.0f}%', '--ok')
-              + line_chart('Endpoints with no test at all', notest, lambda v: f'{v:.0f}', '--gap'))
+            nt_d.append(d)
+            nt_v.append(int(z))
+    charts = (line_chart('% of endpoints tested for every status code', pct_d, pct_v, lambda v: f'{v:.0f}%', '--ok')
+              + line_chart('Endpoints with no test at all', nt_d, nt_v, lambda v: f'{v:.0f}', '--gap'))
     if not charts:
         return ''
     return ('<section aria-labelledby="trend"><h2 id="trend">Coverage trend</h2>'
@@ -275,16 +307,18 @@ def render(s, rows, history=()):
     ref = (s.get('specRef') or '')[:7] or s['specHash'].replace('sha256:', '')[:7]
     verdict = 'Every response the spec lists is tested for every endpoint (2xx/400/401/403/404/409; a documented 500 is not checked).' if s['fullyAsserted'] == s['operations'] else 'Not full.'
     fnd = findings(s)
-    findings_html = f'<section aria-labelledby="gaps"><h2 id="gaps">Where the gaps are</h2><div class="findings">{fnd}</div></section>' if fnd else ''
     t_ref = tracking_ref(s)
-    tracked = f'<span>tracked in {t_ref}</span>' if t_ref else ''
+    # One tracking-issue link for the whole section, on the heading — not the same number on every card.
+    gap_link = f'<span class="h2link">tracked in {t_ref}</span>' if t_ref else ''
+    findings_html = (f'<section aria-labelledby="gaps"><h2 id="gaps">Where the gaps are{gap_link}</h2>'
+                     f'<div class="findings">{fnd}</div></section>') if fnd else ''
     return f"""<title>Hub Endpoint Coverage</title>
 <style>{CSS}</style>
 <main>
   <header>
     <h1>Hub endpoint coverage</h1>
     <p class="lede"><b>{verdict}</b> {c['2xx'][0]} of {c['2xx'][1]} endpoints have a success test, but only {s['fullyAsserted']} of {s['operations']} have a test for every response the spec lists (2xx/400/401/403/404/409; a documented 500 is not checked). {s['opsMissingResponseTest']} endpoints are missing a test for a success, 400, 401, 404 or 409 response, and {len(s['missing']['403'])} have an untested 403.</p>
-    <p class="meta"><span>camunda-hub@{esc(ref)}</span><span>{s['operations']} endpoints</span><span>{s['negativeTests']} negative tests</span><span>secured + rbac profiles</span>{tracked}</p>
+    <p class="meta"><span>camunda-hub@{esc(ref)}</span><span>{s['operations']} endpoints</span><span>{s['negativeTests']} negative tests</span><span>secured + rbac profiles</span></p>
   </header>
   {trend_section(history)}
   <section aria-labelledby="codes"><h2 id="codes">Responses tested, out of those the spec lists</h2><ol class="bars">{bars}</ol></section>
