@@ -1,5 +1,6 @@
 import type { OperationModel, ValidationScenario } from '../model/types.js';
-import { buildBaselineBody, synthesizeBaseline } from '../schema/baseline.js';
+import { buildBaselineBody } from '../schema/baseline.js';
+import { synthesizeValid, validItems } from '../schema/validValue.js';
 import { buildWalk, type WalkNode } from '../schema/walker.js';
 import { type CapabilityGateInfo, isBlankValue } from '../util/capabilityGate.js';
 import { buildGuaranteedPatternMismatch } from '../util/patternMismatch.js';
@@ -183,17 +184,15 @@ function planConstraintMutations(
     if (typeof cons.minItems === 'number' && cons.minItems > 0)
       out.push({ kind: 'belowMinItems', value: [] });
     if (typeof cons.maxItems === 'number') {
-      // Valid items, so the item count is the only thing wrong with the array.
-      const maxItems = cons.maxItems;
-      const item = () => (node.items ? synthesizeBaseline(node.items, MINIMAL) : 1);
-      out.push({
-        kind: 'aboveMaxItems',
-        value: Array.from({ length: maxItems + 1 }, item),
-      });
-      out.push({
-        kind: 'wayAboveMaxItems',
-        value: Array.from({ length: maxItems + 5 }, item),
-      });
+      // Valid (and, under uniqueItems, distinct) items, so the item count is the only thing wrong with the array. No
+      // mutation when such items cannot be built: a 400 for a bad item would hide a server that ignores maxItems.
+      for (const [kind, length] of [
+        ['aboveMaxItems', cons.maxItems + 1],
+        ['wayAboveMaxItems', cons.maxItems + 5],
+      ] as const) {
+        const value = node.items ? validItems(node, length) : Array.from({ length }, () => 1);
+        if (value) out.push({ kind, value });
+      }
     }
   }
   return out; // no slice; allow expansion
@@ -220,12 +219,9 @@ function findPathFromRoot(root: WalkNode, node: WalkNode): string[] | undefined 
 
 /**
  * Set `value` at `path` (a property name, or '0' for an array's first item). An optional field the baseline left out,
- * and any parent on the way to it, is added first with a valid value for its schema node, so a constraint on an
- * optional field or on an array item can still be broken on its own.
+ * and any parent on the way to it, is added first with a value that meets its own constraints (required fields only,
+ * `minItems` items), so only the target is invalid. Returns false, skipping the case, when no such value exists.
  */
-// Values built only to reach the targeted field: required fields only, so nothing but the target is invalid.
-const MINIMAL = { requiredOnly: true };
-
 function applyAtPath(obj: unknown, root: WalkNode, path: string[], value: unknown): boolean {
   let target: unknown = obj;
   let node = root;
@@ -238,7 +234,11 @@ function applyAtPath(obj: unknown, root: WalkNode, path: string[], value: unknow
         target[0] = value;
         return true;
       }
-      if (target.length === 0) target.push(synthesizeBaseline(node.items, MINIMAL));
+      if (target.length === 0) {
+        const item = synthesizeValid(node.items);
+        if (item === undefined) return false;
+        target.push(item);
+      }
       node = node.items;
       target = target[0];
     } else if (isObject(target)) {
@@ -248,7 +248,11 @@ function applyAtPath(obj: unknown, root: WalkNode, path: string[], value: unknow
         target[seg] = value;
         return true;
       }
-      if (!(seg in target)) target[seg] = synthesizeBaseline(child, MINIMAL);
+      if (!(seg in target)) {
+        const built = synthesizeValid(child);
+        if (built === undefined) return false;
+        target[seg] = built;
+      }
       node = child;
       target = target[seg];
     } else {
