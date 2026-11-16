@@ -277,6 +277,9 @@ function loadRules() {
         match: /(key|id)$/i,
         gen: (n, e) => `${n}-${e.runId}-${e.counter('id')}-${e.random().slice(0, 6)}`,
       },
+      // A plain `name` field: lowercase letters, digits and `_` only, so the value also
+      // matches identifier-style patterns such as Hub credential names (^[a-z_][a-z0-9_]*$).
+      { match: /^nameVar$/, gen: (_n, e) => `name_${e.random().slice(0, 8)}` },
       { match: /name/i, gen: (n, e) => `${n}-${e.random().slice(0, 8)}` },
       { match: () => true, gen: (n, e) => `${n}-${e.random().slice(0, 6)}` },
     ];
