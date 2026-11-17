@@ -57,6 +57,12 @@ describe('constraint-violation applicability matches what the generator builds',
     );
   });
 
+  it('keeps a required maxLength field eligible and generates a scenario for it', () => {
+    const required = CASES[1][1];
+    expect(isConstraintViolationEligible(required, {})).toBe(true);
+    expect(generateConstraintViolations([required], {}).length).toBeGreaterThan(0);
+  });
+
   it('does not flag a search body whose only limits sit in the page oneOf', () => {
     expect(isConstraintViolationEligible(CASES[0][1], {})).toBe(false);
   });
