@@ -347,9 +347,11 @@ def render(s, rows, history=(), ages=None, progress=None):
     if fnd:
         inner = f'<div class="findings">{fnd}</div>'
     elif t_ref:
-        # An open tracking issue but no cards: only bad-request-kind gaps remain (findings covers response
-        # codes, optional fields, response shape and no-test, not the per-kind checks). Keep the link.
-        inner = '<p class="gaps-note">The remaining gaps are bad-request-kind checks — see the tracking issue.</p>'
+        # An open tracking issue but no cards: findings() renders cards for response-code gaps (404/409/403/
+        # 400), optional fields, response shape and no-test endpoints — not for a missing success (2xx) or
+        # auth (401) test, nor for the per-kind bad-request checks. Any of those can remain here, so keep the
+        # link with neutral wording rather than naming one kind.
+        inner = '<p class="gaps-note">The remaining gaps are listed in the tracking issue.</p>'
     else:
         inner = ''
     findings_html = (f'<section aria-labelledby="gaps"><h2 id="gaps">Where the gaps are{gap_link}</h2>'

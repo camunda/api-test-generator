@@ -1329,12 +1329,14 @@ describe('coverage report page — gap-card issue links', () => {
     }
   });
 
-  it('keeps the tracking link when only bad-request-kind gaps remain (no finding cards)', () => {
+  it('keeps the tracking link with neutral wording when there are no finding cards', () => {
     const dir = mkdtempSync(join(tmpdir(), 'cov-nocards-'));
     try {
       const B = ['2xx', '400', '401', '403', '404', '409'];
-      // everything findings() cares about is clean (no response/optional/shape/no-test gaps), but the
-      // index issue is still open because only bad-request-kind checks are missing.
+      // everything findings() renders a card for is clean (no response-code/optional/shape/no-test gaps),
+      // but the index issue is still open because some gap findings() does not card — a missing success
+      // (2xx) or auth (401) test, or a per-kind bad-request check — remains. The note must not name one
+      // kind, since it cannot tell which it is.
       const summary = {
         specHash: 'sha256:abc',
         specRef: 'abc',
@@ -1363,7 +1365,9 @@ describe('coverage report page — gap-card issue links', () => {
       const html = readFileSync(join(dir, 'page.html'), 'utf8');
       expect(html).toContain('Where the gaps are');
       expect(html).toContain('issues/700');
-      expect(html).toContain('bad-request-kind checks');
+      expect(html).toContain('The remaining gaps are listed in the tracking issue.');
+      // Must not claim the remaining gaps are only one kind — findings() also omits success/auth cards.
+      expect(html).not.toContain('bad-request-kind checks');
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
