@@ -451,7 +451,11 @@ describe('per-endpoint issue lifecycle (stub gh)', () => {
     try {
       const r = runIssueScript(
         'hub-coverage-endpoint-issues.sh',
-        endpointFiles('newOp', 'stillOpen'),
+        {
+          ...endpointFiles('newOp', 'stillOpen'),
+          // fixedOp is genuinely covered now (a clean row), so it is a real closure.
+          'rows.json': JSON.stringify([{ operationId: 'fixedOp' }]),
+        },
         [
           { number: 5, title: endpointTitle('stillOpen'), state: 'OPEN' },
           { number: 8, title: endpointTitle('fixedOp'), state: 'OPEN' }, // covered this run → closed
@@ -508,13 +512,46 @@ describe('per-endpoint issue lifecycle (stub gh)', () => {
     try {
       const r = runIssueScript(
         'hub-coverage-endpoint-issues.sh',
-        endpointFiles('stillOpen'),
+        {
+          ...endpointFiles('stillOpen'),
+          // alreadyClosed is genuinely covered now (a clean row), so it is a real closure.
+          'rows.json': JSON.stringify([{ operationId: 'alreadyClosed' }]),
+        },
         [{ number: 5, title: endpointTitle('stillOpen'), state: 'OPEN' }],
         { ...NO_HUB, PREV_ENDPOINT_ISSUES: prevEI },
       );
       expect(r.gapsProgress.closedOps).toEqual(['alreadyClosed']);
       // an ongoing gap (tracked both reports) is neither reported nor closed this week
       expect(r.gapsProgress.newThisWeek).toEqual([]);
+    } finally {
+      rmSync(prevDir, { recursive: true, force: true });
+    }
+  });
+
+  it('does not count a suppressed or removed endpoint as a closure (only a genuine fix)', () => {
+    const prevDir = mkdtempSync(join(tmpdir(), 'cov-prevei4-'));
+    const prevEI = join(prevDir, 'endpoint-issues.json');
+    // Last report, three endpoints each had a coverage issue. This report none has an open coverage issue,
+    // but for three different reasons: fixedOp got a real test (a genuine closure); suppressedOp's last gap
+    // was parked as a known hold (no test added); removedOp was deleted from the spec (gone from rows.json).
+    // Only fixedOp is a win — suppressions and removals must not show as green Closed bars or Slack Wins.
+    writeFileSync(prevEI, JSON.stringify({ fixedOp: 1, suppressedOp: 2, removedOp: 3 }));
+    try {
+      const r = runIssueScript(
+        'hub-coverage-endpoint-issues.sh',
+        {
+          ...endpointFiles(), // no open gaps this run
+          'rows.json': JSON.stringify([
+            { operationId: 'fixedOp' }, // clean row → genuinely covered
+            { operationId: 'suppressedOp', cells: { '404': 'hold' } }, // parked, not covered
+            // removedOp intentionally absent from rows.json (removed from the spec)
+          ]),
+        },
+        [],
+        { ...NO_HUB, PREV_ENDPOINT_ISSUES: prevEI },
+      );
+      expect(r.gapsProgress.closedOps).toEqual(['fixedOp']);
+      expect(r.gapsProgress.closedThisWeek).toBe(1);
     } finally {
       rmSync(prevDir, { recursive: true, force: true });
     }
@@ -559,7 +596,10 @@ describe('per-endpoint issue lifecycle (stub gh)', () => {
     try {
       const r = runIssueScript(
         'hub-coverage-endpoint-issues.sh',
-        endpointFiles('newOp', 'stillOpen'),
+        {
+          ...endpointFiles('newOp', 'stillOpen'),
+          'rows.json': JSON.stringify([{ operationId: 'fixedOp' }]), // genuinely covered now → a real closure
+        },
         [
           { number: 5, title: endpointTitle('stillOpen'), state: 'OPEN' },
           { number: 8, title: endpointTitle('fixedOp'), state: 'OPEN' }, // covered this run → closed
