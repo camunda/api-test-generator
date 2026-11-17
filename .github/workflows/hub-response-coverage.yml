@@ -263,12 +263,17 @@ jobs:
           d=$(tail -n1 coverage-report/history.csv 2>/dev/null | cut -d, -f1)
           case "$d" in [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]) ;; *) d=$(date -u +%F) ;; esac
           echo "ymd=$d" >> "$GITHUB_OUTPUT"
+          # Give the file itself the dated name too, so unzipping the artifact yields
+          # hub-coverage-page-<date>.html rather than a generic page.html that collides when several
+          # weeks are saved in one folder. A copy (not a move) keeps page.html for the Slack-thread
+          # upload below; this runs after the full-bundle upload, so the bundle is unaffected.
+          cp coverage-report/page.html "coverage-report/hub-coverage-page-$d.html"
 
       - name: Upload the report page on its own
         uses: actions/upload-artifact@v7
         with:
           name: hub-coverage-page-${{ steps.page-date.outputs.ymd }}
-          path: coverage-report/page.html
+          path: coverage-report/hub-coverage-page-${{ steps.page-date.outputs.ymd }}.html
           retention-days: 90
 
       - name: Write job summary
