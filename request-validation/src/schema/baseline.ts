@@ -1,6 +1,7 @@
 import type { OperationModel } from '../model/types.js';
 import {
   buildValidValue,
+  findValidNumber,
   findValidValue,
   orderedDateValuesFor,
   type ResolvedParamSchema,
@@ -59,6 +60,14 @@ export function buildBaselineBody(op: OperationModel, opts: BaselineOpts = {}): 
     return r;
   }
 
+  /** A value for a field that cannot be left out although no value meets its schema. */
+  function placeholder(node: WalkNode): unknown {
+    const t = Array.isArray(node.type) ? node.type[0] : node.type;
+    // Keep the declared type: a number field that gets a string fails for its type, not its range.
+    if (t === 'integer' || t === 'number') return 1;
+    return buildValidValue(resolved(node));
+  }
+
   function synth(node: WalkNode, depth: number, onKeep: boolean): unknown {
     const t = Array.isArray(node.type) ? node.type[0] : node.type;
     switch (t) {
@@ -86,7 +95,7 @@ export function buildBaselineBody(op: OperationModel, opts: BaselineOpts = {}): 
             obj[k] = value;
           } else if (required || kept) {
             // Cannot be omitted (required) or is the field under test: send a placeholder.
-            obj[k] = buildValidValue(resolved(child));
+            obj[k] = placeholder(child);
           }
         }
         return obj;
@@ -95,11 +104,11 @@ export function buildBaselineBody(op: OperationModel, opts: BaselineOpts = {}): 
         if (!node.items) return [];
         const item = synth(node.items, depth + 1, onKeep && keep[depth] === '0');
         // An item no value satisfies still gets a placeholder: an empty array can break `minItems`.
-        return [item === NO_VALID_VALUE ? buildValidValue(resolved(node.items)) : item];
+        return [item === NO_VALID_VALUE ? placeholder(node.items) : item];
       }
       case 'integer':
       case 'number':
-        return validNumber(node.constraints ?? {}, t === 'integer');
+        return findValidNumber(resolved(node), t === 'integer') ?? NO_VALID_VALUE;
       case 'boolean':
         return true;
       case 'string': {
@@ -128,18 +137,6 @@ function isInteresting(raw: SchemaFragment): boolean {
     raw.uniqueItems ||
     raw.additionalProperties === false
   );
-}
-
-/** 1, moved into the schema's range when the range excludes it. */
-function validNumber(c: Record<string, unknown>, integer: boolean): number {
-  let v = 1;
-  if (typeof c.minimum === 'number' && v < c.minimum) v = c.minimum;
-  if (typeof c.exclusiveMinimum === 'number' && v <= c.exclusiveMinimum)
-    v = integer ? Math.floor(c.exclusiveMinimum) + 1 : c.exclusiveMinimum + 1;
-  if (typeof c.maximum === 'number' && v > c.maximum) v = c.maximum;
-  if (typeof c.exclusiveMaximum === 'number' && v >= c.exclusiveMaximum)
-    v = integer ? Math.ceil(c.exclusiveMaximum) - 1 : c.exclusiveMaximum - 1;
-  return integer ? Math.ceil(v) : v;
 }
 
 function toBaseline(v: unknown): BaselineValue {

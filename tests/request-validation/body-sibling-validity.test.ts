@@ -187,8 +187,26 @@ function why(schema: unknown, value: unknown): string | undefined {
     if (schema.format === 'uuid' && !UUID.test(value)) return 'not a uuid';
   }
   if (typeof value === 'number') {
-    if (typeof schema.minimum === 'number' && value < schema.minimum) return 'below minimum';
-    if (typeof schema.maximum === 'number' && value > schema.maximum) return 'above maximum';
+    // OpenAPI 3.0 writes an exclusive bound as a boolean next to minimum/maximum, 3.1 as a number.
+    const loOpen = schema.exclusiveMinimum === true;
+    const hiOpen = schema.exclusiveMaximum === true;
+    if (typeof schema.minimum === 'number') {
+      if (value < schema.minimum) return 'below minimum';
+      if (loOpen && value === schema.minimum) return 'at exclusive minimum';
+    }
+    if (typeof schema.maximum === 'number') {
+      if (value > schema.maximum) return 'above maximum';
+      if (hiOpen && value === schema.maximum) return 'at exclusive maximum';
+    }
+    if (typeof schema.exclusiveMinimum === 'number' && value <= schema.exclusiveMinimum)
+      return 'not above exclusiveMinimum';
+    if (typeof schema.exclusiveMaximum === 'number' && value >= schema.exclusiveMaximum)
+      return 'not below exclusiveMaximum';
+    if (typeof schema.multipleOf === 'number' && schema.multipleOf > 0) {
+      const q = value / schema.multipleOf;
+      if (Math.abs(q - Math.round(q)) > 1e-9) return `not a multiple of ${schema.multipleOf}`;
+    }
+    if (schema.type === 'integer' && !Number.isInteger(value)) return 'not an integer';
   }
   return undefined;
 }
@@ -241,6 +259,56 @@ function gatedSiblings(op: OperationModel, body: unknown, target: string): strin
   const required = new Set(op.requiredProps ?? []);
   return [...gates.keys()].filter((k) => k !== target && !required.has(k) && k in body);
 }
+
+describe('sibling values meet every limit of their schema', () => {
+  // Each field below has more than one limit; a value that meets only some of them makes the server
+  // reject the field instead of the one a test targets (PR #802 review).
+  const properties: Record<string, Record<string, unknown>> = {
+    numericKey: { type: 'string', pattern: '^-?[0-9]+$', minLength: 5 },
+    shortUuid: { type: 'string', format: 'uuid', maxLength: 10 }, // no uuid fits
+    above1: { type: 'integer', minimum: 1, exclusiveMinimum: true }, // OpenAPI 3.0 form
+    between: { type: 'number', exclusiveMinimum: 0.1, exclusiveMaximum: 0.9 }, // OpenAPI 3.1 form
+    step5: { type: 'integer', multipleOf: 5 },
+    noInteger: {
+      type: 'integer',
+      minimum: 1,
+      maximum: 2,
+      exclusiveMinimum: true,
+      exclusiveMaximum: true,
+    }, // no integer fits
+  };
+  const op: OperationModel = {
+    operationId: 'limits',
+    method: 'POST',
+    path: '/limits',
+    tags: [],
+    parameters: [],
+    bodyRequired: true,
+    requiredProps: ['numericKey', 'above1', 'between', 'step5'],
+    requestBodySchema: {
+      type: 'object',
+      required: ['numericKey', 'above1', 'between', 'step5'],
+      properties: properties,
+    },
+  };
+  const scenarios = generateUniversalAdditionalProp([op], {});
+
+  it('builds a scenario whose body can be checked', () => {
+    expect(scenarios.length).toBe(1);
+  });
+
+  for (const [name, schema] of Object.entries(properties)) {
+    it(`${name}: the value sent meets every limit, or the optional field is left out`, () => {
+      const body = isRecord(scenarios[0]?.requestBody) ? scenarios[0].requestBody : {};
+      const required = op.requiredProps?.includes(name) ?? false;
+      if (!(name in body)) {
+        expect(required, `${name} is required but missing`).toBe(false);
+        return;
+      }
+      expect(why(schema, body[name]), `${name}=${JSON.stringify(body[name])}`).toBeUndefined();
+    });
+  }
+});
 
 describe('bundled spec: in every body scenario, fields other than the target are valid', async () => {
   const m = await loadSpec(join(getSpecBundleDir(process.cwd()), 'rest-api.bundle.json'));

@@ -13,6 +13,12 @@ export interface SchemaFragment {
   maxLength?: number;
   format?: string;
   enum?: unknown[];
+  minimum?: number;
+  maximum?: number;
+  /** A number in OpenAPI 3.1, a flag that makes `minimum` exclusive in OpenAPI 3.0. */
+  exclusiveMinimum?: number | boolean;
+  exclusiveMaximum?: number | boolean;
+  multipleOf?: number;
   allOf?: SchemaFragment[];
   oneOf?: unknown[];
   anyOf?: unknown[];
@@ -26,6 +32,11 @@ export interface ResolvedParamSchema {
   format?: string;
   enumValues?: unknown[];
   type?: string | string[];
+  minimum?: number;
+  maximum?: number;
+  exclusiveMinimum?: number | boolean;
+  exclusiveMaximum?: number | boolean;
+  multipleOf?: number;
 }
 
 function isSchemaFragment(v: unknown): v is SchemaFragment {
@@ -67,6 +78,14 @@ export function resolveFieldSchema(schema: SchemaFragment): ResolvedParamSchema 
     if (typeof s.format === 'string' && out.format === undefined) out.format = s.format;
     if (Array.isArray(s.enum) && !out.enumValues) out.enumValues = s.enum.slice();
     if (s.type !== undefined && out.type === undefined) out.type = s.type;
+    if (typeof s.minimum === 'number' && out.minimum === undefined) out.minimum = s.minimum;
+    if (typeof s.maximum === 'number' && out.maximum === undefined) out.maximum = s.maximum;
+    if (isBound(s.exclusiveMinimum) && out.exclusiveMinimum === undefined)
+      out.exclusiveMinimum = s.exclusiveMinimum;
+    if (isBound(s.exclusiveMaximum) && out.exclusiveMaximum === undefined)
+      out.exclusiveMaximum = s.exclusiveMaximum;
+    if (typeof s.multipleOf === 'number' && s.multipleOf > 0 && out.multipleOf === undefined)
+      out.multipleOf = s.multipleOf;
     if (Array.isArray(s.allOf)) for (const part of s.allOf) merge(part);
     for (const branches of [s.oneOf, s.anyOf]) {
       if (Array.isArray(branches) && branches.length) merge(branches[0]);
@@ -74,6 +93,77 @@ export function resolveFieldSchema(schema: SchemaFragment): ResolvedParamSchema 
   }
   merge(schema);
   return out;
+}
+
+function isBound(v: unknown): v is number | boolean {
+  return typeof v === 'number' || typeof v === 'boolean';
+}
+
+/** The allowed range of a number, with both OpenAPI exclusive-bound forms normalized. */
+interface NumericInterval {
+  lo?: number;
+  loOpen: boolean;
+  hi?: number;
+  hiOpen: boolean;
+  multipleOf?: number;
+}
+
+function numericInterval(r: ResolvedParamSchema): NumericInterval {
+  const out: NumericInterval = { loOpen: false, hiOpen: false, multipleOf: r.multipleOf };
+  if (r.minimum !== undefined) out.lo = r.minimum;
+  if (r.exclusiveMinimum === true && out.lo !== undefined) out.loOpen = true; // OpenAPI 3.0
+  if (
+    typeof r.exclusiveMinimum === 'number' &&
+    (out.lo === undefined || r.exclusiveMinimum >= out.lo)
+  )
+    Object.assign(out, { lo: r.exclusiveMinimum, loOpen: true }); // OpenAPI 3.1, the tighter bound
+  if (r.maximum !== undefined) out.hi = r.maximum;
+  if (r.exclusiveMaximum === true && out.hi !== undefined) out.hiOpen = true;
+  if (
+    typeof r.exclusiveMaximum === 'number' &&
+    (out.hi === undefined || r.exclusiveMaximum <= out.hi)
+  )
+    Object.assign(out, { hi: r.exclusiveMaximum, hiOpen: true });
+  return out;
+}
+
+function inInterval(v: number, iv: NumericInterval, integer: boolean): boolean {
+  if (!Number.isFinite(v)) return false;
+  if (integer && !Number.isInteger(v)) return false;
+  if (iv.lo !== undefined && (iv.loOpen ? v <= iv.lo : v < iv.lo)) return false;
+  if (iv.hi !== undefined && (iv.hiOpen ? v >= iv.hi : v > iv.hi)) return false;
+  if (iv.multipleOf !== undefined) {
+    const q = v / iv.multipleOf;
+    if (Math.abs(q - Math.round(q)) > 1e-9) return false;
+  }
+  return true;
+}
+
+/**
+ * A number the schema accepts: 1 when allowed, else a value at or next to a bound, or the middle of
+ * the range, each also moved up to the next `multipleOf`. Both exclusive-bound forms count (a 3.0
+ * `exclusiveMinimum: true` flag next to `minimum`, a 3.1 numeric `exclusiveMinimum`). Undefined when
+ * none fits, e.g. an integer strictly between 1 and 2.
+ */
+export function findValidNumber(r: ResolvedParamSchema, integer: boolean): number | undefined {
+  const iv = numericInterval(r);
+  const step = integer ? 1 : 1e-6;
+  const raw: number[] = [1];
+  if (iv.lo !== undefined)
+    raw.push(iv.loOpen ? (integer ? Math.floor(iv.lo) + 1 : iv.lo + step) : iv.lo);
+  if (iv.hi !== undefined)
+    raw.push(iv.hiOpen ? (integer ? Math.ceil(iv.hi) - 1 : iv.hi - step) : iv.hi);
+  if (iv.lo !== undefined && iv.hi !== undefined) {
+    const mid = (iv.lo + iv.hi) / 2;
+    raw.push(integer ? Math.round(mid) : mid);
+  }
+  const candidates = [...raw];
+  if (iv.multipleOf !== undefined) {
+    const m = iv.multipleOf;
+    for (const c of raw)
+      candidates.push(Math.ceil(c / m) * m, Math.floor(c / m) * m, Math.ceil(c / m + 1) * m);
+  }
+  return candidates.find((c) => inInterval(c, iv, integer));
 }
 
 /** {@link resolveViolationSchema} for a parameter. */
@@ -173,15 +263,29 @@ function fallbackValue(r: ResolvedParamSchema): string {
  * that can leave the param out (an optional sibling) should do that instead of sending it invalid.
  */
 export function findValidValue(r: ResolvedParamSchema): string | undefined {
-  if (r.enumValues?.length) return String(r.enumValues[0]);
-  if (r.pattern) {
-    if (/^\^-?\[0-9]\+\$$/.test(r.pattern) || r.pattern === '^-?[0-9]+$') return '1';
-  }
+  // Every candidate goes through the same check (enum, length, pattern), so a shortcut value such as
+  // '1' for a numeric key or the sample uuid for a format can't skip a limit it breaks (PR #802 review).
+  const ok = (c: string): boolean => satisfiesAll(c, r);
+  if (r.enumValues?.length) return r.enumValues.map(String).find(ok);
   const t = Array.isArray(r.type) ? r.type[0] : r.type;
-  if (t === 'integer' || t === 'number') return '1';
-  if (t === 'boolean') return 'true';
+  if (t === 'integer' || t === 'number') {
+    const n = findValidNumber(r, t === 'integer');
+    return n !== undefined && ok(String(n)) ? String(n) : undefined;
+  }
+  const numericKey =
+    r.pattern !== undefined && (/^\^-?\[0-9]\+\$$/.test(r.pattern) || r.pattern === '^-?[0-9]+$');
+  if (numericKey) {
+    // A numeric key is a string: only its length bounds limit it, so try '1' and digit strings sized
+    // to them.
+    const digits = ['1'];
+    if (r.minLength) digits.push('1'.padEnd(r.minLength, '0'));
+    if (r.maxLength) digits.push('1'.padEnd(Math.min(r.maxLength, 18), '0'));
+    const found = digits.find(ok);
+    if (found !== undefined) return found;
+  }
+  if (t === 'boolean') return ['true', 'false'].find(ok);
   const byFormat = r.format !== undefined ? VALID_BY_FORMAT[r.format] : undefined;
-  if (byFormat !== undefined) return byFormat;
+  if (byFormat !== undefined) return ok(byFormat) ? byFormat : undefined;
   // Cover the pattern shapes in the bundled specs: lowercase, uppercase, digits, `1-1` keys and
   // `1*` prefix wildcards.
   const candidates = [
@@ -200,7 +304,16 @@ export function findValidValue(r: ResolvedParamSchema): string | undefined {
     '*',
     '1*',
   ];
-  return firstSatisfying(candidates, r);
+  return candidates.find(ok);
+}
+
+/** Does `c` meet the schema's enum, length bounds and pattern? */
+function satisfiesAll(c: string, r: ResolvedParamSchema): boolean {
+  if (r.enumValues?.length && !r.enumValues.map(String).includes(c)) return false;
+  if (r.minLength !== undefined && c.length < r.minLength) return false;
+  if (r.maxLength !== undefined && c.length > r.maxLength) return false;
+  const re = r.pattern ? compilePattern(r.pattern) : undefined;
+  return re === undefined || re.test(c);
 }
 
 const END_NAME = /^(end|to|until|before)/i;
@@ -281,17 +394,6 @@ export function compilePattern(pattern: string): RegExp | undefined {
     }
   }
   return undefined;
-}
-
-/** The first candidate that meets the schema's length bounds and pattern, if any does. */
-function firstSatisfying(candidates: string[], r: ResolvedParamSchema): string | undefined {
-  const re = r.pattern ? compilePattern(r.pattern) : undefined;
-  return candidates.find(
-    (c) =>
-      (r.minLength === undefined || c.length >= r.minLength) &&
-      (r.maxLength === undefined || c.length <= r.maxLength) &&
-      (re === undefined || re.test(c)),
-  );
 }
 
 /**
