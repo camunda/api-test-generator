@@ -86,6 +86,7 @@ h3 { margin:0; font-size:1.02rem; letter-spacing:-.005em; }
 .pchart .x { text-anchor:middle; } .pchart .y { text-anchor:end; }
 .pchart .vlab { fill:var(--ink); font:650 9px var(--mono); text-anchor:middle; }
 .pchart .ax { stroke:var(--rule); stroke-width:1; }
+.vh { position:absolute; width:1px; height:1px; margin:-1px; padding:0; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; border:0; }
 
 .tools { display:flex; flex-wrap:wrap; gap:14px 28px; align-items:center; justify-content:space-between; margin-bottom:14px; }
 .legend { display:flex; flex-wrap:wrap; gap:6px 20px; font-size:.84rem; color:var(--muted); }
@@ -359,13 +360,20 @@ def progress_chart(rows):
                 parts.append(f'<text class="vlab" x="{bx + bar_w / 2:.1f}" y="{y(val) - 3:.1f}">{val}</text>')
         md = d[5:] if len(d) >= 10 else esc(d)
         parts.append(f'<text class="x" x="{cx:.1f}" y="{y0 + 14:.1f}">{esc(md)}</text>')
-    svg = (f'<svg viewBox="0 0 {w} {h}" role="img" preserveAspectRatio="xMidYMid meet" class="pchart" '
-           f'aria-label="Coverage gaps reported versus closed, per week, for the last {len(pts)} reports">'
-           + ''.join(parts) + '</svg>')
+    # The SVG is decorative for assistive tech (aria-hidden); the data lives in a visually-hidden table
+    # below it, so a screen reader reads every week's reported/closed values, which a role="img" label
+    # cannot convey. Sighted users get the bars (and the per-bar hover titles).
+    svg = (f'<svg viewBox="0 0 {w} {h}" aria-hidden="true" preserveAspectRatio="xMidYMid meet" '
+           f'class="pchart">' + ''.join(parts) + '</svg>')
     legend = ('<p class="plegend"><span class="pk rep">Reported</span>'
               '<span class="pk clo">Closed</span></p>')
+    trows = ''.join(f'<tr><th scope="row">{esc(d)}</th><td>{rep}</td><td>{clo}</td></tr>'
+                    for d, rep, clo in pts)
+    table = ('<table class="vh"><caption>Coverage gaps reported vs. closed, by week</caption>'
+             '<thead><tr><th scope="col">Week</th><th scope="col">Reported</th>'
+             f'<th scope="col">Closed</th></tr></thead><tbody>{trows}</tbody></table>')
     return ('<section aria-labelledby="progress"><h2 id="progress">Gaps reported vs. closed, by week</h2>'
-            f'{legend}{svg}</section>')
+            f'{legend}{svg}{table}</section>')
 
 
 def render(s, rows, history=(), ages=None, progress=None, progress_history=()):

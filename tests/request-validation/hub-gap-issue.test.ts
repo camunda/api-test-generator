@@ -1376,6 +1376,11 @@ describe('coverage report page — reported vs. closed chart', () => {
     // each bar carries a hover title naming the week and count
     expect(svg).toContain('2026-11-10: 1 rep');
     expect(svg).toContain('2026-11-10: 4 clo');
+    // the SVG is decorative for assistive tech; the data is in a visually-hidden table a screen reader
+    // can read row by row (the per-week values a role="img" label cannot convey)
+    expect(svg).toContain('aria-hidden="true"');
+    expect(svg).toContain('<table class="vh">');
+    expect(svg).toContain('<tr><th scope="row">2026-11-10</th><td>1</td><td>4</td></tr>');
   });
 
   it('shows nothing until there are at least two weeks of data', () => {

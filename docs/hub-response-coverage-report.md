@@ -75,7 +75,8 @@ asking whether developers are acting on the generator after it was handed to the
 with the amber, the findings are being worked; when reported stays high and closed stays low, they are piling up.
 The weekly counts accumulate in `progress-history.csv` the same way `history.csv` does (each run appends its row
 and carries the earlier weeks forward through the artifact), so the chart fills in one week at a time and needs at
-least two reports before it appears. A gap's age is measured from its tracking issue's latest reopen (or its creation when never
+least two reports before it appears. The bars are mirrored by a visually-hidden data table (week, reported,
+closed), so a screen reader can read every week's values that the chart shows. A gap's age is measured from its tracking issue's latest reopen (or its creation when never
 reopened), so a gap that was fixed, closed, then returned is counted from its return — not reported as open
 the whole time it was closed. An endpoint with **no test *and* no tracking issue** is an
 unexplained gap: it is escalated to a `:red_circle:` alert line and pages `hub-medic`. A known/tracked no-test
