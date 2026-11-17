@@ -431,6 +431,12 @@ def build(args):
             'shape': shape, 'optionalSent': sent, 'optionalTotal': len(o['optional']),
             'requestChecks': req_state, 'requestPresent': req_present, 'requestApplicable': req_applicable,
             'requestMissing': req_missing,
+            # Request-validation kinds parked by a scoped config exclusion. When other kinds of the same status
+            # code stay tested, request_check_state() still reads 'ok' and the 400 cell is not marked 'hold'
+            # (400 has many kinds, so one held kind never parks it), so this is the only place a held kind
+            # shows. The closure guard in hub-coverage-endpoint-issues.sh reads it to tell a suppressed last
+            # kind from a genuinely covered endpoint.
+            'requestHeldKinds': sorted(held_kinds.get(op_id, set())),
             'notes': sorted(scoped[op_id]),
             'optionalMissing': [] if op_id in suppressed else [p for p in o['optional'] if p not in pos_sent[op_id]],
             'fullyTestedExcept403': all(v == 'ok' for b, v in cells.items() if b != '403'),

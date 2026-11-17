@@ -184,13 +184,20 @@ new_json=$(comm -13 "$prev_ops" "$cur_ops" | jq -R -s 'split("\n") | map(select(
 # test added — not a win), or the operation was removed from the spec (the endpoint is gone — not a win).
 # The last two would otherwise show as green Closed bars and Slack Wins, misrepresenting a suppression or a
 # deletion as dev progress. So restrict the previous-report set to endpoints that are genuinely handled this
-# run: present in rows.json (removed ops are absent) with no held response cell and request-checks not held (a
-# whole-op suppression, a whole-op negative exclusion, and a scoped kind hold all surface as a 'hold' here).
-# Conservative by design — an endpoint whose genuine fix lands the same week it also carries an unrelated
-# long-standing hold is not counted that week, which under-credits rather than inventing a false win.
+# run: present in rows.json (removed ops are absent), with no held response cell, request-checks not held, and
+# no held request kind. A whole-op suppression and a whole-op negative exclusion surface as a 'hold' cell or
+# 'hold' requestChecks; a scoped kind exclusion that parks only one kind of a many-kind code (e.g. one 400
+# kind) leaves requestChecks 'ok' and the cell un-parked, so it shows only in requestHeldKinds — without that
+# check, suppressing an endpoint's last missing kind would pass as a closure. Conservative by design — an
+# endpoint whose genuine fix lands the same week it also carries an unrelated held check is not counted that
+# week, which under-credits rather than inventing a false win.
 clean_now=$(mktemp)  # endpoints genuinely handled this run (present and not parked); excludes removed + held/suppressed
 if [ -s "$REPORT_DIR/rows.json" ]; then
-  jq -r '.[] | select(([.cells[]?] | any(. == "hold")) | not) | select(.requestChecks != "hold") | .operationId' \
+  jq -r '.[]
+    | select(([.cells[]?] | any(. == "hold")) | not)
+    | select(.requestChecks != "hold")
+    | select(((.requestHeldKinds // []) | length) == 0)
+    | .operationId' \
     "$REPORT_DIR/rows.json" 2>/dev/null | sort -u > "$clean_now" || true
 fi
 closed_candidates=$(mktemp)  # had an issue last report, no coverage issue this run (fixed, suppressed, or removed)

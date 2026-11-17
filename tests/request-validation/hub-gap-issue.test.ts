@@ -557,6 +557,38 @@ describe('per-endpoint issue lifecycle (stub gh)', () => {
     }
   });
 
+  it('does not count a scoped held request-kind as a closure (other kinds of the code still tested)', () => {
+    const prevDir = mkdtempSync(join(tmpdir(), 'cov-prevei5-'));
+    const prevEI = join(prevDir, 'endpoint-issues.json');
+    // scopedHeldOp had a coverage issue last report (its last missing kind). This report that kind was parked
+    // by a scoped config exclusion while the other kinds of the same 400 code stay tested, so the 400 cell is
+    // 'ok' and requestChecks is 'ok' — the park shows only in requestHeldKinds. No test was added, so it must
+    // not count as a closure even though it dropped out of the issue set.
+    writeFileSync(prevEI, JSON.stringify({ scopedHeldOp: 2 }));
+    try {
+      const r = runIssueScript(
+        'hub-coverage-endpoint-issues.sh',
+        {
+          ...endpointFiles(), // no open gaps this run
+          'rows.json': JSON.stringify([
+            {
+              operationId: 'scopedHeldOp',
+              cells: { '400': 'ok' },
+              requestChecks: 'ok',
+              requestHeldKinds: ['malformed-json-body'],
+            },
+          ]),
+        },
+        [],
+        { ...NO_HUB, PREV_ENDPOINT_ISSUES: prevEI },
+      );
+      expect(r.gapsProgress.closedOps).toEqual([]);
+      expect(r.gapsProgress.closedThisWeek).toBe(0);
+    } finally {
+      rmSync(prevDir, { recursive: true, force: true });
+    }
+  });
+
   it('counts a gap an intervening run already issued as reported this week (OPEN, absent from the previous report)', () => {
     const prevDir = mkdtempSync(join(tmpdir(), 'cov-prevei3-'));
     const prevEI = join(prevDir, 'endpoint-issues.json');
