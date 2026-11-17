@@ -269,6 +269,8 @@ describe('sibling values meet every limit of their schema', () => {
     above1: { type: 'integer', minimum: 1, exclusiveMinimum: true }, // OpenAPI 3.0 form
     between: { type: 'number', exclusiveMinimum: 0.1, exclusiveMaximum: 0.9 }, // OpenAPI 3.1 form
     step5: { type: 'integer', multipleOf: 5 },
+    fracMin: { type: 'integer', minimum: 1.5 }, // smallest integer is 2
+    fracMax: { type: 'integer', maximum: -1.5 }, // largest integer is -2
     noInteger: {
       type: 'integer',
       minimum: 1,
@@ -284,10 +286,10 @@ describe('sibling values meet every limit of their schema', () => {
     tags: [],
     parameters: [],
     bodyRequired: true,
-    requiredProps: ['numericKey', 'above1', 'between', 'step5'],
+    requiredProps: ['numericKey', 'above1', 'between', 'step5', 'fracMin', 'fracMax'],
     requestBodySchema: {
       type: 'object',
-      required: ['numericKey', 'above1', 'between', 'step5'],
+      required: ['numericKey', 'above1', 'between', 'step5', 'fracMin', 'fracMax'],
       properties: properties,
     },
   };

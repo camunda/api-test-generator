@@ -150,9 +150,26 @@ export function findValidNumber(r: ResolvedParamSchema, integer: boolean): numbe
   const step = integer ? 1 : 1e-6;
   const raw: number[] = [1];
   if (iv.lo !== undefined)
-    raw.push(iv.loOpen ? (integer ? Math.floor(iv.lo) + 1 : iv.lo + step) : iv.lo);
+    // For an integer, round toward the inside of the range: `minimum: 1.5` allows 2, not 1.5.
+    raw.push(
+      integer
+        ? iv.loOpen
+          ? Math.floor(iv.lo) + 1
+          : Math.ceil(iv.lo)
+        : iv.loOpen
+          ? iv.lo + step
+          : iv.lo,
+    );
   if (iv.hi !== undefined)
-    raw.push(iv.hiOpen ? (integer ? Math.ceil(iv.hi) - 1 : iv.hi - step) : iv.hi);
+    raw.push(
+      integer
+        ? iv.hiOpen
+          ? Math.ceil(iv.hi) - 1
+          : Math.floor(iv.hi)
+        : iv.hiOpen
+          ? iv.hi - step
+          : iv.hi,
+    );
   if (iv.lo !== undefined && iv.hi !== undefined) {
     const mid = (iv.lo + iv.hi) / 2;
     raw.push(integer ? Math.round(mid) : mid);
