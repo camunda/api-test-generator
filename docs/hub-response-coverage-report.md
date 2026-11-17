@@ -31,23 +31,30 @@ The numbers below are an example.
 ```
 Hub API test coverage (weekly) · camunda-hub@abc1234 · 66 endpoints
 57/66 tested for every status code (+2)  ·  32/64 reject every bad-request kind (-1)
-:chart_with_upwards_trend: last 5 reports: tested 53→57 · no-test 2→1
+:chart_with_upwards_trend: This week's movement: 86% of endpoints tested for every status code — ▲ up 6 pts over the last 8 reports · no-test 2→1
 
+:tada: Wins
+:white_check_mark: 2 coverage gaps closed this week: createFile, updateFile
+
+:pushpin: Needs attention
+:red_circle: No test, untracked: exportWorkspace (new this week)
 Gaps by code: 403 (1) · 404 (2) · 409 (3)      by area: Project Snapshot 2 · File 1 · Member 1
 Other: 5 optional fields
-
-:red_circle: No test, untracked: exportWorkspace (new this week)
 :warning: No test, tracked: getClusterUsageMetrics (camunda-hub#25907, camunda-hub#26448)
 
 Full table · Tracking issue · Guide
 ```
 
-The message is compact so it reads at a glance: one headline line with both angles — *does every endpoint test
+The message is sectioned so it reads at a glance. The headline carries both angles — *does every endpoint test
 every status code it can return?* (the 2xx/400/401/403/404/409 the spec lists; a documented 500 is deliberately
 not counted) and *does it reject every applicable kind of bad request?* (an upper bound) — each with its
-bracketed change since the last report; then the actionable gaps by status code and by API area on one line,
-a one-line roll-up of the other dimensions (lifecycle, optional-field, response-shape), and the no-test lines.
-The caveats live in the Guide rather than inline.
+bracketed change since the last report, then the movement line. A **Wins** section leads with the good news:
+the gaps the teams closed this week (named), and a note when every no-test endpoint is already tracked. A
+**Needs attention** section then lists the actionable gaps: the untracked no-test line, the gaps by status code
+and by API area, a one-line roll-up of the other dimensions (lifecycle, optional-field, response-shape), and the
+calm tracked no-test line. The caveats live in the Guide rather than inline. The closed-gaps Win needs this
+run's reconciled issue state, so the workflow re-renders the message after the per-endpoint issues are
+reconciled — a dry run shows the message without that line.
 
 A `:chart_with_upwards_trend: *This week's movement:*` line shows the **trajectory** — the same headline the
 report page leads with: the share of endpoints tested for every status code now and how far it has moved (in

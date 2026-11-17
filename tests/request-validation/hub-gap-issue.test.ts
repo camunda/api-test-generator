@@ -726,6 +726,7 @@ function slackText(
   prev: Record<string, unknown> | null,
   mention = '',
   prevIssueOps: string[] = [],
+  progress: Record<string, unknown> | null = null,
 ): string {
   const code = [
     'import sys, json, types, importlib.util',
@@ -733,10 +734,10 @@ function slackText(
     'h = importlib.util.module_from_spec(spec); spec.loader.exec_module(h)',
     'd = json.load(sys.stdin)',
     "args = types.SimpleNamespace(spec_ref='abcdef1234', run_url='http://run', tracking_url='http://track', regression_mention=d['m'], prev_issue_ops=set(d['pio']))",
-    "sys.stdout.write(h.slack(d['s'], d['p'], args))",
+    "sys.stdout.write(h.slack(d['s'], d['p'], args, d.get('prog')))",
   ].join('\n');
   return execFileSync('python3', ['-B', '-c', code], {
-    input: JSON.stringify({ s: summary, p: prev, m: mention, pio: prevIssueOps }),
+    input: JSON.stringify({ s: summary, p: prev, m: mention, pio: prevIssueOps, prog: progress }),
     encoding: 'utf8',
   });
 }
@@ -858,6 +859,75 @@ describe('weekly Slack message', () => {
     expect(text).toContain('<http://run|Full table>');
     expect(text).toContain('<http://track|Tracking issue>');
     expect(text).toContain('|📖 Guide>');
+  });
+
+  it('groups the actionable gaps under a Needs-attention section', () => {
+    const text = slackText(baseSummary(), null);
+    expect(text).toContain('*:pushpin: Needs attention*');
+    expect(text).toContain('Gaps by code:');
+  });
+
+  it('shows a Wins section naming the gaps closed this week, from gaps-progress', () => {
+    const text = slackText(baseSummary(), null, '', [], {
+      closedOps: ['createFile', 'updateFile'],
+    });
+    expect(text).toContain('*:tada: Wins*');
+    expect(text).toContain(
+      ':white_check_mark: 2 coverage gaps closed this week: `createFile`, `updateFile`',
+    );
+  });
+
+  it('uses the singular when exactly one gap closed', () => {
+    const text = slackText(baseSummary(), null, '', [], { closedOps: ['createFile'] });
+    expect(text).toContain(':white_check_mark: 1 coverage gap closed this week: `createFile`');
+  });
+
+  it('counts a fully-tracked no-test set as a win', () => {
+    const text = slackText(
+      baseSummary({ operationIds: ['a'], zeroTestOperations: ['a'], trackedOperations: ['a'] }),
+      null,
+    );
+    expect(text).toContain('*:tada: Wins*');
+    expect(text).toContain(':large_green_circle: Every endpoint with no test is tracked');
+  });
+
+  it('omits the Wins section when there is nothing to celebrate', () => {
+    // no gaps closed (no progress) and no no-test endpoints, so neither win applies
+    const text = slackText(baseSummary(), null);
+    expect(text).not.toContain(':tada: Wins');
+  });
+
+  it('re-renders slack.txt from summary.json + gaps-progress.json via --render-slack', () => {
+    // The workflow runs this after issue reconciliation so the message can name the closed gaps the audit
+    // (which runs first) could not. It reuses the written summary.json rather than re-auditing.
+    const dir = mkdtempSync(join(tmpdir(), 'cov-renderslack-'));
+    try {
+      writeFileSync(join(dir, 'summary.json'), JSON.stringify(baseSummary()));
+      writeFileSync(
+        join(dir, 'gaps-progress.json'),
+        JSON.stringify({ newThisWeek: [], closedThisWeek: 1, closedOps: ['createFile'] }),
+      );
+      execFileSync(
+        'python3',
+        [
+          '-B',
+          script,
+          '--render-slack',
+          '--out',
+          dir,
+          '--gaps-progress',
+          join(dir, 'gaps-progress.json'),
+          '--run-url',
+          'http://run',
+        ],
+        { encoding: 'utf8' },
+      );
+      const txt = readFileSync(join(dir, 'slack.txt'), 'utf8');
+      expect(txt).toContain('*:tada: Wins*');
+      expect(txt).toContain(':white_check_mark: 1 coverage gap closed this week: `createFile`');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 
