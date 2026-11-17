@@ -945,7 +945,7 @@ describe('weekly Slack message', () => {
   it('leads with both headline angles on one compact line', () => {
     const text = slackText(baseSummary(), null);
     expect(text).toContain('8/10 tested for every status code');
-    expect(text).toContain('5/10 reject every bad-request kind');
+    expect(text).toContain('5/10 tested for every request-validation kind');
     // the long inline framing/caveats moved to the Guide to keep the message scannable
     expect(text).not.toContain('Two angles');
     expect(text).not.toContain('a documented 500 is not checked');
@@ -982,7 +982,7 @@ describe('weekly Slack message', () => {
       baseSummary({ fullyAsserted: 7, requestChecks: [7, 10] }),
     );
     expect(text).toContain('tested for every status code (+1)');
-    expect(text).toContain('reject every bad-request kind (-2)');
+    expect(text).toContain('tested for every request-validation kind (-2)');
   });
 
   it('shows no change figures at all for the first report', () => {

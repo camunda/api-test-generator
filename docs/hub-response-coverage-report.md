@@ -30,7 +30,7 @@ The numbers below are an example.
 
 ```
 Hub API test coverage (weekly) · camunda-hub@abc1234 · 66 endpoints
-57/66 tested for every status code (+2)  ·  32/64 reject every bad-request kind (-1)
+57/66 tested for every status code (+2)  ·  32/64 tested for every request-validation kind (-1)
 :chart_with_upwards_trend: This week's movement: 86% of endpoints tested for every status code — ▲ up 6 pts over the last 8 reports · no-test 2→1
 
 :tada: Wins
@@ -47,7 +47,8 @@ Full table · Tracking issue · Guide
 
 The message is sectioned so it reads at a glance. The headline carries both angles — *does every endpoint test
 every status code it can return?* (the 2xx/400/401/403/404/409 the spec lists; a documented 500 is deliberately
-not counted) and *does it reject every applicable kind of bad request?* (an upper bound) — each with its
+not counted) and *is it tested with every applicable request-validation kind?* (an upper bound; most kinds are
+bad requests the server must reject, but a few are accepted edge cases that expect 200, such as `pagination-offset-past-total`) — each with its
 bracketed change since the last report, then the movement line. A **Wins** section leads with the good news:
 the gaps the teams closed this week (named), and a note when every no-test endpoint is already tracked. A
 **Needs attention** section then lists the actionable gaps: the untracked no-test line, the gaps by status code

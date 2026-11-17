@@ -540,8 +540,8 @@ def known_note(urls):
 def regressed(s, prev):
     """True when coverage got worse since the previous report — the only case worth actively pinging a
     human about. Quiet or improving weeks return False so the weekly message posts without a mention.
-    'Worse' = fewer endpoints fully tested, fewer endpoints with all bad-request kinds, more endpoints
-    with no test at all, or a brand-new endpoint that shipped with no test."""
+    'Worse' = fewer endpoints fully tested, fewer endpoints with all request-validation kinds, more
+    endpoints with no test at all, or a brand-new endpoint that shipped with no test."""
     if not prev:
         return False
     if s['fullyAsserted'] < prev.get('fullyAsserted', s['fullyAsserted']):
@@ -611,7 +611,7 @@ def slack(s, prev, args, progress=None):
     lines = [
         f':bar_chart: *Hub API test coverage* (weekly) · {ref} · {n} endpoints',
         f'{s["fullyAsserted"]}/{n} tested for every status code{change(s["fullyAsserted"], pf)}'
-        f'  ·  {kind_ok}/{kind_total} reject every bad-request kind{change(kind_ok, kind_before)}',
+        f'  ·  {kind_ok}/{kind_total} tested for every request-validation kind{change(kind_ok, kind_before)}',
     ]
     tl = trend_line(getattr(args, 'history', []), s)
     if tl:
@@ -855,7 +855,7 @@ def history_markdown(path, last=8):
     with open(path, newline='') as f:
         rows = list(csv.DictReader(f))[-last:]
     cols = [('date', 'Date')] + [(f'{b}_tested', NAMES[b].split(' (')[-1].rstrip(')') + ' tested') for b in BUCKETS] \
-        + [('fullyAsserted', 'Fully tested endpoints'), ('requestChecksFull', 'All bad-request kinds covered'),
+        + [('fullyAsserted', 'Fully tested endpoints'), ('requestChecksFull', 'All request-validation kinds covered'),
            ('operations', 'Endpoints')]
     out = [f'## Coverage history (last {len(rows)} reports)', '',
            '| ' + ' | '.join(h for _, h in cols) + ' |', '|' + '---|' * len(cols)]
