@@ -46,11 +46,14 @@ export function resolveParamSchema(p: ParameterModel): ResolvedParamSchema | und
 }
 
 /**
- * The constraint fields a value must satisfy, merged from the schema itself, every `allOf` part
- * (recursively) and the first branch of a `oneOf`/`anyOf`. A Camunda key that may be one of several
- * key types (`ScopeKey` is `oneOf: [ProcessInstanceKey, ElementInstanceKey]`, each `allOf: [LongKey]`)
- * keeps its numeric `pattern` only inside those branches. The branches of the specs' key unions share
- * the same constraints, so the first one is representative. The schema's own fields win over its parts.
+ * The constraints to build a VALID value from: the schema itself, every `allOf` part (recursively)
+ * and the first branch of a `oneOf`/`anyOf`. A value that satisfies one branch satisfies the union,
+ * so the first branch is enough here. A Camunda key that may be one of several key types (`ScopeKey`
+ * is `oneOf: [ProcessInstanceKey, ElementInstanceKey]`, each `allOf: [LongKey]`) keeps its numeric
+ * `pattern` only inside those branches. The schema's own fields win over its parts.
+ *
+ * Do not build an INVALID value from this: a constraint of the first branch can be one another branch
+ * does not have. Use {@link resolveViolationSchema} for that.
  */
 export function resolveFieldSchema(schema: SchemaFragment): ResolvedParamSchema {
   const out: ResolvedParamSchema = { schema };
@@ -71,6 +74,85 @@ export function resolveFieldSchema(schema: SchemaFragment): ResolvedParamSchema 
   }
   merge(schema);
   return out;
+}
+
+/** {@link resolveViolationSchema} for a parameter. */
+export function resolveParamViolationSchema(p: ParameterModel): ResolvedParamSchema | undefined {
+  const schema = isSchemaFragment(p.schema) ? p.schema : undefined;
+  if (!schema) return undefined;
+  return resolveViolationSchema(schema);
+}
+
+type Constraints = Omit<ResolvedParamSchema, 'schema'>;
+
+/**
+ * The constraints EVERY allowed value meets, to build an INVALID value from: the schema itself and
+ * every `allOf` part (recursively), plus, for a `oneOf`/`anyOf`, only what all branches agree on.
+ * A value that breaks a constraint must break every branch, or another branch accepts it and the
+ * test expects 400 for a valid request (PR #802 review). So across branches:
+ *  - `pattern`, `format`, `type`: kept only when every branch has the same one;
+ *  - `minLength`: the smallest, `maxLength`: the largest, each only when every branch has one;
+ *  - `enumValues`: the union, only when every branch is an enum.
+ * The Camunda key unions (`ResourceKey`: four `allOf: [LongKey]` branches) share their pattern and
+ * lengths, so they keep them. The schema's own fields win over its parts.
+ */
+export function resolveViolationSchema(schema: SchemaFragment): ResolvedParamSchema {
+  return { schema, ...violationConstraints(schema, new Set()) };
+}
+
+function violationConstraints(s: unknown, seen: Set<SchemaFragment>): Constraints {
+  const out: Constraints = {};
+  if (!isSchemaFragment(s) || seen.has(s)) return out;
+  seen.add(s);
+  const fill = (from: Constraints): void => {
+    if (from.pattern !== undefined && out.pattern === undefined) out.pattern = from.pattern;
+    if (from.minLength !== undefined && out.minLength === undefined) out.minLength = from.minLength;
+    if (from.maxLength !== undefined && out.maxLength === undefined) out.maxLength = from.maxLength;
+    if (from.format !== undefined && out.format === undefined) out.format = from.format;
+    if (from.enumValues && !out.enumValues) out.enumValues = from.enumValues.slice();
+    if (from.type !== undefined && out.type === undefined) out.type = from.type;
+  };
+  fill({
+    pattern: typeof s.pattern === 'string' ? s.pattern : undefined,
+    minLength: typeof s.minLength === 'number' ? s.minLength : undefined,
+    maxLength: typeof s.maxLength === 'number' ? s.maxLength : undefined,
+    format: typeof s.format === 'string' ? s.format : undefined,
+    enumValues: Array.isArray(s.enum) ? s.enum : undefined,
+    type: s.type,
+  });
+  if (Array.isArray(s.allOf)) for (const part of s.allOf) fill(violationConstraints(part, seen));
+  for (const branches of [s.oneOf, s.anyOf]) {
+    if (Array.isArray(branches) && branches.length) {
+      // Each branch resolves on its own copy of `seen`: a schema shared by two branches must count
+      // for both.
+      fill(commonToAll(branches.map((b) => violationConstraints(b, new Set(seen)))));
+    }
+  }
+  return out;
+}
+
+function commonToAll(views: Constraints[]): Constraints {
+  const same = <T>(get: (v: Constraints) => T | undefined): T | undefined => {
+    const first = get(views[0]);
+    if (first === undefined) return undefined;
+    const key = JSON.stringify(first);
+    return views.every((v) => JSON.stringify(get(v)) === key) ? first : undefined;
+  };
+  const all = <T>(get: (v: Constraints) => T | undefined): T[] | undefined => {
+    const values = views.map(get);
+    return values.every((x) => x !== undefined) ? values.filter((x) => x !== undefined) : undefined;
+  };
+  const mins = all((v) => v.minLength);
+  const maxs = all((v) => v.maxLength);
+  const enums = all((v) => v.enumValues);
+  return {
+    pattern: same((v) => v.pattern),
+    format: same((v) => v.format),
+    type: same((v) => v.type),
+    minLength: mins ? Math.min(...mins) : undefined,
+    maxLength: maxs ? Math.max(...maxs) : undefined,
+    enumValues: enums ? [...new Set(enums.flat())] : undefined,
+  };
 }
 
 /**
