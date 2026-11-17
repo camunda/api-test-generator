@@ -54,10 +54,13 @@ report page leads with: the share of endpoints tested for every status code now 
 points) over the reports on record, with the no-test trajectory (`· no-test A→B`) appended. It renders once at
 least two reports exist (one earlier run plus the current one); the bracketed deltas on the headline show only
 the week-over-week step, this line shows the direction over the whole history. The report page (`page.html`)
-opens with the same **"This week's movement"** headline, and adds plain lines for how many coverage gaps were
-newly reported and closed this week and how many have stalled (open 4+ weeks) — detail that needs the per-issue
-state the Slack message is built too early to have — so a manager can see at a glance whether the team is acting
-on the gaps. A gap's age is measured from its tracking issue's latest reopen (or its creation when never
+opens with the same **"This week's movement"** headline, and adds plain lines naming which coverage gaps were
+newly reported and **closed** this week (the endpoints whose tracking issue closed because they are now
+covered) and how many have stalled (open 4+ weeks) — detail that needs the per-issue state the Slack message is
+built too early to have, which is why the closed list lives on the page and not in Slack — so a manager can see
+at a glance whether the team is acting on the gaps. The page header shows the **report date** (the run that
+generated it), and the workflow publishes the page as its own dated artifact, **`hub-coverage-page-<date>`**, so
+it is one click from the run rather than buried in the full report bundle. A gap's age is measured from its tracking issue's latest reopen (or its creation when never
 reopened), so a gap that was fixed, closed, then returned is counted from its return — not reported as open
 the whole time it was closed. An endpoint with **no test *and* no tracking issue** is an
 unexplained gap: it is escalated to a `:red_circle:` alert line and pages `hub-medic`. A known/tracked no-test

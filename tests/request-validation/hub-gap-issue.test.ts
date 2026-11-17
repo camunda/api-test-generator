@@ -453,7 +453,13 @@ describe('per-endpoint issue lifecycle (stub gh)', () => {
       ],
       NO_HUB,
     );
-    expect(r.gapsProgress).toEqual({ newThisWeek: ['newOp'], closedThisWeek: 1 });
+    // closedOps names which endpoints were covered this run (fixedOp), so the page can list them, not
+    // just count them; closedThisWeek stays the count (= closedOps length).
+    expect(r.gapsProgress).toEqual({
+      newThisWeek: ['newOp'],
+      closedThisWeek: 1,
+      closedOps: ['fixedOp'],
+    });
   });
 
   it('assigns a newly created issue to the resolved endpoint author', () => {
@@ -1180,10 +1186,10 @@ describe("coverage report page — this week's movement", () => {
     expect(trendSection([], null, null)).toBe('');
   });
 
-  it('lists new, closed and stalled gap counts in plain language', () => {
+  it('lists new, closed and stalled gaps by name in plain language', () => {
     const html = trendSection(
       [],
-      { newThisWeek: ['createFile'], closedThisWeek: 3 },
+      { newThisWeek: ['createFile'], closedThisWeek: 2, closedOps: ['oldFile', 'oldForm'] },
       {
         exportWorkspace: 42,
         freshGap: 2,
@@ -1192,7 +1198,10 @@ describe("coverage report page — this week's movement", () => {
     expect(html).toContain('new coverage gap reported this week');
     expect(html).toContain('<code>createFile</code>');
     expect(html).toContain('coverage gaps closed this week');
-    expect(html).toContain('<b>3</b>');
+    expect(html).toContain('<b>2</b>');
+    // closed gaps are named, not just counted, so the team sees which endpoints got covered
+    expect(html).toContain('<code>oldFile</code>');
+    expect(html).toContain('<code>oldForm</code>');
     // open 42 days (>= 4 weeks) is stalled; 2 days is not
     expect(html).toContain('stalled — open 4+ weeks');
     expect(html).toContain('<code>exportWorkspace</code>');
@@ -1206,13 +1215,33 @@ describe("coverage report page — this week's movement", () => {
       writeFileSync(join(dir, 'rows.json'), JSON.stringify(minRows));
       writeFileSync(
         join(dir, 'gaps-progress.json'),
-        JSON.stringify({ newThisWeek: ['x'], closedThisWeek: 2 }),
+        JSON.stringify({ newThisWeek: ['x'], closedThisWeek: 1, closedOps: ['coveredNow'] }),
       );
       execFileSync('python3', ['-B', pageScript, '--report', dir], { encoding: 'utf8' });
       const html = readFileSync(join(dir, 'page.html'), 'utf8');
       expect(html).toContain("This week's movement");
       expect(html).toContain('new coverage gap reported this week');
-      expect(html).toContain('coverage gaps closed this week');
+      expect(html).toContain('coverage gap closed this week');
+      expect(html).toContain('<code>coveredNow</code>');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('shows the report date in the header from the latest history.csv row', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cov-date-'));
+    try {
+      writeFileSync(join(dir, 'summary.json'), JSON.stringify(minSummary));
+      writeFileSync(join(dir, 'rows.json'), JSON.stringify(minRows));
+      writeFileSync(
+        join(dir, 'history.csv'),
+        'date,fullyAsserted,operations,zeroTestOperations\n2026-11-10,1,1,0\n2026-11-17,1,1,0\n',
+      );
+      execFileSync('python3', ['-B', pageScript, '--report', dir], { encoding: 'utf8' });
+      const html = readFileSync(join(dir, 'page.html'), 'utf8');
+      // the newest row's date (this run) is shown as "as of ..." in the header, not an older row's
+      expect(html).toContain('as of 2026-11-17');
+      expect(html).not.toContain('as of 2026-11-10');
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

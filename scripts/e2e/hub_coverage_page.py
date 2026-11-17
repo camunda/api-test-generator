@@ -47,6 +47,7 @@ h3 { margin:0; font-size:1.02rem; letter-spacing:-.005em; }
 .lede { margin:20px 0 0; max-width:62ch; font-size:1.12rem; color:var(--ink); }
 .lede b { font-weight:650; }
 .meta { margin:14px 0 0; color:var(--muted); font:.8rem var(--mono); display:flex; flex-wrap:wrap; gap:6px 18px; }
+.meta .asof { color:var(--ink); font-weight:650; }
 
 .bars { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:2px; background:var(--panel); border:1px solid var(--rule); }
 .bar { display:grid; grid-template-columns:56px minmax(180px,1.2fr) minmax(120px,2fr) 84px; align-items:center; gap:18px; padding:14px 20px; }
@@ -295,11 +296,12 @@ def trend_section(history, progress=None, ages=None):
     items = []
     if progress:
         new = progress.get('newThisWeek') or []
-        closed = progress.get('closedThisWeek') or 0
+        closed_ops = progress.get('closedOps') or []
+        closed = progress.get('closedThisWeek', len(closed_ops))
         items.append(('new', f'<b>{len(new)}</b> new coverage gap' + ('' if len(new) == 1 else 's')
                       + ' reported this week' + (f': {names(new)}' if new else '')))
         items.append(('closed', f'<b>{int(closed)}</b> coverage gap' + ('' if closed == 1 else 's')
-                      + ' closed this week'))
+                      + ' closed this week' + (f': {names(closed_ops)}' if closed_ops else '')))
     if ages:
         stalled = sorted(o for o, dys in ages.items() if int(dys) >= STALLED_WEEKS * 7)
         items.append(('stalled', f'<b>{len(stalled)}</b> stalled — open {STALLED_WEEKS}+ weeks'
@@ -359,13 +361,17 @@ def render(s, rows, history=(), ages=None, progress=None):
     # otherwise read "Where the gaps are tracked in #NNN" to a screen reader navigating by region.
     findings_html = (f'<section aria-labelledby="gaps"><h2><span id="gaps">Where the gaps are</span>'
                      f'{gap_link}</h2>{inner}</section>') if (fnd or t_ref) else ''
+    # The date of this report run, from the latest history.csv row the workflow just appended; shown in the
+    # header so a saved or shared page says when it was generated. Empty on a local run with no history.
+    report_date = history[-1].get('date', '') if history else ''
+    date_span = f'<span class="asof">as of {esc(report_date)}</span>' if report_date else ''
     return f"""<title>Hub Endpoint Coverage</title>
 <style>{CSS}</style>
 <main>
   <header>
     <h1>Hub endpoint coverage</h1>
     <p class="lede"><b>{verdict}</b> {c['2xx'][0]} of {c['2xx'][1]} endpoints have a success test, but only {s['fullyAsserted']} of {s['operations']} have a test for every response the spec lists (2xx/400/401/403/404/409; a documented 500 is not checked). {s['opsMissingResponseTest']} endpoints are missing a test for a success, 400, 401, 404 or 409 response, and {len(s['missing']['403'])} have an untested 403.</p>
-    <p class="meta"><span>camunda-hub@{esc(ref)}</span><span>{s['operations']} endpoints</span><span>{s['negativeTests']} negative tests</span><span>secured + rbac profiles</span></p>
+    <p class="meta">{date_span}<span>camunda-hub@{esc(ref)}</span><span>{s['operations']} endpoints</span><span>{s['negativeTests']} negative tests</span><span>secured + rbac profiles</span></p>
   </header>
   {trend_section(history, progress, ages)}
   <section aria-labelledby="codes"><h2 id="codes">Responses tested, out of those the spec lists</h2><ol class="bars">{bars}</ol></section>

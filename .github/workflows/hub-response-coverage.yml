@@ -229,6 +229,24 @@ jobs:
           path: coverage-report/
           retention-days: 90
 
+      # Also publish the rendered page on its own, named with the report date, so people do not have to
+      # download the 40-file bundle and hunt for page.html — the dated artifact is the one-click report.
+      # The date comes from history.csv's newest row (the row this run just appended), so it matches the
+      # date shown in the page header; today's UTC date is the fallback on a run with no history.
+      - name: Name the report page by its date
+        id: page-date
+        run: |
+          d=$(tail -n1 coverage-report/history.csv 2>/dev/null | cut -d, -f1)
+          case "$d" in [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]) ;; *) d=$(date -u +%F) ;; esac
+          echo "ymd=$d" >> "$GITHUB_OUTPUT"
+
+      - name: Upload the report page on its own
+        uses: actions/upload-artifact@v7
+        with:
+          name: hub-coverage-page-${{ steps.page-date.outputs.ymd }}
+          path: coverage-report/page.html
+          retention-days: 90
+
       - name: Write job summary
         run: cat coverage-report/history.md coverage-report/matrix.md >> "$GITHUB_STEP_SUMMARY"
 

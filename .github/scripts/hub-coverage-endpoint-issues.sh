@@ -159,14 +159,25 @@ jq -R -s 'split("\n") | map(select(length > 0) | split("\t") | {(.[0]): (.[1] | 
   "$ages" > "$REPORT_DIR/endpoint-ages.json"
 
 # This week's movement, for the report page: the brand-new gaps reported this run (ops that got a new
-# issue) and how many gaps were closed. "Closed" = open per-endpoint issues whose endpoint no longer has
-# a gap (title in $existing OPEN but not in $current) — the same set the cleanup loop below closes.
+# issue) and the gaps that closed. "Closed" = open per-endpoint issues whose endpoint no longer has a gap
+# (title in $existing OPEN but not in $current) — the same set the cleanup loop below closes. We record the
+# operationIds, not just a count, so the page can name which endpoints were covered this week.
 new_json=$(jq -R -s 'split("\n") | map(select(length > 0))' "$new_ops")
-closed_count=$(jq -r --arg p "$prefix" --arg x "$endpoint_suffix" \
+closed_titles=$(jq -r --arg p "$prefix" --arg x "$endpoint_suffix" \
   '.[] | select(.state == "OPEN" and (.title | startswith($p)) and (.title | endswith($x))) | .title' \
-  <<< "$existing" | grep -cxvF -f "$current" 2>/dev/null || true)
-jq -n --argjson new "$new_json" --argjson closed "${closed_count:-0}" \
-  '{newThisWeek: $new, closedThisWeek: $closed}' > "$REPORT_DIR/gaps-progress.json"
+  <<< "$existing" | grep -xvF -f "$current" 2>/dev/null || true)
+# Map each closed title back to its operationId by stripping the fixed prefix and suffix (bash parameter
+# expansion, so the "[" in the prefix needs no regex escaping).
+closed_ops=$(mktemp)
+while IFS= read -r t; do
+  [ -z "$t" ] && continue
+  o=${t#"$prefix"}; o=${o%"$endpoint_suffix"}
+  printf '%s\n' "$o" >> "$closed_ops"
+done <<< "$closed_titles"
+closed_json=$(jq -R -s 'split("\n") | map(select(length > 0))' "$closed_ops")
+jq -n --argjson new "$new_json" --argjson closedops "$closed_json" \
+  '{newThisWeek: $new, closedThisWeek: ($closedops | length), closedOps: $closedops}' \
+  > "$REPORT_DIR/gaps-progress.json"
 
 # Close open per-endpoint issues whose endpoint no longer has a gap (the singular "test" suffix matches
 # only the per-endpoint issues, never the plural-"tests" summary or the old per-area issues).
