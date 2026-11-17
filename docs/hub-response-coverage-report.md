@@ -64,9 +64,11 @@ least two reports exist (one earlier run plus the current one); the bracketed de
 the week-over-week step, this line shows the direction over the whole history. The report page (`page.html`)
 opens with the same **"This week's movement"** headline, and adds plain lines naming which coverage gaps were
 newly reported and **closed** this week (the endpoints whose tracking issue closed because they are now
-covered) and how many have stalled (open 4+ weeks) — detail that needs the per-issue state the Slack message is
-built too early to have, which is why the closed list lives on the page and not in Slack — so a manager can see
-at a glance whether the team is acting on the gaps. The page header shows the **report date** (the run that
+covered) and how many have stalled (open 4+ weeks), so a manager can see at a glance whether the team is acting
+on the gaps. The **closed** list is the same one the Slack **Wins** section names — both read the reconciled
+`gaps-progress.json`, which is exactly why the Slack message is re-rendered after the per-endpoint issues are
+reconciled (above). The **newly reported** and **stalled** lines are extra detail the page carries that the
+Slack message does not. The page header shows the **report date** (the run that
 generated it), and the workflow publishes the page as its own dated artifact, **`hub-coverage-page-<date>`**, so
 it is one click from the run rather than buried in the full report bundle.
 
