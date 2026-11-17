@@ -560,23 +560,31 @@ def read_history(path):
 
 
 def trend_line(history, s):
-    """A one-line Slack summary of the trajectory over the last few reports, or '' with fewer than two
-    history rows. The baseline is up to four reports back (clamped to the oldest row). A column a
-    baseline row never recorded (an older header) is skipped, never guessed."""
-    if len(history) < 2:
+    """A one-line Slack "This week's movement" headline — the same trajectory the report page leads with:
+    the share of endpoints tested for every status code now, and how many points it has moved over the
+    reports on record. Built from the fully-tested % per report (history rows plus this run), so it needs
+    at least two reports (one prior plus this run); '' otherwise, matching the page. A row that never
+    recorded the columns (an older header) is skipped, never guessed. The no-test trajectory is appended
+    because the % headline covers only the tested axis."""
+    pct = []
+    for r in history:
+        fa, ops = r.get('fullyAsserted'), r.get('operations')
+        if fa not in (None, '') and ops not in (None, '') and int(ops):
+            pct.append(100 * int(fa) / int(ops))
+    if s.get('operations'):
+        pct.append(100 * int(s['fullyAsserted']) / int(s['operations']))
+    if len(pct) < 2:
         return ''
-    back = min(4, len(history))
-    base = history[-back]
-    parts = []
-    bf = base.get('fullyAsserted')
-    if bf not in (None, ''):
-        parts.append(f'tested {int(bf)}→{s["fullyAsserted"]}')
-    bz = base.get('zeroTestOperations')
+    d = round(pct[-1] - pct[0])
+    move = f'▲ up {d} pts' if d > 0 else f'▼ down {abs(d)} pts' if d < 0 else 'level'
+    line = (f":chart_with_upwards_trend: *This week's movement:* {pct[-1]:.0f}% of endpoints tested for "
+            f'every status code — {move} over the last {len(pct)} reports')
+    # Preserve the no-test trajectory: the oldest history row that recorded it, over the same window.
+    bz = next((r['zeroTestOperations'] for r in history
+               if r.get('zeroTestOperations') not in (None, '')), None)
     if bz not in (None, ''):
-        parts.append(f'no-test {int(bz)}→{len(s["zeroTestOperations"])}')
-    if not parts:
-        return ''
-    return f':chart_with_upwards_trend: last {back + 1} reports: ' + ' · '.join(parts)
+        line += f' · no-test {int(bz)}→{len(s["zeroTestOperations"])}'
+    return line
 
 
 def slack(s, prev, args):

@@ -889,34 +889,44 @@ describe('weekly Slack trend + no-test escalation', () => {
     });
   };
 
-  it('summarises the trend over recent reports once there are at least two', () => {
+  it("leads with a 'This week's movement' headline — the tested % and its points delta — with at least two reports", () => {
     expect(
       trendLine(
         [
-          { fullyAsserted: '54', zeroTestOperations: '2' },
-          { fullyAsserted: '56', zeroTestOperations: '2' },
+          { fullyAsserted: '54', operations: '66', zeroTestOperations: '2' },
+          { fullyAsserted: '56', operations: '66', zeroTestOperations: '2' },
         ],
-        { fullyAsserted: 58, zeroTestOperations: ['x'] },
+        { fullyAsserted: 58, operations: 66, zeroTestOperations: ['x'] },
       ),
-    ).toMatch(/last \d+ reports: tested 54→58 · no-test 2→1/);
+      // 54/66→56/66→58/66 is 82%→85%→88%; +6 pts over the three reports; no-test 2→1.
+    ).toMatch(
+      /This week's movement:\* 88% of endpoints tested for every status code — ▲ up 6 pts over the last 3 reports · no-test 2→1/,
+    );
   });
 
-  it('shows nothing until a second report exists', () => {
+  it('shows nothing until a prior report exists to compare against', () => {
+    // no history → only this run → a single data point → no movement to show
+    expect(trendLine([], { fullyAsserted: 58, operations: 66, zeroTestOperations: [] })).toBe('');
+    // one prior report + this run = two points → the movement headline renders (parity with the page)
     expect(
-      trendLine([{ fullyAsserted: '58', zeroTestOperations: '1' }], {
+      trendLine([{ fullyAsserted: '52', operations: '66', zeroTestOperations: '1' }], {
         fullyAsserted: 58,
+        operations: 66,
         zeroTestOperations: [],
       }),
-    ).toBe('');
+    ).toContain("This week's movement");
   });
 
-  it('omits a metric the baseline row never recorded, rather than crashing', () => {
-    const line = trendLine([{ zeroTestOperations: '3' }, { zeroTestOperations: '2' }], {
-      fullyAsserted: 58,
-      zeroTestOperations: ['a'],
-    });
-    expect(line).toMatch(/no-test 3→1/);
-    expect(line).not.toContain('tested ');
+  it('skips a report that never recorded the tested columns, rather than crashing', () => {
+    const line = trendLine(
+      [
+        { zeroTestOperations: '3' }, // older header: no fullyAsserted/operations → skipped from the % series
+        { fullyAsserted: '56', operations: '66', zeroTestOperations: '2' },
+      ],
+      { fullyAsserted: 58, operations: 66, zeroTestOperations: ['a'] },
+    );
+    // only the valid row + this run span the window; the oldest recorded no-test baseline (3) is used
+    expect(line).toMatch(/over the last 2 reports · no-test 3→1/);
   });
 
   it('escalates an untracked no-test endpoint to a red alert and pings once', () => {

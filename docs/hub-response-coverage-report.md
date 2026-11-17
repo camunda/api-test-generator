@@ -49,13 +49,15 @@ bracketed change since the last report; then the actionable gaps by status code 
 a one-line roll-up of the other dimensions (lifecycle, optional-field, response-shape), and the no-test lines.
 The caveats live in the Guide rather than inline.
 
-A `:chart_with_upwards_trend: Trend (last N reports)` line shows the **trajectory** — the headline fully-tested
-count and the no-test count now versus a few reports back — once at least three reports exist (two earlier
-runs plus the current one); the bracketed deltas show only the week-over-week step, the trend shows the
-direction. The report page (`page.html`) opens with a **"This week's movement"** summary instead: a one-line
-trajectory of the headline %, then plain lines for how many coverage gaps were newly reported and closed this
-week and how many have stalled (open 4+ weeks), so a manager can see at a glance whether the team is acting on
-the gaps. A gap's age is measured from its tracking issue's latest reopen (or its creation when never
+A `:chart_with_upwards_trend: *This week's movement:*` line shows the **trajectory** — the same headline the
+report page leads with: the share of endpoints tested for every status code now and how far it has moved (in
+points) over the reports on record, with the no-test trajectory (`· no-test A→B`) appended. It renders once at
+least two reports exist (one earlier run plus the current one); the bracketed deltas on the headline show only
+the week-over-week step, this line shows the direction over the whole history. The report page (`page.html`)
+opens with the same **"This week's movement"** headline, and adds plain lines for how many coverage gaps were
+newly reported and closed this week and how many have stalled (open 4+ weeks) — detail that needs the per-issue
+state the Slack message is built too early to have — so a manager can see at a glance whether the team is acting
+on the gaps. A gap's age is measured from its tracking issue's latest reopen (or its creation when never
 reopened), so a gap that was fixed, closed, then returned is counted from its return — not reported as open
 the whole time it was closed. An endpoint with **no test *and* no tracking issue** is an
 unexplained gap: it is escalated to a `:red_circle:` alert line and pages `hub-medic`. A known/tracked no-test
