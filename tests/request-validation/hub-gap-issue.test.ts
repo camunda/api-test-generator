@@ -1368,6 +1368,9 @@ describe('coverage report page — gap-card issue links', () => {
       expect(html).toContain('The remaining gaps are listed in the tracking issue.');
       // Must not claim the remaining gaps are only one kind — findings() also omits success/auth cards.
       expect(html).not.toContain('bad-request-kind checks');
+      // The section is a landmark named by aria-labelledby="gaps"; its target must hold only the heading
+      // words, so a screen reader navigating by region hears "Where the gaps are", not the tracking link.
+      expect(html).toContain('<span id="gaps">Where the gaps are</span>');
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

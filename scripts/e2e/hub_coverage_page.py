@@ -354,8 +354,11 @@ def render(s, rows, history=(), ages=None, progress=None):
         inner = '<p class="gaps-note">The remaining gaps are listed in the tracking issue.</p>'
     else:
         inner = ''
-    findings_html = (f'<section aria-labelledby="gaps"><h2 id="gaps">Where the gaps are{gap_link}</h2>'
-                     f'{inner}</section>') if (fnd or t_ref) else ''
+    # The section is a landmark named by aria-labelledby, so point it at the heading words alone — the
+    # tracking link stays visually inline in the <h2> but out of the region's accessible name, which would
+    # otherwise read "Where the gaps are tracked in #NNN" to a screen reader navigating by region.
+    findings_html = (f'<section aria-labelledby="gaps"><h2><span id="gaps">Where the gaps are</span>'
+                     f'{gap_link}</h2>{inner}</section>') if (fnd or t_ref) else ''
     return f"""<title>Hub Endpoint Coverage</title>
 <style>{CSS}</style>
 <main>
