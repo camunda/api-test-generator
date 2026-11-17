@@ -920,6 +920,43 @@
       }
     },
     {
+      "operationId": "migrateProcessInstancesBatchOperation",
+      "scenarioKinds": [
+        {
+          "kind": "constraint-violation",
+          "targets": ["operationReference"],
+          "constraintKinds": ["belowMinimum", "wayBelowMinimum"]
+        }
+      ],
+      "reason": "operationReference declares minimum: 1 in the spec, but migrateProcessInstancesBatchOperation's request validator never calls RequestValidator.validateOperationReference for it (camunda/camunda#58942), so an integer value of 0 or -99 is forwarded instead of rejected — the batch is created (200) instead of 400ing up front. Previously hidden because the baseline body sent an invalid migrationPlan.targetProcessDefinitionKey (\"x\") that the server rejected first. Scoped to just those two constraint kinds on operationReference; the other constraint-violation coverage on the same body is unaffected.",
+      "knownIssue": {
+        "summary": "operationReference's minimum:1 constraint isn't enforced on several job/incident/process-instance/decision-instance operations — 0 or negative values are forwarded instead of being rejected; a single-resource lookup operation (e.g. deleteProcessInstance, resolveIncident, updateJob, deleteDecisionInstance) 404s (resource lookup runs first) instead of 400ing up front, while a filter-based batch operation (no synchronous resource lookup) returns 200 and creates the batch instead of 400ing up front",
+        "url": "https://github.com/camunda/camunda/issues/58942"
+      }
+    },
+    {
+      "operationId": "publishMessage",
+      "scenarioKinds": [
+        {
+          "kind": "constraint-violation",
+          "targets": ["businessId"],
+          "constraintKinds": ["belowMinLength", "emptyString"]
+        }
+      ],
+      "reason": "businessId declares minLength: 1 (BusinessId schema), but the gateway accepts an empty businessId on publishMessage: MessageRequestValidator calls RequestValidator.validateBusinessId, which only checks the maximum length, and MessageCorrelationRecord's businessId defaults to \"\" (unset), so \"\" behaves like omitting the field — the message is published (200) instead of 400. completeJob and assignProcessInstanceBusinessId do reject a blank businessId. Previously hidden because the baseline body sent a gated tenantId that the server rejected first. Whether the spec or the validator is wrong is an open question with Core Features / the C8 API team (no issue yet). Scoped to the empty-string kinds on businessId; its max-length cases still run."
+    },
+    {
+      "operationId": "correlateMessage",
+      "scenarioKinds": [
+        {
+          "kind": "constraint-violation",
+          "targets": ["businessId"],
+          "constraintKinds": ["belowMinLength", "emptyString"]
+        }
+      ],
+      "reason": "businessId declares minLength: 1 (BusinessId schema), but the gateway accepts an empty businessId on correlateMessage: MessageRequestValidator calls RequestValidator.validateBusinessId, which only checks the maximum length, and MessageCorrelationRecord's businessId defaults to \"\" (unset), so \"\" behaves like omitting the field — the correlation proceeds to the subscription lookup (404) instead of 400. completeJob and assignProcessInstanceBusinessId do reject a blank businessId. Previously hidden because the baseline body sent a gated tenantId that the server rejected first. Whether the spec or the validator is wrong is an open question with Core Features / the C8 API team (no issue yet). Scoped to the empty-string kinds on businessId; its max-length cases still run."
+    },
+    {
       "operationId": "deleteProcessInstance",
       "scenarioKinds": [
         "constraint-violation"
