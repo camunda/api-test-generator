@@ -77,6 +77,15 @@ h3 { margin:0; font-size:1.02rem; letter-spacing:-.005em; }
 .h2link { margin-left:12px; font:400 .72rem var(--mono); text-transform:none; letter-spacing:0; }
 .h2link a { color:var(--focus); }
 .gaps-note { margin:0; color:var(--muted); font-size:.95rem; }
+.plegend { display:flex; gap:20px; font-size:.84rem; color:var(--muted); margin:0 0 8px; }
+.plegend .pk::before { content:''; display:inline-block; width:11px; height:11px; border-radius:2px; margin-right:7px; vertical-align:-1px; }
+.plegend .pk.rep::before { background:var(--hold); } .plegend .pk.clo::before { background:var(--ok); }
+.pchart { width:100%; height:auto; max-width:720px; }
+.pchart .b-rep { fill:var(--hold); } .pchart .b-clo { fill:var(--ok); }
+.pchart .x, .pchart .y { fill:var(--muted); font:400 10px var(--mono); }
+.pchart .x { text-anchor:middle; } .pchart .y { text-anchor:end; }
+.pchart .vlab { fill:var(--ink); font:650 9px var(--mono); text-anchor:middle; }
+.pchart .ax { stroke:var(--rule); stroke-width:1; }
 
 .tools { display:flex; flex-wrap:wrap; gap:14px 28px; align-items:center; justify-content:space-between; margin-bottom:14px; }
 .legend { display:flex; flex-wrap:wrap; gap:6px 20px; font-size:.84rem; color:var(--muted); }
@@ -314,7 +323,52 @@ def trend_section(history, progress=None, ages=None):
             f'{headline}{activity}</section>')
 
 
-def render(s, rows, history=(), ages=None, progress=None):
+def progress_chart(rows):
+    """A grouped-bar chart of gaps reported vs. closed per week, so a QA manager can see whether the teams
+    act on what the generator reports: if the green (closed) bars keep pace with the amber (reported) bars
+    the findings are being worked; a widening gap means they pile up. `rows` are the progress-history.csv
+    rows ({date, reported, closed}); '' with fewer than two weeks (nothing to trend yet). A row missing a
+    column is skipped rather than guessed."""
+    pts = []
+    for r in rows:
+        d, rep, clo = r.get('date'), r.get('reported'), r.get('closed')
+        if d and rep not in (None, '') and clo not in (None, ''):
+            pts.append((d, int(rep), int(clo)))
+    if len(pts) < 2:
+        return ''
+    pts = pts[-12:]  # last 12 weeks keeps the bars legible
+    top = max((max(rep, clo) for _, rep, clo in pts), default=0) or 1
+    w, h, pad_l, pad_r, pad_t, pad_b = 720, 240, 34, 12, 18, 38
+    plot_w, plot_h = w - pad_l - pad_r, h - pad_t - pad_b
+    group_w = plot_w / len(pts)
+    bar_w = min(18.0, group_w / 2 - 3)
+    y0 = pad_t + plot_h
+
+    def y(v):
+        return pad_t + plot_h * (1 - v / top)
+
+    parts = [f'<line class="ax" x1="{pad_l}" y1="{y0:.1f}" x2="{w - pad_r}" y2="{y0:.1f}"/>',
+             f'<text class="y" x="{pad_l - 6}" y="{y0 + 3:.1f}">0</text>',
+             f'<text class="y" x="{pad_l - 6}" y="{pad_t + 3:.1f}">{top}</text>']
+    for i, (d, rep, clo) in enumerate(pts):
+        cx = pad_l + group_w * (i + 0.5)
+        for val, cls, bx in ((rep, 'b-rep', cx - bar_w - 1), (clo, 'b-clo', cx + 1)):
+            if val > 0:
+                parts.append(f'<rect class="{cls}" x="{bx:.1f}" y="{y(val):.1f}" width="{bar_w:.1f}" '
+                             f'height="{y0 - y(val):.1f}"><title>{esc(d)}: {val} {cls[2:]}</title></rect>')
+                parts.append(f'<text class="vlab" x="{bx + bar_w / 2:.1f}" y="{y(val) - 3:.1f}">{val}</text>')
+        md = d[5:] if len(d) >= 10 else esc(d)
+        parts.append(f'<text class="x" x="{cx:.1f}" y="{y0 + 14:.1f}">{esc(md)}</text>')
+    svg = (f'<svg viewBox="0 0 {w} {h}" role="img" preserveAspectRatio="xMidYMid meet" class="pchart" '
+           f'aria-label="Coverage gaps reported versus closed, per week, for the last {len(pts)} reports">'
+           + ''.join(parts) + '</svg>')
+    legend = ('<p class="plegend"><span class="pk rep">Reported</span>'
+              '<span class="pk clo">Closed</span></p>')
+    return ('<section aria-labelledby="progress"><h2 id="progress">Gaps reported vs. closed, by week</h2>'
+            f'{legend}{svg}</section>')
+
+
+def render(s, rows, history=(), ages=None, progress=None, progress_history=()):
     groups = {}
     for r in rows:
         groups.setdefault(r['path'].strip('/').split('/')[0], []).append(r)
@@ -374,6 +428,7 @@ def render(s, rows, history=(), ages=None, progress=None):
     <p class="meta">{date_span}<span>camunda-hub@{esc(ref)}</span><span>{s['operations']} endpoints</span><span>{s['negativeTests']} negative tests</span><span>secured + rbac profiles</span></p>
   </header>
   {trend_section(history, progress, ages)}
+  {progress_chart(progress_history)}
   <section aria-labelledby="codes"><h2 id="codes">Responses tested, out of those the spec lists</h2><ol class="bars">{bars}</ol></section>
   {findings_html}
   <section aria-labelledby="matrix">
@@ -446,8 +501,15 @@ def main():
     if os.path.exists(prog_path):
         with open(prog_path) as f:
             progress = json.load(f)
+    # Weekly reported-vs-closed rows (previous weeks + this run), written by the workflow's endpoint-issues
+    # step, for the engagement chart. Absent on a local or dry run.
+    progress_history = []
+    ph_path = os.path.join(a.report, 'progress-history.csv')
+    if os.path.exists(ph_path):
+        with open(ph_path, newline='') as f:
+            progress_history = list(csv.DictReader(f))
     out = a.out or os.path.join(a.report, 'page.html')
-    page = render(s, rows, history, ages, progress)
+    page = render(s, rows, history, ages, progress, progress_history)
     open(out, 'w', encoding='utf-8').write(page if a.fragment else as_document(page))
     print(f'wrote {out}')
 

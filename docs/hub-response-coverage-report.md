@@ -60,7 +60,15 @@ covered) and how many have stalled (open 4+ weeks) — detail that needs the per
 built too early to have, which is why the closed list lives on the page and not in Slack — so a manager can see
 at a glance whether the team is acting on the gaps. The page header shows the **report date** (the run that
 generated it), and the workflow publishes the page as its own dated artifact, **`hub-coverage-page-<date>`**, so
-it is one click from the run rather than buried in the full report bundle. A gap's age is measured from its tracking issue's latest reopen (or its creation when never
+it is one click from the run rather than buried in the full report bundle.
+
+Below the movement summary the page draws a **"Gaps reported vs. closed, by week"** bar chart — amber bars for
+the gaps the generator reported that week, green for the ones the teams closed. It is the view for a QA manager
+asking whether developers are acting on the generator after it was handed to them: when the green bars keep pace
+with the amber, the findings are being worked; when reported stays high and closed stays low, they are piling up.
+The weekly counts accumulate in `progress-history.csv` the same way `history.csv` does (each run appends its row
+and carries the earlier weeks forward through the artifact), so the chart fills in one week at a time and needs at
+least two reports before it appears. A gap's age is measured from its tracking issue's latest reopen (or its creation when never
 reopened), so a gap that was fixed, closed, then returned is counted from its return — not reported as open
 the whole time it was closed. An endpoint with **no test *and* no tracking issue** is an
 unexplained gap: it is escalated to a `:red_circle:` alert line and pages `hub-medic`. A known/tracked no-test

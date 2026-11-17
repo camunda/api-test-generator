@@ -282,6 +282,7 @@ fi
     endpointIssues: ((raw) => (raw ? JSON.parse(raw) : undefined))(read('endpoint-issues.json')),
     endpointAges: ((raw) => (raw ? JSON.parse(raw) : undefined))(read('endpoint-ages.json')),
     gapsProgress: ((raw) => (raw ? JSON.parse(raw) : undefined))(read('gaps-progress.json')),
+    progressHistory: read('progress-history.csv'),
     rendered: read('issue.rendered.md'),
     stderr: res.stderr,
   };
@@ -460,6 +461,37 @@ describe('per-endpoint issue lifecycle (stub gh)', () => {
       closedThisWeek: 1,
       closedOps: ['fixedOp'],
     });
+  });
+
+  it('appends a weekly reported-vs-closed row to progress-history.csv, continuing the previous file', () => {
+    const prevDir = mkdtempSync(join(tmpdir(), 'cov-prevprog-'));
+    const prev = join(prevDir, 'progress-history.csv');
+    writeFileSync(prev, 'date,reported,closed\n2026-11-10,4,2\n');
+    try {
+      const r = runIssueScript(
+        'hub-coverage-endpoint-issues.sh',
+        endpointFiles('newOp', 'stillOpen'),
+        [
+          { number: 5, title: endpointTitle('stillOpen'), state: 'OPEN' },
+          { number: 8, title: endpointTitle('fixedOp'), state: 'OPEN' }, // closed this run
+        ],
+        { ...NO_HUB, PREV_PROGRESS_HISTORY: prev },
+      );
+      const lines = r.progressHistory.trim().split('\n');
+      expect(lines[0]).toBe('date,reported,closed');
+      expect(lines[1]).toBe('2026-11-10,4,2'); // the earlier week is carried forward
+      // this run reported 1 new gap (newOp) and closed 1 (fixedOp)
+      expect(lines[2]).toMatch(/^\d{4}-\d{2}-\d{2},1,1$/);
+    } finally {
+      rmSync(prevDir, { recursive: true, force: true });
+    }
+  });
+
+  it('starts progress-history.csv with a header when there is no previous file', () => {
+    const r = runIssueScript('hub-coverage-endpoint-issues.sh', endpointFiles('newOp'), [], NO_HUB);
+    const lines = r.progressHistory.trim().split('\n');
+    expect(lines[0]).toBe('date,reported,closed');
+    expect(lines[1]).toMatch(/^\d{4}-\d{2}-\d{2},1,0$/); // 1 reported, 0 closed
   });
 
   it('assigns a newly created issue to the resolved endpoint author', () => {
@@ -1242,6 +1274,86 @@ describe("coverage report page — this week's movement", () => {
       // the newest row's date (this run) is shown as "as of ..." in the header, not an older row's
       expect(html).toContain('as of 2026-11-17');
       expect(html).not.toContain('as of 2026-11-10');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('coverage report page — reported vs. closed chart', () => {
+  const chart = (rows: Record<string, string>[]): string => {
+    const code = [
+      'import sys, json, importlib.util',
+      `spec = importlib.util.spec_from_file_location('p', ${JSON.stringify(pageScript)})`,
+      'p = importlib.util.module_from_spec(spec); spec.loader.exec_module(p)',
+      'd = json.load(sys.stdin)',
+      "sys.stdout.write(p.progress_chart(d['r']))",
+    ].join('\n');
+    return execFileSync('python3', ['-B', '-c', code], {
+      input: JSON.stringify({ r: rows }),
+      encoding: 'utf8',
+    });
+  };
+
+  it('draws a reported and a closed bar per week once there are two weeks', () => {
+    const svg = chart([
+      { date: '2026-11-03', reported: '6', closed: '2' },
+      { date: '2026-11-10', reported: '1', closed: '4' },
+    ]);
+    expect(svg).toContain('Gaps reported vs. closed, by week');
+    expect((svg.match(/class="b-rep"/g) || []).length).toBe(2);
+    expect((svg.match(/class="b-clo"/g) || []).length).toBe(2);
+    // each bar carries a hover title naming the week and count
+    expect(svg).toContain('2026-11-10: 1 rep');
+    expect(svg).toContain('2026-11-10: 4 clo');
+  });
+
+  it('shows nothing until there are at least two weeks of data', () => {
+    expect(chart([])).toBe('');
+    expect(chart([{ date: '2026-11-10', reported: '1', closed: '4' }])).toBe('');
+  });
+
+  it('skips a week missing a column rather than guessing it', () => {
+    const svg = chart([
+      { date: '2026-11-03', reported: '6', closed: '2' },
+      { date: '2026-11-10', reported: '1' }, // no closed column → skipped
+      { date: '2026-11-17', reported: '2', closed: '3' },
+    ]);
+    // two complete weeks remain, so two reported bars (the incomplete row is dropped)
+    expect((svg.match(/class="b-rep"/g) || []).length).toBe(2);
+    expect(svg).not.toContain('2026-11-10');
+  });
+
+  it('renders the chart into the full page from progress-history.csv', () => {
+    const B = ['2xx', '400', '401', '403', '404', '409'];
+    const minSummary = {
+      specHash: 'sha256:abcdef0',
+      specRef: 'abcdef1234567',
+      operations: 1,
+      negativeTests: 5,
+      fullyAsserted: 1,
+      opsMissingResponseTest: 0,
+      codes: Object.fromEntries(B.map((b) => [b, [1, 1]])),
+      missing: Object.fromEntries(B.map((b) => [b, []])),
+      heldCells: Object.fromEntries(B.map((b) => [b, []])),
+      optionalFields: [0, 0],
+      optionalMissing: {},
+      shapeUnvalidated: [],
+      zeroTestOperations: [],
+      trackedOperations: [],
+    };
+    const dir = mkdtempSync(join(tmpdir(), 'cov-chart-'));
+    try {
+      writeFileSync(join(dir, 'summary.json'), JSON.stringify(minSummary));
+      writeFileSync(join(dir, 'rows.json'), JSON.stringify([]));
+      writeFileSync(
+        join(dir, 'progress-history.csv'),
+        'date,reported,closed\n2026-11-03,6,2\n2026-11-10,1,4\n',
+      );
+      execFileSync('python3', ['-B', pageScript, '--report', dir], { encoding: 'utf8' });
+      const html = readFileSync(join(dir, 'page.html'), 'utf8');
+      expect(html).toContain('Gaps reported vs. closed, by week');
+      expect(html).toContain('class="pchart"');
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

@@ -179,6 +179,23 @@ jq -n --argjson new "$new_json" --argjson closedops "$closed_json" \
   '{newThisWeek: $new, closedThisWeek: ($closedops | length), closedOps: $closedops}' \
   > "$REPORT_DIR/gaps-progress.json"
 
+# Accumulate one weekly row of reported-vs-closed counts into progress-history.csv, so the report page can
+# chart developer engagement over time (does the team close the gaps the generator reports?). Like
+# history.csv, it round-trips through the artifact: the previous run's file (PREV_PROGRESS_HISTORY, from the
+# downloaded previous artifact) carries the earlier weeks, and this run appends its own row. Absent on the
+# first run after this shipped — the history simply starts here.
+reported_n=$(jq 'length' <<< "$new_json")
+closed_n=$(jq 'length' <<< "$closed_json")
+prev_progress="${PREV_PROGRESS_HISTORY:-}"
+{
+  if [ -n "$prev_progress" ] && [ -s "$prev_progress" ]; then
+    cat "$prev_progress"
+  else
+    echo 'date,reported,closed'
+  fi
+  printf '%s,%s,%s\n' "$today" "$reported_n" "$closed_n"
+} > "$REPORT_DIR/progress-history.csv"
+
 # Close open per-endpoint issues whose endpoint no longer has a gap (the singular "test" suffix matches
 # only the per-endpoint issues, never the plural-"tests" summary or the old per-area issues).
 # Anchor on the prefix too: `in:title "$prefix"` above is a substring match, so $existing can also hold a
