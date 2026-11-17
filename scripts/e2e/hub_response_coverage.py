@@ -431,6 +431,12 @@ def build(args):
             'shape': shape, 'optionalSent': sent, 'optionalTotal': len(o['optional']),
             'requestChecks': req_state, 'requestPresent': req_present, 'requestApplicable': req_applicable,
             'requestMissing': req_missing,
+            # Request-validation kinds parked by a scoped config exclusion. When other kinds of the same status
+            # code stay tested, request_check_state() still reads 'ok' and the 400 cell is not marked 'hold'
+            # (400 has many kinds, so one held kind never parks it), so this is the only place a held kind
+            # shows. The closure guard in hub-coverage-endpoint-issues.sh reads it to tell a suppressed last
+            # kind from a genuinely covered endpoint.
+            'requestHeldKinds': sorted(held_kinds.get(op_id, set())),
             'notes': sorted(scoped[op_id]),
             'optionalMissing': [] if op_id in suppressed else [p for p in o['optional'] if p not in pos_sent[op_id]],
             'fullyTestedExcept403': all(v == 'ok' for b, v in cells.items() if b != '403'),
@@ -524,18 +530,18 @@ def change(now, before):
 
 
 def known_note(urls):
-    """' (known, tracked: camunda-hub#25907, ...)' with each issue linked, or ' (known, tracked)' when there is no URL."""
+    """' (camunda-hub#25907, ...)' with each issue linked, or '' when there is no URL."""
     def label(u):
         m = re.search(r'github\.com/[^/]+/([^/]+)/(?:issues|pull)/(\d+)', u)
         return f'<{u}|{m.group(1)}#{m.group(2)}>' if m else f'<{u}|issue>'
-    return f' (known, tracked: {", ".join(label(u) for u in urls)})' if urls else ' (known, tracked)'
+    return f' ({", ".join(label(u) for u in urls)})' if urls else ''
 
 
 def regressed(s, prev):
     """True when coverage got worse since the previous report — the only case worth actively pinging a
     human about. Quiet or improving weeks return False so the weekly message posts without a mention.
-    'Worse' = fewer endpoints fully tested, fewer endpoints with all bad-request kinds, more endpoints
-    with no test at all, or a brand-new endpoint that shipped with no test."""
+    'Worse' = fewer endpoints fully tested, fewer endpoints with all request-validation kinds, more
+    endpoints with no test at all, or a brand-new endpoint that shipped with no test."""
     if not prev:
         return False
     if s['fullyAsserted'] < prev.get('fullyAsserted', s['fullyAsserted']):
@@ -551,48 +557,117 @@ def regressed(s, prev):
     return False
 
 
-def slack(s, prev, args):
-    # Leads with the report's documented main question — does every endpoint test every status code it
-    # can return? (2xx/400/401/403/404/409; a documented 500 is not checked) — then the bad-request-kind
-    # axis as its own line (kept separate because its covered count can be understated: an over-broad
-    # applicability rule marks an endpoint as a gap, so the count of endpoints still missing a kind is an
-    # upper bound). Then the actionable gaps grouped by code and by area. Dimensions outside the main
-    # question (lifecycle, optional fields, response-shape) get one roll-up line so they stay visible
-    # without dominating. Numbers come straight from the summary; nothing new is computed here.
+def read_history(path):
+    """Rows of the previous run's history.csv (str->str dicts), or [] when there is none."""
+    if not path or not os.path.exists(path):
+        return []
+    with open(path, newline='') as f:
+        return list(csv.DictReader(f))
+
+
+def trend_line(history, s):
+    """A one-line Slack "This week's movement" headline — the same trajectory the report page leads with:
+    the share of endpoints tested for every status code now, and how many points it has moved over the
+    reports on record. Built from the fully-tested % per report (history rows plus this run), so it needs
+    at least two reports (one prior plus this run); '' otherwise, matching the page. A row that never
+    recorded the columns (an older header) is skipped, never guessed. The no-test trajectory is appended
+    because the % headline covers only the tested axis."""
+    pct = []
+    for r in history:
+        fa, ops = r.get('fullyAsserted'), r.get('operations')
+        if fa not in (None, '') and ops not in (None, '') and int(ops):
+            pct.append(100 * int(fa) / int(ops))
+    if s.get('operations'):
+        pct.append(100 * int(s['fullyAsserted']) / int(s['operations']))
+    if len(pct) < 2:
+        return ''
+    d = round(pct[-1] - pct[0])
+    move = f'▲ up {d} pts' if d > 0 else f'▼ down {abs(d)} pts' if d < 0 else 'level'
+    line = (f":chart_with_upwards_trend: *This week's movement:* {pct[-1]:.0f}% of endpoints tested for "
+            f'every status code — {move} over the last {len(pct)} reports')
+    # Preserve the no-test trajectory: the oldest history row that recorded it, over the same window.
+    bz = next((r['zeroTestOperations'] for r in history
+               if r.get('zeroTestOperations') not in (None, '')), None)
+    if bz not in (None, ''):
+        line += f' · no-test {int(bz)}→{len(s["zeroTestOperations"])}'
+    return line
+
+
+STALLED_DAYS = 28  # a gap open this long (4 weeks) is "stalled" — matches the report page's STALLED_WEEKS
+
+
+def slack(s, prev, args, progress=None, ages=None):
+    # Structured like the QA metrics digests: a headline (both documented angles with their week-over-week
+    # change), the movement trajectory, a one-line "this week" activity summary (new / closed / stalled gaps,
+    # each shown only when non-zero), then a *Needs attention* section (the actionable gaps). `progress` is the
+    # reconciled gaps-progress.json (newThisWeek, closedOps) and `ages` is endpoint-ages.json — both written by
+    # the issue step, so the activity line is present only on a reconciled run, not the audit's base message.
+    # Numbers come straight from the summary; nothing new is computed here. Caveats (a documented 500 is not
+    # checked; the bad-request "applies" count is an upper bound) live in the Guide, not inline.
     ref = f'camunda-hub@{args.spec_ref[:7]}' if args.spec_ref else 'spec ' + s['specHash'].replace('sha256:', '')[:7]
     n = s['operations']
     pf = prev['fullyAsserted'] if prev else None
     kind_ok, kind_total = s['requestChecks']
     kind_before = prev['requestChecks'][0] if prev and 'requestChecks' in prev else None
+    new_ops = set(s['operationIds']) - set(prev.get('operationIds', [])) if prev else set()
 
     lines = [
         f':bar_chart: *Hub API test coverage* (weekly) · {ref} · {n} endpoints',
-        '_Two angles: does each endpoint test every status code it can return, '
-        'and does it reject every kind of bad request?_',
-        f'*{s["fullyAsserted"]} of {n} endpoints are tested for every status code they can return*'
-        f'{change(s["fullyAsserted"], pf)}.'
-        ' _Counts 2xx/400/401/403/404/409; a documented 500 is not checked. '
-        'A bracketed number is the change since the last report._',
-        f'• Invalid-request coverage: {kind_ok} of {kind_total} endpoints are tested with every kind '
-        f'of bad request that applies{change(kind_ok, kind_before)}'
-        ' _(may be understated: some flagged kinds cannot be generated yet, so the count of '
-        'endpoints still missing a kind is an upper bound)_',
-        '',
+        f'{s["fullyAsserted"]}/{n} tested for every status code{change(s["fullyAsserted"], pf)}'
+        f'  ·  {kind_ok}/{kind_total} tested for every request-validation kind{change(kind_ok, kind_before)}',
     ]
-    # Ping a human (e.g. hub-medic) ONLY when coverage regressed week-over-week — a flat or improving
-    # week posts the same message with no mention, so the weekly report never becomes a page people
-    # learn to ignore. The mention text (a Slack subteam handle) is supplied by the workflow.
-    mention = getattr(args, 'regression_mention', '')
-    if mention and regressed(s, prev):
-        lines.insert(
-            0,
-            f':rotating_light: {mention} — Hub API test coverage dropped since last week. Details below.')
+    tl = trend_line(getattr(args, 'history', []), s)
+    if tl:
+        lines.append(tl)
+
+    # This week's activity, right under the movement %: new gaps reported, gaps closed (the week's win), and
+    # gaps that have stalled (open 4+ weeks). Each part renders only when non-zero, so a flat week adds no
+    # line at all — the same "hide zeros" rule as the untracked line below. new / closed come from the
+    # reconciled gaps-progress.json, stalled from endpoint-ages.json, so this line appears only on a run that
+    # reconciled issues (the audit's base message, and a dry run, have neither file and so omit it).
+    def _named(ops, cap=8):
+        shown = ', '.join(f'`{o}`' for o in ops[:cap])
+        return shown + (f' and {len(ops) - cap} more' if len(ops) > cap else '')
+    new_this_week = (progress or {}).get('newThisWeek') or []
+    closed_ops = (progress or {}).get('closedOps') or []
+    stalled = sorted(o for o, d in (ages or {}).items() if int(d) >= STALLED_DAYS)
+    activity = []
+    if new_this_week:
+        activity.append(f':new: {len(new_this_week)} reported: {_named(new_this_week)}')
+    if closed_ops:
+        activity.append(f':white_check_mark: {len(closed_ops)} closed: {_named(closed_ops)}')
+    if stalled:
+        activity.append(f':hourglass_flowing_sand: {len(stalled)} stalled: {_named(stalled)}')
+    if activity:
+        lines.append('   ·   '.join(activity))
+
+    # Classify no-test endpoints. "Tracked" = a known/suppressed issue (trackedOperations) OR an endpoint
+    # that already had a per-endpoint coverage issue last run (prev_issue_ops), so a no-test endpoint only
+    # pages the first week, not every week.
+    tracked = set(s['trackedOperations']) | getattr(args, 'prev_issue_ops', set())
+    untracked = [o for o in s['zeroTestOperations'] if o not in tracked]
+    tracked_zero = [o for o in s['zeroTestOperations'] if o in tracked]
+    urls = s.get('trackedUrls', {})
+
+    # Needs attention — the actionable gaps. No-test endpoints lead, split by whether they are tracked: a
+    # :red_circle: untracked line (an unexplained gap — shown only when there is one, and it pages) and a calm
+    # :large_orange_circle: tracked line with the issue links. A fully-tested week (no untracked and no
+    # tracked) shows neither — there is no green "all good" line, by design. Then the response gaps by code
+    # and area, and the one-line roll-up of the other dimensions.
+    need = []
+    if untracked:
+        need.append(f':red_circle: {len(untracked)} no test, untracked: ' + ', '.join(
+            f'`{o}`' + (' (new this week)' if o in new_ops else '') for o in untracked))
+    if tracked_zero:
+        need.append(f':large_orange_circle: {len(tracked_zero)} no test, tracked: '
+                    + ', '.join(f'`{o}`' + known_note(urls.get(o, [])) for o in tracked_zero))
     code_bits = [f'{b} ({s["codeGaps"][b]})' for b in BUCKETS if s['codeGaps'].get(b)]
-    lines.append(
-        '• Status codes not tested yet: ' + (' · '.join(code_bits) if code_bits else 'none :tada:'))
     areas = sorted(s['areaResponseGaps'].items(), key=lambda kv: (-kv[1], kv[0]))
-    lines.append(
-        '• Where those gaps are (by area): ' + (' · '.join(f'{a} {c}' for a, c in areas) if areas else 'none'))
+    if code_bits or areas:
+        gaps = 'Gaps by code: ' + (' · '.join(code_bits) if code_bits else 'none :tada:')
+        if areas:
+            gaps += '      by area: ' + ' · '.join(f'{a} {c}' for a, c in areas)
+        need.append(gaps)
     other = []
     lc = s['lifecycle']
     lc_missing = len(lc['createMissing']) + len(lc['restoreMissing']) + len(lc['edgeMissing'])
@@ -604,17 +679,30 @@ def slack(s, prev, args):
     if s['shapeUnvalidated']:
         other.append(f'{len(s["shapeUnvalidated"])} response-shape')
     if other:
-        lines.append('• Other test gaps: ' + ' · '.join(other))
-    if s['zeroTestOperations']:
-        tracked = set(s['trackedOperations'])
-        urls = s.get('trackedUrls', {})
-        lines.append(':warning: No test at all: ' + ', '.join(
-            f'`{o}`' + (known_note(urls.get(o, [])) if o in tracked else '')
-            for o in s['zeroTestOperations']))
-    if prev:
-        new = sorted(set(s['operationIds']) - set(prev.get('operationIds', [])))
-        if new:
-            lines.append('New endpoints since last report: ' + ', '.join(f'`{o}`' for o in new))
+        need.append('Other: ' + ' · '.join(other))
+    if need:
+        lines += ['', "*:pushpin: Needs attention*"] + need
+
+    # Ping (one :rotating_light: max) ONLY on something actionable: coverage regressed week-over-week, or an
+    # endpoint has no test AND no tracking issue. A flat/improving week with every no-test endpoint tracked
+    # posts with no mention, so the weekly report never becomes a page people learn to ignore.
+    mention = getattr(args, 'regression_mention', '')
+    reg = regressed(s, prev)
+    if mention and (reg or untracked):
+        reasons = []
+        if reg:
+            reasons.append('coverage dropped since last week')
+        if untracked:
+            reasons.append(f'{len(untracked)} endpoint(s) have no test and no tracking issue')
+        lines.insert(
+            0,
+            f':rotating_light: {mention} — Hub API test coverage: {" and ".join(reasons)}. Details below.')
+
+    # The full rendered report page is uploaded to the channel alongside this message (not as a thread reply),
+    # so point to it right after Needs attention. The workflow posts the page only on a real (non-dry) run,
+    # which is the only time this message reaches Slack, so the pointer is always accurate for a posted message.
+    lines += ['', ':bar_chart: *Full coverage report* — open the attached page']
+
     links = []
     if args.run_url:
         links.append(f'<{args.run_url}|Full table>')
@@ -784,7 +872,7 @@ def history_markdown(path, last=8):
     with open(path, newline='') as f:
         rows = list(csv.DictReader(f))[-last:]
     cols = [('date', 'Date')] + [(f'{b}_tested', NAMES[b].split(' (')[-1].rstrip(')') + ' tested') for b in BUCKETS] \
-        + [('fullyAsserted', 'Fully tested endpoints'), ('requestChecksFull', 'All bad-request kinds covered'),
+        + [('fullyAsserted', 'Fully tested endpoints'), ('requestChecksFull', 'All request-validation kinds covered'),
            ('operations', 'Endpoints')]
     out = [f'## Coverage history (last {len(rows)} reports)', '',
            '| ' + ' | '.join(h for _, h in cols) + ' |', '|' + '---|' * len(cols)]
@@ -796,30 +884,93 @@ def history_markdown(path, last=8):
     return '\n'.join(out) + '\n'
 
 
+def _load_prev(path):
+    """The previous run's summary.json (for the week-over-week delta), or None when there is none."""
+    if path and os.path.exists(path):
+        try:
+            return json.load(open(path))
+        except ValueError:
+            return None
+    return None
+
+
+def _set_slack_args(args):
+    """Populate args.history and args.prev_issue_ops for slack(), from the previous-run files."""
+    args.history = read_history(args.previous_history)
+    # Endpoints that already had a per-endpoint coverage issue last run — they are tracked, so the Slack
+    # message does not re-page about them as "no tracking issue" (the previous run's map, downloaded with
+    # the artifact).
+    args.prev_issue_ops = set()
+    if args.previous_endpoint_issues and os.path.exists(args.previous_endpoint_issues):
+        try:
+            args.prev_issue_ops = set(json.load(open(args.previous_endpoint_issues)))
+        except ValueError:
+            args.prev_issue_ops = set()
+
+
+def render_slack(args):
+    """Re-render args.out/slack.txt from the already-written summary.json plus the reconciled
+    gaps-progress.json, so the weekly message can name the gaps closed this week — the audit that first
+    writes slack.txt runs before issue reconciliation, so its message has no closed line. Prints it too."""
+    summary = json.load(open(f'{args.out}/summary.json'))
+    prev = _load_prev(args.previous)
+    _set_slack_args(args)
+    progress = None
+    if args.gaps_progress and os.path.exists(args.gaps_progress):
+        try:
+            progress = json.load(open(args.gaps_progress))
+        except ValueError:
+            progress = None
+    ages = None
+    if getattr(args, 'endpoint_ages', None) and os.path.exists(args.endpoint_ages):
+        try:
+            ages = json.load(open(args.endpoint_ages))
+        except ValueError:
+            ages = None
+    open(f'{args.out}/slack.txt', 'w').write(slack(summary, prev, args, progress, ages))
+    print(open(f'{args.out}/slack.txt').read())
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--out', required=True)
     ap.add_argument('--previous')
     ap.add_argument('--previous-history', help='history.csv from the previous scheduled report')
+    ap.add_argument('--previous-endpoint-issues',
+                    help='endpoint-issues.json from the previous scheduled report. An endpoint that '
+                         'already had a per-endpoint coverage issue last run counts as tracked, so a '
+                         'no-test endpoint is only flagged "untracked" (and pages) the first week.')
     ap.add_argument('--spec-ref', default='')
     ap.add_argument('--run-url', default='')
     ap.add_argument('--tracking-url', default='')
     ap.add_argument('--regression-mention', default='',
                     help='Slack mention (e.g. a <!subteam^ID|name> handle) added to the message only '
                          'when coverage regressed since the previous report. Empty = never mention.')
+    ap.add_argument('--render-slack', action='store_true',
+                    help='Re-render slack.txt from the already-written summary.json plus --gaps-progress, '
+                         'without re-running the audit. Run after issue reconciliation so the message can '
+                         'name the gaps closed this week (the audit runs before that, so its message cannot).')
+    ap.add_argument('--gaps-progress',
+                    help='gaps-progress.json from this run (newThisWeek, closedOps), for the --render-slack '
+                         'activity line (gaps reported and closed this week).')
+    ap.add_argument('--endpoint-ages',
+                    help='endpoint-ages.json from this run (operationId -> days open), for the --render-slack '
+                         'activity line (gaps stalled 4+ weeks).')
     args = ap.parse_args()
 
+    if args.render_slack:
+        render_slack(args)
+        return
+
     summary, rows = build(args)
-    prev = None
-    if args.previous and os.path.exists(args.previous):
-        try:
-            prev = json.load(open(args.previous))
-        except ValueError:
-            prev = None
+    prev = _load_prev(args.previous)
     os.makedirs(args.out, exist_ok=True)
     json.dump(summary, open(f'{args.out}/summary.json', 'w'), indent=2)
     json.dump(rows, open(f'{args.out}/rows.json', 'w'), indent=1)
     open(f'{args.out}/matrix.md', 'w').write(matrix(summary, rows))
+    _set_slack_args(args)
+    # The audit runs before this run's issues are reconciled, so its message carries no "closed this week"
+    # line; the workflow re-renders slack.txt with --render-slack after reconciliation to add it.
     open(f'{args.out}/slack.txt', 'w').write(slack(summary, prev, args))
     open(f'{args.out}/issue.md', 'w').write(issue_body(summary, rows, args))
     os.makedirs(f'{args.out}/endpoints', exist_ok=True)

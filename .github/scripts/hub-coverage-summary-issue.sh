@@ -41,5 +41,7 @@ if [ -s "$REPORT_DIR/issue.md" ]; then
 elif [ -n "$found" ] && [ "$state" = "OPEN" ]; then
   gh issue close "$num" --reason completed \
     --comment "Nothing is missing any more in the weekly check on $(date -u +%F), so this is closed automatically."
-  echo "$REPO_URL/issues/$num" > "$REPORT_DIR/issue-url.txt"
+  # Deliberately NOT writing issue-url.txt here: the index is now closed, so neither the Slack message nor
+  # the page should link it (a card for an optional-field/response-shape gap must not point at a closed
+  # ticket). No file means no tracking link, which is correct when the index issue is closed.
 fi

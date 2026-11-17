@@ -18,6 +18,11 @@ const script = join(
   '../../scripts/e2e/hub_response_coverage.py',
 );
 
+const pageScript = join(
+  dirname(fileURLToPath(import.meta.url)),
+  '../../scripts/e2e/hub_coverage_page.py',
+);
+
 type Row = {
   operationId: string;
   area?: string;
@@ -188,7 +193,12 @@ const SUMMARY = '[hub-response-coverage] Endpoints missing response or bad-reque
 const areaTitle = (a: string) =>
   `[hub-response-coverage] ${a}: missing response or bad-request tests`;
 
-type Existing = { number: number; title: string; state: 'OPEN' | 'CLOSED' };
+type Existing = {
+  number: number;
+  title: string;
+  state: 'OPEN' | 'CLOSED';
+  createdAt?: string;
+};
 
 /** Runs one of the issue scripts with a stub gh that records every call; returns calls + outputs. */
 function runIssueScript(
@@ -225,6 +235,15 @@ if [ "$1 $2" = "issue list" ]; then
   if [ -n "$expr" ]; then jq -r "$expr" "$GH_EXISTING"; else cat "$GH_EXISTING"; fi
 elif [ "$1 $2" = "issue create" ]; then
   echo "https://example.test/issues/$((100 + $(grep -c 'issue create' "$GH_LOG")))"
+elif [ "$1" = "api" ]; then
+  # Serve a per-issue timeline fixture for the reopen-age lookup: GH_TIMELINE_DIR/<num>.json, keyed by
+  # the issue number parsed out of repos/{owner}/{repo}/issues/<num>/timeline. Absent => empty (no reopen).
+  _tl=""
+  for a in "$@"; do case "$a" in */issues/*/timeline) _tl="$a" ;; esac; done
+  _num="\${_tl#*/issues/}"; _num="\${_num%/timeline}"
+  if [ -n "$_num" ] && [ -n "\${GH_TIMELINE_DIR:-}" ] && [ -f "$GH_TIMELINE_DIR/$_num.json" ]; then
+    cat "$GH_TIMELINE_DIR/$_num.json"
+  fi
 fi
 `,
   );
@@ -261,6 +280,9 @@ fi
     issueUrl: read('issue-url.txt').trim(),
     endpointIndex: read('endpoint-index.md').trim().split('\n').filter(Boolean),
     endpointIssues: ((raw) => (raw ? JSON.parse(raw) : undefined))(read('endpoint-issues.json')),
+    endpointAges: ((raw) => (raw ? JSON.parse(raw) : undefined))(read('endpoint-ages.json')),
+    gapsProgress: ((raw) => (raw ? JSON.parse(raw) : undefined))(read('gaps-progress.json')),
+    progressHistory: read('progress-history.csv'),
     rendered: read('issue.rendered.md'),
     stderr: res.stderr,
   };
@@ -325,13 +347,14 @@ describe('summary issue lifecycle (stub gh)', () => {
     expect(r.calls.some((c) => c.includes('issue create'))).toBe(false);
   });
 
-  it('closes the open issue when nothing is missing, and still records its link', () => {
+  it('closes the open issue when nothing is missing, and writes no link to the closed issue', () => {
     const r = runIssueScript('hub-coverage-summary-issue.sh', { 'issue.md': '' }, [
       { number: 7, title: SUMMARY, state: 'OPEN' },
     ]);
     expect(r.calls).toHaveLength(1);
     expect(r.calls[0]).toContain('issue close 7');
-    expect(r.issueUrl).toBe('https://example.test/issues/7');
+    // no issue-url.txt on close, so neither the page nor Slack links a now-closed index issue
+    expect(r.issueUrl).toBe('');
   });
 
   it('does nothing when nothing is missing and no issue is open', () => {
@@ -370,6 +393,266 @@ describe('per-endpoint issue lifecycle (stub gh)', () => {
       NO_HUB,
     );
     expect(r.endpointIssues).toEqual({ newOp: 101, openOp: 5, shutOp: 6 });
+  });
+
+  it('records how long each gap has been open in endpoint-ages.json', () => {
+    const daysAgo = (n: number) => new Date(Date.now() - n * 86_400_000).toISOString().slice(0, 10);
+    const r = runIssueScript(
+      'hub-coverage-endpoint-issues.sh',
+      endpointFiles('oldGap', 'newGap'),
+      [
+        {
+          number: 9,
+          title: endpointTitle('oldGap'),
+          state: 'OPEN',
+          createdAt: `${daysAgo(42)}T00:00:00Z`,
+        },
+      ],
+      NO_HUB,
+    );
+    // oldGap's issue has existed 42 days; newGap's issue is created this run, so its gap is 0 days old
+    expect(r.endpointAges).toEqual({ oldGap: 42, newGap: 0 });
+  });
+
+  it('ages a reopened gap from the latest reopen, not the original createdAt', () => {
+    const daysAgo = (n: number) => new Date(Date.now() - n * 86_400_000).toISOString().slice(0, 10);
+    // Issue 9 was created 60 days ago, fixed and closed, then reopened 5 days ago when the gap returned.
+    // Its age must be measured from the reopen (5 days), not creation (60), so a returning gap is not
+    // reported as continuously unaddressed (and wrongly marked stalled).
+    const timelineDir = mkdtempSync(join(tmpdir(), 'gap-timeline-'));
+    writeFileSync(
+      join(timelineDir, '9.json'),
+      JSON.stringify([
+        { event: 'closed', created_at: `${daysAgo(40)}T00:00:00Z` },
+        { event: 'reopened', created_at: `${daysAgo(5)}T00:00:00Z` },
+      ]),
+    );
+    const r = runIssueScript(
+      'hub-coverage-endpoint-issues.sh',
+      endpointFiles('returnedGap'),
+      [
+        {
+          number: 9,
+          title: endpointTitle('returnedGap'),
+          state: 'OPEN',
+          createdAt: `${daysAgo(60)}T00:00:00Z`,
+        },
+      ],
+      { ...NO_HUB, GH_TIMELINE_DIR: timelineDir },
+    );
+    expect(r.endpointAges).toEqual({ returnedGap: 5 });
+  });
+
+  it('records this week movement (new and closed gap counts) in gaps-progress.json', () => {
+    const prevDir = mkdtempSync(join(tmpdir(), 'cov-prevei-'));
+    const prevEI = join(prevDir, 'endpoint-issues.json');
+    // Last run: stillOpen and fixedOp each had a coverage issue.
+    writeFileSync(prevEI, JSON.stringify({ stillOpen: 5, fixedOp: 8 }));
+    try {
+      const r = runIssueScript(
+        'hub-coverage-endpoint-issues.sh',
+        {
+          ...endpointFiles('newOp', 'stillOpen'),
+          // fixedOp is genuinely covered now (a clean row), so it is a real closure.
+          'rows.json': JSON.stringify([{ operationId: 'fixedOp' }]),
+        },
+        [
+          { number: 5, title: endpointTitle('stillOpen'), state: 'OPEN' },
+          { number: 8, title: endpointTitle('fixedOp'), state: 'OPEN' }, // covered this run → closed
+        ],
+        { ...NO_HUB, PREV_ENDPOINT_ISSUES: prevEI },
+      );
+      // closedOps names which endpoints were covered since last run (fixedOp had an issue, no longer a
+      // gap), so the page and Slack can list them; closedThisWeek stays the count (= closedOps length).
+      expect(r.gapsProgress).toEqual({
+        newThisWeek: ['newOp'],
+        closedThisWeek: 1,
+        closedOps: ['fixedOp'],
+      });
+    } finally {
+      rmSync(prevDir, { recursive: true, force: true });
+    }
+  });
+
+  it('counts a returning (reopened) gap as reported this week, alongside brand-new ones', () => {
+    const r = runIssueScript(
+      'hub-coverage-endpoint-issues.sh',
+      endpointFiles('returned', 'brandNew'),
+      [{ number: 7, title: endpointTitle('returned'), state: 'CLOSED' }], // reopened this run
+      NO_HUB,
+    );
+    expect(r.calls).toContain('gh issue reopen 7');
+    // a returning gap is a regression reported this week: reopening it puts it in this run's issue set, and it
+    // was not in the previous report (no PREV_ENDPOINT_ISSUES here), so the movement block counts it as
+    // reported alongside the brand-new op (a regress→fix cycle is not net progress). The list is the sorted
+    // set-difference of the two issue maps, so the order is alphabetical, not creation order.
+    expect(r.gapsProgress.newThisWeek).toEqual(['brandNew', 'returned']);
+  });
+
+  it('reopens a returning gap even when the brand-new issue cap is reached (reopen is not a creation)', () => {
+    const r = runIssueScript(
+      'hub-coverage-endpoint-issues.sh',
+      endpointFiles('returned'),
+      [{ number: 7, title: endpointTitle('returned'), state: 'CLOSED' }],
+      { ...NO_HUB, MAX_NEW_ENDPOINT_ISSUES: '0' },
+    );
+    // the cap gates only brand-new issue creation; a reopen still happens and still counts as reported
+    expect(r.calls).toContain('gh issue reopen 7');
+    expect(r.gapsProgress.newThisWeek).toEqual(['returned']);
+  });
+
+  it('counts a gap closed since last report even if its issue was already closed by an owner', () => {
+    const prevDir = mkdtempSync(join(tmpdir(), 'cov-prevei2-'));
+    const prevEI = join(prevDir, 'endpoint-issues.json');
+    // alreadyClosed had an issue last run; this run it is covered, and its issue is not OPEN in $existing
+    // (an owner or an intervening non-dry run already closed it). The previous-map comparison still counts
+    // it, which the old "still-open issues we close now" set would have missed. stillOpen also had an issue
+    // last run (it is still a gap now), so the previous map lists it too — an ongoing gap, not newly reported.
+    writeFileSync(prevEI, JSON.stringify({ alreadyClosed: 9, stillOpen: 5 }));
+    try {
+      const r = runIssueScript(
+        'hub-coverage-endpoint-issues.sh',
+        {
+          ...endpointFiles('stillOpen'),
+          // alreadyClosed is genuinely covered now (a clean row), so it is a real closure.
+          'rows.json': JSON.stringify([{ operationId: 'alreadyClosed' }]),
+        },
+        [{ number: 5, title: endpointTitle('stillOpen'), state: 'OPEN' }],
+        { ...NO_HUB, PREV_ENDPOINT_ISSUES: prevEI },
+      );
+      expect(r.gapsProgress.closedOps).toEqual(['alreadyClosed']);
+      // an ongoing gap (tracked both reports) is neither reported nor closed this week
+      expect(r.gapsProgress.newThisWeek).toEqual([]);
+    } finally {
+      rmSync(prevDir, { recursive: true, force: true });
+    }
+  });
+
+  it('does not count a suppressed or removed endpoint as a closure (only a genuine fix)', () => {
+    const prevDir = mkdtempSync(join(tmpdir(), 'cov-prevei4-'));
+    const prevEI = join(prevDir, 'endpoint-issues.json');
+    // Last report, three endpoints each had a coverage issue. This report none has an open coverage issue,
+    // but for three different reasons: fixedOp got a real test (a genuine closure); suppressedOp's last gap
+    // was parked as a known hold (no test added); removedOp was deleted from the spec (gone from rows.json).
+    // Only fixedOp is a win — suppressions and removals must not show as green Closed bars or Slack Wins.
+    writeFileSync(prevEI, JSON.stringify({ fixedOp: 1, suppressedOp: 2, removedOp: 3 }));
+    try {
+      const r = runIssueScript(
+        'hub-coverage-endpoint-issues.sh',
+        {
+          ...endpointFiles(), // no open gaps this run
+          'rows.json': JSON.stringify([
+            { operationId: 'fixedOp' }, // clean row → genuinely covered
+            { operationId: 'suppressedOp', cells: { '404': 'hold' } }, // parked, not covered
+            // removedOp intentionally absent from rows.json (removed from the spec)
+          ]),
+        },
+        [],
+        { ...NO_HUB, PREV_ENDPOINT_ISSUES: prevEI },
+      );
+      expect(r.gapsProgress.closedOps).toEqual(['fixedOp']);
+      expect(r.gapsProgress.closedThisWeek).toBe(1);
+    } finally {
+      rmSync(prevDir, { recursive: true, force: true });
+    }
+  });
+
+  it('does not count a scoped held request-kind as a closure (other kinds of the code still tested)', () => {
+    const prevDir = mkdtempSync(join(tmpdir(), 'cov-prevei5-'));
+    const prevEI = join(prevDir, 'endpoint-issues.json');
+    // scopedHeldOp had a coverage issue last report (its last missing kind). This report that kind was parked
+    // by a scoped config exclusion while the other kinds of the same 400 code stay tested, so the 400 cell is
+    // 'ok' and requestChecks is 'ok' — the park shows only in requestHeldKinds. No test was added, so it must
+    // not count as a closure even though it dropped out of the issue set.
+    writeFileSync(prevEI, JSON.stringify({ scopedHeldOp: 2 }));
+    try {
+      const r = runIssueScript(
+        'hub-coverage-endpoint-issues.sh',
+        {
+          ...endpointFiles(), // no open gaps this run
+          'rows.json': JSON.stringify([
+            {
+              operationId: 'scopedHeldOp',
+              cells: { '400': 'ok' },
+              requestChecks: 'ok',
+              requestHeldKinds: ['malformed-json-body'],
+            },
+          ]),
+        },
+        [],
+        { ...NO_HUB, PREV_ENDPOINT_ISSUES: prevEI },
+      );
+      expect(r.gapsProgress.closedOps).toEqual([]);
+      expect(r.gapsProgress.closedThisWeek).toBe(0);
+    } finally {
+      rmSync(prevDir, { recursive: true, force: true });
+    }
+  });
+
+  it('counts a gap an intervening run already issued as reported this week (OPEN, absent from the previous report)', () => {
+    const prevDir = mkdtempSync(join(tmpdir(), 'cov-prevei3-'));
+    const prevEI = join(prevDir, 'endpoint-issues.json');
+    // Between two scheduled reports, a non-dry manual run (or a failed run that already reconciled issues)
+    // opened the issue for interveningGap. So this scheduled run finds it already OPEN and only edits it —
+    // it does not create or reopen it — yet it is a real gap reported since the last report. Counting only
+    // this invocation's own create/reopen mutations would miss it (the bug this guards). It is absent from
+    // the previous report's map but present in this run's issue set, so the set-difference counts it.
+    writeFileSync(prevEI, JSON.stringify({ ongoing: 4 }));
+    try {
+      const r = runIssueScript(
+        'hub-coverage-endpoint-issues.sh',
+        endpointFiles('interveningGap', 'ongoing'),
+        [
+          { number: 11, title: endpointTitle('interveningGap'), state: 'OPEN' }, // opened by an intervening run
+          { number: 4, title: endpointTitle('ongoing'), state: 'OPEN' },
+        ],
+        { ...NO_HUB, PREV_ENDPOINT_ISSUES: prevEI },
+      );
+      // not created or reopened this run — only edited
+      expect(r.calls).not.toContain('gh issue reopen 11');
+      // still reported, because it is tracked now and was not in the previous report; ongoing is in both, so
+      // it is neither reported nor closed
+      expect(r.gapsProgress.newThisWeek).toEqual(['interveningGap']);
+      expect(r.gapsProgress.closedOps).toEqual([]);
+    } finally {
+      rmSync(prevDir, { recursive: true, force: true });
+    }
+  });
+
+  it('appends a weekly reported-vs-closed row to progress-history.csv, continuing the previous file', () => {
+    const prevDir = mkdtempSync(join(tmpdir(), 'cov-prevprog-'));
+    const prev = join(prevDir, 'progress-history.csv');
+    writeFileSync(prev, 'date,reported,closed\n2026-11-10,4,2\n');
+    const prevEI = join(prevDir, 'endpoint-issues.json');
+    writeFileSync(prevEI, JSON.stringify({ stillOpen: 5, fixedOp: 8 })); // both had issues last run
+    try {
+      const r = runIssueScript(
+        'hub-coverage-endpoint-issues.sh',
+        {
+          ...endpointFiles('newOp', 'stillOpen'),
+          'rows.json': JSON.stringify([{ operationId: 'fixedOp' }]), // genuinely covered now → a real closure
+        },
+        [
+          { number: 5, title: endpointTitle('stillOpen'), state: 'OPEN' },
+          { number: 8, title: endpointTitle('fixedOp'), state: 'OPEN' }, // covered this run → closed
+        ],
+        { ...NO_HUB, PREV_PROGRESS_HISTORY: prev, PREV_ENDPOINT_ISSUES: prevEI },
+      );
+      const lines = r.progressHistory.trim().split('\n');
+      expect(lines[0]).toBe('date,reported,closed');
+      expect(lines[1]).toBe('2026-11-10,4,2'); // the earlier week is carried forward
+      // this run reported 1 new gap (newOp) and closed 1 (fixedOp)
+      expect(lines[2]).toMatch(/^\d{4}-\d{2}-\d{2},1,1$/);
+    } finally {
+      rmSync(prevDir, { recursive: true, force: true });
+    }
+  });
+
+  it('starts progress-history.csv with a header when there is no previous file', () => {
+    const r = runIssueScript('hub-coverage-endpoint-issues.sh', endpointFiles('newOp'), [], NO_HUB);
+    const lines = r.progressHistory.trim().split('\n');
+    expect(lines[0]).toBe('date,reported,closed');
+    expect(lines[1]).toMatch(/^\d{4}-\d{2}-\d{2},1,0$/); // 1 reported, 0 closed
   });
 
   it('assigns a newly created issue to the resolved endpoint author', () => {
@@ -603,17 +886,27 @@ function slackText(
   summary: Record<string, unknown>,
   prev: Record<string, unknown> | null,
   mention = '',
+  prevIssueOps: string[] = [],
+  progress: Record<string, unknown> | null = null,
+  ages: Record<string, number> | null = null,
 ): string {
   const code = [
     'import sys, json, types, importlib.util',
     `spec = importlib.util.spec_from_file_location('h', ${JSON.stringify(script)})`,
     'h = importlib.util.module_from_spec(spec); spec.loader.exec_module(h)',
     'd = json.load(sys.stdin)',
-    "args = types.SimpleNamespace(spec_ref='abcdef1234', run_url='http://run', tracking_url='http://track', regression_mention=d['m'])",
-    "sys.stdout.write(h.slack(d['s'], d['p'], args))",
+    "args = types.SimpleNamespace(spec_ref='abcdef1234', run_url='http://run', tracking_url='http://track', regression_mention=d['m'], prev_issue_ops=set(d['pio']))",
+    "sys.stdout.write(h.slack(d['s'], d['p'], args, d.get('prog'), d.get('ages')))",
   ].join('\n');
   return execFileSync('python3', ['-B', '-c', code], {
-    input: JSON.stringify({ s: summary, p: prev, m: mention }),
+    input: JSON.stringify({
+      s: summary,
+      p: prev,
+      m: mention,
+      pio: prevIssueOps,
+      prog: progress,
+      ages,
+    }),
     encoding: 'utf8',
   });
 }
@@ -657,73 +950,59 @@ const baseSummary = (over: Record<string, unknown> = {}) => ({
 describe('weekly Slack message', () => {
   // Note: the weekly report pings hub-medic ONLY on a week-over-week regression — that behaviour
   // is covered by the 'weekly Slack message pings only on a regression' describe block below.
-  it('leads with the documented main question — endpoints tested for every status code', () => {
+  it('leads with both headline angles on one compact line', () => {
     const text = slackText(baseSummary(), null);
-    expect(text).toContain('*8 of 10 endpoints are tested for every status code they can return*');
-    // The two-angle intro frames the headline and the invalid-request line.
-    expect(text).toContain('Two angles:');
+    expect(text).toContain('8/10 tested for every status code');
+    expect(text).toContain('5/10 tested for every request-validation kind');
+    // the long inline framing/caveats moved to the Guide to keep the message scannable
+    expect(text).not.toContain('Two angles');
+    expect(text).not.toContain('a documented 500 is not checked');
+    expect(text).not.toContain('upper bound');
   });
 
-  it('notes that a documented 500 is not counted, so the headline is not over-claimed', () => {
-    const text = slackText(baseSummary(), null);
-    expect(text).toContain('a documented 500 is not checked');
-    expect(text).toContain('2xx/400/401/403/404/409');
-  });
-
-  it('shows the bad-request-kind axis on its own line, flagged as possibly understated', () => {
-    const text = slackText(baseSummary(), null);
-    expect(text).toContain(
-      'Invalid-request coverage: 5 of 10 endpoints are tested with every kind of bad request that applies',
-    );
-    // The caveat now names the direction: the covered count may be understated; the missing count is the bound.
-    expect(text).toContain('may be understated');
-    expect(text).toContain('upper bound');
-  });
-
-  it('lists status codes not tested yet, omitting codes with no gap', () => {
-    const text = slackText(baseSummary(), null);
-    // baseSummary codeGaps: 400:1, 403:2, 404:1, 409:2 ; 2xx and 401 are 0, so omitted
-    expect(text).toContain('Status codes not tested yet: 400 (1) · 403 (2) · 404 (1) · 409 (2)');
-    const clean = slackText(
-      baseSummary({ codeGaps: { '2xx': 0, '400': 0, '401': 0, '403': 0, '404': 0, '409': 0 } }),
-      null,
-    );
-    expect(clean).toContain('Status codes not tested yet: none');
-  });
-
-  it('lists where the response gaps are, by area, most first', () => {
+  it('lists the gaps by status code and by area on one line, most first', () => {
     const text = slackText(
       baseSummary({ areaResponseGaps: { File: 2, Project: 1, Catalog: 2 } }),
       null,
     );
-    // sorted by count desc then name: Catalog 2, File 2, Project 1
-    expect(text).toContain('Where those gaps are (by area): Catalog 2 · File 2 · Project 1');
+    // codeGaps 400:1,403:2,404:1,409:2 (2xx/401 omitted); areas sorted by count desc then name
+    expect(text).toContain('Gaps by code: 400 (1) · 403 (2) · 404 (1) · 409 (2)');
+    expect(text).toContain('by area: Catalog 2 · File 2 · Project 1');
+  });
+
+  it('says none with a tada when no status code has a gap', () => {
+    const clean = slackText(
+      baseSummary({ codeGaps: { '2xx': 0, '400': 0, '401': 0, '403': 0, '404': 0, '409': 0 } }),
+      null,
+    );
+    expect(clean).toContain('Gaps by code: none');
   });
 
   it('rolls up the out-of-scope dimensions on one line so they stay visible', () => {
     const text = slackText(baseSummary(), null);
     // lifecycle missing 2+1+1=4 ; optional fields 9-6=3 ; response-shape 3
-    expect(text).toContain('Other test gaps: 4 lifecycle · 3 optional fields · 3 response-shape');
+    expect(text).toContain('Other: 4 lifecycle · 3 optional fields · 3 response-shape');
   });
 
-  it('shows the change in brackets on the headline and on the kind line', () => {
+  it('shows the change in brackets on each headline angle', () => {
     const text = slackText(
       baseSummary({ fullyAsserted: 8, requestChecks: [5, 10] }),
       baseSummary({ fullyAsserted: 7, requestChecks: [7, 10] }),
     );
-    expect(text).toContain('they can return* (+1).');
-    expect(text).toContain('every kind of bad request that applies (-2)');
+    expect(text).toContain('tested for every status code (+1)');
+    expect(text).toContain('tested for every request-validation kind (-2)');
   });
 
   it('shows no change figures at all for the first report', () => {
     const text = slackText(baseSummary(), null);
-    expect(text).toContain('they can return*. _Counts');
+    expect(text).toContain('8/10 tested for every status code');
     expect(text).not.toMatch(/\([+-]\d+\)/);
   });
 
-  it('links the tracking issues next to an endpoint with no test at all', () => {
+  it('splits no-test endpoints into an untracked red line and a tracked calm line', () => {
     const text = slackText(
       baseSummary({
+        operationIds: ['a', 'b', 'c'],
         zeroTestOperations: ['a', 'b', 'c'],
         trackedOperations: ['a', 'b'],
         trackedUrls: {
@@ -735,11 +1014,12 @@ describe('weekly Slack message', () => {
       }),
       null,
     );
+    // tracked no-test endpoints stay calm (orange), counted, each with its tracking issue linked (b has none)
     expect(text).toContain(
-      'No test at all: `a` (known, tracked: <https://github.com/camunda/camunda-hub/issues/25907|camunda-hub#25907>, <https://github.com/camunda/camunda-hub/issues/26448|camunda-hub#26448>)',
+      ':large_orange_circle: 2 no test, tracked: `a` (<https://github.com/camunda/camunda-hub/issues/25907|camunda-hub#25907>, <https://github.com/camunda/camunda-hub/issues/26448|camunda-hub#26448>), `b`',
     );
-    // tracked but no URL on record, and not tracked at all
-    expect(text).toContain('`b` (known, tracked), `c`');
+    // the untracked one (c) is escalated to its own red line, counted, with no tracking note
+    expect(text).toContain(':red_circle: 1 no test, untracked: `c`');
     expect(text).not.toContain('`c` (');
   });
 
@@ -748,6 +1028,109 @@ describe('weekly Slack message', () => {
     expect(text).toContain('<http://run|Full table>');
     expect(text).toContain('<http://track|Tracking issue>');
     expect(text).toContain('|📖 Guide>');
+  });
+
+  it('groups the actionable gaps under a Needs-attention section', () => {
+    const text = slackText(baseSummary(), null);
+    expect(text).toContain('*:pushpin: Needs attention*');
+    expect(text).toContain('Gaps by code:');
+  });
+
+  it('names the gaps reported, closed and stalled this week on one activity line', () => {
+    const text = slackText(
+      baseSummary(),
+      null,
+      '',
+      [],
+      { newThisWeek: ['newA', 'newB'], closedOps: ['createFile', 'updateFile'] },
+      { stalledOp: 40, freshOp: 3 }, // 40 days ≥ 28 → stalled; 3 days → not
+    );
+    expect(text).toContain(':new: 2 reported: `newA`, `newB`');
+    expect(text).toContain(':white_check_mark: 2 closed: `createFile`, `updateFile`');
+    expect(text).toContain(':hourglass_flowing_sand: 1 stalled: `stalledOp`');
+    expect(text).not.toContain('`freshOp`');
+    // no Wins header and no green "all good" line anywhere
+    expect(text).not.toContain(':tada: Wins');
+    expect(text).not.toContain(':large_green_circle:');
+  });
+
+  it('shows only the non-zero parts of the activity line', () => {
+    // only closures this week → just the closed part, no reported/stalled, no empty activity noise
+    const text = slackText(baseSummary(), null, '', [], {
+      newThisWeek: [],
+      closedOps: ['createFile'],
+    });
+    expect(text).toContain(':white_check_mark: 1 closed: `createFile`');
+    expect(text).not.toContain(':new:');
+    expect(text).not.toContain(':hourglass_flowing_sand:');
+  });
+
+  it('omits the activity line entirely on a flat week', () => {
+    // no reconciled progress/ages (as on the audit base message or a dry run) → no activity line at all
+    const text = slackText(baseSummary(), null);
+    expect(text).not.toContain(':new:');
+    expect(text).not.toContain(':white_check_mark:');
+    expect(text).not.toContain(':hourglass_flowing_sand:');
+  });
+
+  it('never shows a green win or a Wins header, even when every no-test endpoint is tracked', () => {
+    const text = slackText(
+      baseSummary({ operationIds: ['a'], zeroTestOperations: ['a'], trackedOperations: ['a'] }),
+      null,
+    );
+    expect(text).not.toContain(':large_green_circle:');
+    expect(text).not.toContain(':tada: Wins');
+    // the tracked no-test endpoint still shows, as the calm orange line
+    expect(text).toContain(':large_orange_circle: 1 no test, tracked: `a`');
+  });
+
+  it('points to the full coverage report page after the needs-attention section', () => {
+    const text = slackText(baseSummary(), null);
+    expect(text).toContain(':bar_chart: *Full coverage report* — open the attached page');
+    // it comes after Needs attention and before the links line
+    expect(text.indexOf(':pushpin: Needs attention')).toBeLessThan(
+      text.indexOf('Full coverage report'),
+    );
+    expect(text.indexOf('Full coverage report')).toBeLessThan(text.indexOf('|📖 Guide>'));
+  });
+
+  it('re-renders slack.txt from summary.json + gaps-progress.json + endpoint-ages.json via --render-slack', () => {
+    // The workflow runs this after issue reconciliation so the message can name the gaps reported, closed and
+    // stalled this week — the audit (which runs first) has none of that state. It reuses the written
+    // summary.json rather than re-auditing.
+    const dir = mkdtempSync(join(tmpdir(), 'cov-renderslack-'));
+    try {
+      writeFileSync(join(dir, 'summary.json'), JSON.stringify(baseSummary()));
+      writeFileSync(
+        join(dir, 'gaps-progress.json'),
+        JSON.stringify({ newThisWeek: ['newA'], closedThisWeek: 1, closedOps: ['createFile'] }),
+      );
+      writeFileSync(join(dir, 'endpoint-ages.json'), JSON.stringify({ stalledOp: 40, freshOp: 2 }));
+      execFileSync(
+        'python3',
+        [
+          '-B',
+          script,
+          '--render-slack',
+          '--out',
+          dir,
+          '--gaps-progress',
+          join(dir, 'gaps-progress.json'),
+          '--endpoint-ages',
+          join(dir, 'endpoint-ages.json'),
+          '--run-url',
+          'http://run',
+        ],
+        { encoding: 'utf8' },
+      );
+      const txt = readFileSync(join(dir, 'slack.txt'), 'utf8');
+      expect(txt).toContain(':new: 1 reported: `newA`');
+      expect(txt).toContain(':white_check_mark: 1 closed: `createFile`');
+      expect(txt).toContain(':hourglass_flowing_sand: 1 stalled: `stalledOp`');
+      expect(txt).not.toContain(':tada: Wins');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 
@@ -799,6 +1182,111 @@ describe('weekly Slack message pings only on a regression', () => {
 
   it('never pings when the workflow passes no handle, even on a clear regression', () => {
     expect(pinged(baseSummary({ fullyAsserted: 7 }), baseSummary(), '')).toBe(false);
+  });
+});
+
+describe('weekly Slack trend + no-test escalation', () => {
+  const trendLine = (history: Record<string, string>[], s: Record<string, unknown>): string => {
+    const code = [
+      'import sys, json, importlib.util',
+      `spec = importlib.util.spec_from_file_location('h', ${JSON.stringify(script)})`,
+      'h = importlib.util.module_from_spec(spec); spec.loader.exec_module(h)',
+      'd = json.load(sys.stdin)',
+      "sys.stdout.write(h.trend_line(d['h'], d['s']))",
+    ].join('\n');
+    return execFileSync('python3', ['-B', '-c', code], {
+      input: JSON.stringify({ h: history, s }),
+      encoding: 'utf8',
+    });
+  };
+
+  it("leads with a 'This week's movement' headline — the tested % and its points delta — with at least two reports", () => {
+    expect(
+      trendLine(
+        [
+          { fullyAsserted: '54', operations: '66', zeroTestOperations: '2' },
+          { fullyAsserted: '56', operations: '66', zeroTestOperations: '2' },
+        ],
+        { fullyAsserted: 58, operations: 66, zeroTestOperations: ['x'] },
+      ),
+      // 54/66→56/66→58/66 is 82%→85%→88%; +6 pts over the three reports; no-test 2→1.
+    ).toMatch(
+      /This week's movement:\* 88% of endpoints tested for every status code — ▲ up 6 pts over the last 3 reports · no-test 2→1/,
+    );
+  });
+
+  it('shows nothing until a prior report exists to compare against', () => {
+    // no history → only this run → a single data point → no movement to show
+    expect(trendLine([], { fullyAsserted: 58, operations: 66, zeroTestOperations: [] })).toBe('');
+    // one prior report + this run = two points → the movement headline renders (parity with the page)
+    expect(
+      trendLine([{ fullyAsserted: '52', operations: '66', zeroTestOperations: '1' }], {
+        fullyAsserted: 58,
+        operations: 66,
+        zeroTestOperations: [],
+      }),
+    ).toContain("This week's movement");
+  });
+
+  it('skips a report that never recorded the tested columns, rather than crashing', () => {
+    const line = trendLine(
+      [
+        { zeroTestOperations: '3' }, // older header: no fullyAsserted/operations → skipped from the % series
+        { fullyAsserted: '56', operations: '66', zeroTestOperations: '2' },
+      ],
+      { fullyAsserted: 58, operations: 66, zeroTestOperations: ['a'] },
+    );
+    // only the valid row + this run span the window; the oldest recorded no-test baseline (3) is used
+    expect(line).toMatch(/over the last 2 reports · no-test 3→1/);
+  });
+
+  it('escalates an untracked no-test endpoint to a red alert and pings once', () => {
+    const over = {
+      operationIds: ['a', 'b', 'newGap'],
+      zeroTestOperations: ['newGap'],
+      trackedOperations: [],
+    };
+    const m = slackText(baseSummary(over), baseSummary(over), '<!subteam^X>');
+    expect(m).toMatch(/:red_circle: \d+ no test, untracked:.*newGap/);
+    expect((m.match(/<!subteam\^X>/g) || []).length).toBe(1);
+  });
+
+  it('stays calm and pings nobody when every no-test endpoint is tracked', () => {
+    const over = {
+      operationIds: ['a', 'b', 'known'],
+      zeroTestOperations: ['known'],
+      trackedOperations: ['known'],
+    };
+    const t = slackText(baseSummary(over), baseSummary(over), '<!subteam^X>');
+    expect(t).toContain(':large_orange_circle: 1 no test, tracked');
+    expect(t).not.toContain('<!subteam^X>');
+    expect(t).not.toContain(':red_circle:');
+  });
+
+  it('treats an endpoint that already had a coverage issue last run as tracked, not untracked', () => {
+    const over = {
+      operationIds: ['a', 'b', 'hadIssue'],
+      zeroTestOperations: ['hadIssue'],
+      trackedOperations: [],
+    };
+    // hadIssue is not suppressed, but it had a per-endpoint coverage issue last run → tracked now, so it
+    // stays on the calm line and does not re-page every week.
+    const t = slackText(baseSummary(over), baseSummary(over), '<!subteam^X>', ['hadIssue']);
+    expect(t).toContain(':large_orange_circle: 1 no test, tracked');
+    expect(t).not.toContain(':red_circle:');
+    expect(t).not.toContain('<!subteam^X>');
+  });
+
+  it('pings once when an untracked no-test endpoint coincides with a regression', () => {
+    const cur = baseSummary({
+      fullyAsserted: 7,
+      operationIds: ['a', 'b', 'newGap'],
+      zeroTestOperations: ['newGap'],
+      trackedOperations: [],
+    });
+    const prev = baseSummary({ fullyAsserted: 8 });
+    const m = slackText(cur, prev, '<!subteam^X>');
+    expect((m.match(/<!subteam\^X>/g) || []).length).toBe(1);
   });
 });
 
@@ -932,6 +1420,428 @@ describe('lifecycle resources found in the spec', () => {
         },
       });
       expect(out).toEqual(['addMember']);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("coverage report page — this week's movement", () => {
+  const trendSection = (
+    history: Record<string, string>[],
+    progress: Record<string, unknown> | null = null,
+    ages: Record<string, number> | null = null,
+  ): string => {
+    const code = [
+      'import sys, json, importlib.util',
+      `spec = importlib.util.spec_from_file_location('p', ${JSON.stringify(pageScript)})`,
+      'p = importlib.util.module_from_spec(spec); spec.loader.exec_module(p)',
+      'd = json.load(sys.stdin)',
+      "sys.stdout.write(p.trend_section(d['h'], d['p'], d['a']))",
+    ].join('\n');
+    return execFileSync('python3', ['-B', '-c', code], {
+      input: JSON.stringify({ h: history, p: progress, a: ages }),
+      encoding: 'utf8',
+    });
+  };
+
+  const B = ['2xx', '400', '401', '403', '404', '409'];
+  const minSummary = {
+    specHash: 'sha256:abcdef0',
+    specRef: 'abcdef1234567',
+    operations: 1,
+    negativeTests: 5,
+    fullyAsserted: 1,
+    opsMissingResponseTest: 0,
+    codes: Object.fromEntries(B.map((b) => [b, [1, 1]])),
+    missing: Object.fromEntries(B.map((b) => [b, []])),
+    heldCells: Object.fromEntries(B.map((b) => [b, []])),
+    optionalFields: [0, 0],
+    optionalMissing: {},
+    shapeUnvalidated: [],
+    zeroTestOperations: [],
+    trackedOperations: [],
+  };
+  const minRows = [
+    {
+      method: 'GET',
+      operationId: 'listA',
+      path: '/a',
+      cells: Object.fromEntries(B.map((b) => [b, 'ok'])),
+      shape: 'ok',
+      optionalSent: 0,
+      optionalTotal: 0,
+      notes: [],
+      fullyTestedExcept403: true,
+      codeGap: 0,
+    },
+  ];
+
+  it('summarises the trajectory with a direction once there are two reports', () => {
+    const html = trendSection([
+      { fullyAsserted: '54', operations: '66' },
+      { fullyAsserted: '58', operations: '66' },
+    ]);
+    expect(html).toContain("This week's movement");
+    expect(html).toContain('88%'); // 58/66
+    expect(html).toContain('up'); // 82% -> 88%
+  });
+
+  it('shows nothing with no history, no progress and no ages', () => {
+    expect(trendSection([], null, null)).toBe('');
+  });
+
+  it('lists new, closed and stalled gaps by name in plain language', () => {
+    const html = trendSection(
+      [],
+      { newThisWeek: ['createFile'], closedThisWeek: 2, closedOps: ['oldFile', 'oldForm'] },
+      {
+        exportWorkspace: 42,
+        freshGap: 2,
+      },
+    );
+    expect(html).toContain('new coverage gap reported this week');
+    expect(html).toContain('<code>createFile</code>');
+    expect(html).toContain('coverage gaps closed this week');
+    expect(html).toContain('<b>2</b>');
+    // closed gaps are named, not just counted, so the team sees which endpoints got covered
+    expect(html).toContain('<code>oldFile</code>');
+    expect(html).toContain('<code>oldForm</code>');
+    // open 42 days (>= 4 weeks) is stalled; 2 days is not
+    expect(html).toContain('stalled — open 4+ weeks');
+    expect(html).toContain('<code>exportWorkspace</code>');
+    expect(html).not.toContain('freshGap');
+  });
+
+  it('renders the movement section into the full page from gaps-progress.json', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cov-page-'));
+    try {
+      writeFileSync(join(dir, 'summary.json'), JSON.stringify(minSummary));
+      writeFileSync(join(dir, 'rows.json'), JSON.stringify(minRows));
+      writeFileSync(
+        join(dir, 'gaps-progress.json'),
+        JSON.stringify({ newThisWeek: ['x'], closedThisWeek: 1, closedOps: ['coveredNow'] }),
+      );
+      execFileSync('python3', ['-B', pageScript, '--report', dir], { encoding: 'utf8' });
+      const html = readFileSync(join(dir, 'page.html'), 'utf8');
+      expect(html).toContain("This week's movement");
+      expect(html).toContain('new coverage gap reported this week');
+      expect(html).toContain('coverage gap closed this week');
+      expect(html).toContain('<code>coveredNow</code>');
+      // the matrix section is a landmark named by aria-labelledby="matrix"; its label element must carry
+      // that id, or the region has no accessible name for screen-reader navigation
+      expect(html).toContain('aria-labelledby="matrix"');
+      expect(html).toContain('<span class="sumh" id="matrix">Every endpoint</span>');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('shows the report date in the header from the latest history.csv row', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cov-date-'));
+    try {
+      writeFileSync(join(dir, 'summary.json'), JSON.stringify(minSummary));
+      writeFileSync(join(dir, 'rows.json'), JSON.stringify(minRows));
+      writeFileSync(
+        join(dir, 'history.csv'),
+        'date,fullyAsserted,operations,zeroTestOperations\n2026-11-10,1,1,0\n2026-11-17,1,1,0\n',
+      );
+      execFileSync('python3', ['-B', pageScript, '--report', dir], { encoding: 'utf8' });
+      const html = readFileSync(join(dir, 'page.html'), 'utf8');
+      // the newest row's date (this run) is shown as "as of ..." in the header, not an older row's
+      expect(html).toContain('as of 2026-11-17');
+      expect(html).not.toContain('as of 2026-11-10');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('coverage report page — reported vs. closed chart', () => {
+  const chart = (rows: Record<string, string>[]): string => {
+    const code = [
+      'import sys, json, importlib.util',
+      `spec = importlib.util.spec_from_file_location('p', ${JSON.stringify(pageScript)})`,
+      'p = importlib.util.module_from_spec(spec); spec.loader.exec_module(p)',
+      'd = json.load(sys.stdin)',
+      "sys.stdout.write(p.progress_chart(d['r']))",
+    ].join('\n');
+    return execFileSync('python3', ['-B', '-c', code], {
+      input: JSON.stringify({ r: rows }),
+      encoding: 'utf8',
+    });
+  };
+
+  it('draws a reported and a closed bar per week once there are two weeks', () => {
+    const svg = chart([
+      { date: '2026-11-03', reported: '6', closed: '2' },
+      { date: '2026-11-10', reported: '1', closed: '4' },
+    ]);
+    expect(svg).toContain('Gaps reported vs. closed, by week');
+    expect((svg.match(/class="b-rep"/g) || []).length).toBe(2);
+    expect((svg.match(/class="b-clo"/g) || []).length).toBe(2);
+    // each bar carries a hover title naming the week and count
+    expect(svg).toContain('2026-11-10: 1 rep');
+    expect(svg).toContain('2026-11-10: 4 clo');
+    // the SVG is decorative for assistive tech; the data is in a visually-hidden table a screen reader
+    // can read row by row (the per-week values a role="img" label cannot convey)
+    expect(svg).toContain('aria-hidden="true"');
+    expect(svg).toContain('<table class="vh">');
+    expect(svg).toContain('<tr><th scope="row">2026-11-10</th><td>1</td><td>4</td></tr>');
+  });
+
+  it('shows nothing until there are at least two weeks of data', () => {
+    expect(chart([])).toBe('');
+    expect(chart([{ date: '2026-11-10', reported: '1', closed: '4' }])).toBe('');
+  });
+
+  it('skips a week missing a column rather than guessing it', () => {
+    const svg = chart([
+      { date: '2026-11-03', reported: '6', closed: '2' },
+      { date: '2026-11-10', reported: '1' }, // no closed column → skipped
+      { date: '2026-11-17', reported: '2', closed: '3' },
+    ]);
+    // two complete weeks remain, so two reported bars (the incomplete row is dropped)
+    expect((svg.match(/class="b-rep"/g) || []).length).toBe(2);
+    expect(svg).not.toContain('2026-11-10');
+  });
+
+  it('renders the chart into the full page from progress-history.csv', () => {
+    const B = ['2xx', '400', '401', '403', '404', '409'];
+    const minSummary = {
+      specHash: 'sha256:abcdef0',
+      specRef: 'abcdef1234567',
+      operations: 1,
+      negativeTests: 5,
+      fullyAsserted: 1,
+      opsMissingResponseTest: 0,
+      codes: Object.fromEntries(B.map((b) => [b, [1, 1]])),
+      missing: Object.fromEntries(B.map((b) => [b, []])),
+      heldCells: Object.fromEntries(B.map((b) => [b, []])),
+      optionalFields: [0, 0],
+      optionalMissing: {},
+      shapeUnvalidated: [],
+      zeroTestOperations: [],
+      trackedOperations: [],
+    };
+    const dir = mkdtempSync(join(tmpdir(), 'cov-chart-'));
+    try {
+      writeFileSync(join(dir, 'summary.json'), JSON.stringify(minSummary));
+      writeFileSync(join(dir, 'rows.json'), JSON.stringify([]));
+      writeFileSync(
+        join(dir, 'progress-history.csv'),
+        'date,reported,closed\n2026-11-03,6,2\n2026-11-10,1,4\n',
+      );
+      execFileSync('python3', ['-B', pageScript, '--report', dir], { encoding: 'utf8' });
+      const html = readFileSync(join(dir, 'page.html'), 'utf8');
+      expect(html).toContain('Gaps reported vs. closed, by week');
+      expect(html).toContain('class="pchart"');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('coverage report page — gap-card issue links', () => {
+  // Minimal summary with one gap in every category findings() can render.
+  const gappySummary = (over: Record<string, unknown> = {}) => ({
+    missing: { '2xx': [], '400': ['a'], '401': [], '403': ['b'], '404': ['c'], '409': ['d'] },
+    codes: {
+      '2xx': [1, 1],
+      '400': [0, 1],
+      '401': [1, 1],
+      '403': [0, 1],
+      '404': [0, 1],
+      '409': [0, 1],
+    },
+    heldCells: { '2xx': [], '400': [], '401': [], '403': [], '404': [], '409': [] },
+    optionalFields: [1, 2],
+    optionalMissing: { e: ['field'] },
+    shapeUnvalidated: ['f'],
+    zeroTestOperations: ['g'],
+    trackedOperations: [],
+    ...over,
+  });
+
+  const findingsHtml = (summary: Record<string, unknown>): string =>
+    execFileSync(
+      'python3',
+      [
+        '-B',
+        '-c',
+        [
+          'import sys, json, importlib.util',
+          `spec = importlib.util.spec_from_file_location('h', ${JSON.stringify(pageScript)})`,
+          'h = importlib.util.module_from_spec(spec); spec.loader.exec_module(h)',
+          'sys.stdout.write(h.findings(json.load(sys.stdin)))',
+        ].join('\n'),
+      ],
+      { input: JSON.stringify(summary), encoding: 'utf8' },
+    );
+
+  const track = 'https://github.com/camunda/api-test-generator/issues/700';
+
+  it('gap cards carry no per-card issue link (the link lives once on the section heading)', () => {
+    const html = findingsHtml(gappySummary({ trackingUrl: track }));
+    expect(html).toContain('<article class="finding"');
+    // no issue number is repeated on the cards, and the old hardcoded epic must never appear
+    expect(html).not.toContain('/issues/');
+    expect(html).not.toMatch(/\/issues\/6(1[89]|2[0-7])/);
+  });
+
+  it('splits no-test endpoints into a red untracked card and an amber tracked card', () => {
+    const html = findingsHtml(
+      gappySummary({ zeroTestOperations: ['g', 'h'], trackedOperations: ['h'] }),
+    );
+    // g has no tracking issue (no age, not suppressed) → red alert card
+    expect(html).toContain('<article class="finding alert">');
+    expect(html).toContain('No test at all, and no tracking issue');
+    expect(html).toContain('<code>g</code>');
+    // h is suppressed/known → amber (warn) card
+    expect(html).toContain('<article class="finding warn">');
+    expect(html).toContain('No test at all, but tracked by an issue');
+    expect(html).toContain('<code>h</code>');
+  });
+
+  // Integration: the workflow writes the live tracking URL into the report dir as issue-url.txt
+  // (the same file the Slack link reads). The page's main() must pick it up from there — it is
+  // never passed on the summary, because the audit that writes summary.json runs before the issue
+  // exists.
+  const renderReport = (withUrl: boolean): string => {
+    const dir = mkdtempSync(join(tmpdir(), 'cov-page-'));
+    try {
+      const summary = {
+        ...gappySummary(),
+        specHash: 'sha256:abc',
+        specRef: '63a4765abc',
+        operations: 1,
+        negativeTests: 10,
+        opsMissingResponseTest: 1,
+        fullyAsserted: 0,
+      };
+      const rows = [
+        {
+          operationId: 'createProject',
+          area: 'projects',
+          method: 'POST',
+          path: '/projects',
+          cells: { '2xx': 'ok', '409': 'gap' },
+          shape: 'ok',
+          optionalSent: 0,
+          optionalTotal: 0,
+          notes: [],
+          codeGap: true,
+          fullyTestedExcept403: false,
+        },
+      ];
+      writeFileSync(join(dir, 'summary.json'), JSON.stringify(summary));
+      writeFileSync(join(dir, 'rows.json'), JSON.stringify(rows));
+      if (withUrl) writeFileSync(join(dir, 'issue-url.txt'), `${track}\n`);
+      execFileSync('python3', ['-B', pageScript, '--report', dir, '--fragment'], {
+        encoding: 'utf8',
+      });
+      return readFileSync(join(dir, 'page.html'), 'utf8');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  };
+
+  it('links the live tracking issue once, on the gaps heading, never a hardcoded one', () => {
+    const html = renderReport(true);
+    const links =
+      html.match(/href="https:\/\/github\.com\/camunda\/api-test-generator\/issues\/700"/g) ?? [];
+    // exactly one link for the whole section, not one per card
+    expect(links.length).toBe(1);
+    expect(html).toContain('Where the gaps are');
+    expect(html).toContain('#700');
+    expect(html).not.toMatch(/\/issues\/6(1[89]|2[0-7])/);
+  });
+
+  it('omits the tracking link when the report dir has no issue-url.txt', () => {
+    const html = renderReport(false);
+    expect(html).toContain('Where the gaps are');
+    expect(html).not.toContain('/issues/');
+  });
+
+  it('collapses the full per-endpoint table behind a details toggle naming the count', () => {
+    const html = renderReport(true);
+    expect(html).toContain('<details class="matrix">');
+    // the summary names the full endpoint count so a reader knows the table is complete when opened
+    expect(html).toMatch(/show all \d+ endpoints/);
+  });
+
+  it('shows how long each no-test gap has been open from endpoint-ages.json', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cov-age-'));
+    try {
+      const summary = {
+        ...gappySummary({ zeroTestOperations: ['g'], trackedOperations: [] }),
+        specHash: 'sha256:abc',
+        specRef: 'abc',
+        operations: 1,
+        negativeTests: 1,
+        opsMissingResponseTest: 0,
+        fullyAsserted: 0,
+      };
+      writeFileSync(join(dir, 'summary.json'), JSON.stringify(summary));
+      writeFileSync(join(dir, 'rows.json'), JSON.stringify([]));
+      // 42 days open → "open 6 weeks"; a gap opened this run (0) would read "new this week"
+      writeFileSync(join(dir, 'endpoint-ages.json'), JSON.stringify({ g: 42 }));
+      execFileSync('python3', ['-B', pageScript, '--report', dir, '--fragment'], {
+        encoding: 'utf8',
+      });
+      const html = readFileSync(join(dir, 'page.html'), 'utf8');
+      expect(html).toContain('<code>g</code> <span class="age">(open 6 weeks)</span>');
+      // g has an age ⇒ it has a tracking issue ⇒ amber "tracked" card, not the red "no tracking issue"
+      // one — so the page never says "no issue tracks the gap" next to "open 6 weeks".
+      expect(html).toContain('No test at all, but tracked by an issue');
+      expect(html).not.toContain('No test at all, and no tracking issue');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps the tracking link with neutral wording when there are no finding cards', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cov-nocards-'));
+    try {
+      const B = ['2xx', '400', '401', '403', '404', '409'];
+      // everything findings() renders a card for is clean (no response-code/optional/shape/no-test gaps),
+      // but the index issue is still open because some gap findings() does not card — a missing success
+      // (2xx) or auth (401) test, or a per-kind bad-request check — remains. The note must not name one
+      // kind, since it cannot tell which it is.
+      const summary = {
+        specHash: 'sha256:abc',
+        specRef: 'abc',
+        operations: 1,
+        negativeTests: 1,
+        opsMissingResponseTest: 0,
+        fullyAsserted: 1,
+        codes: Object.fromEntries(B.map((b) => [b, [1, 1]])),
+        missing: Object.fromEntries(B.map((b) => [b, []])),
+        heldCells: Object.fromEntries(B.map((b) => [b, []])),
+        optionalFields: [1, 1],
+        optionalMissing: {},
+        shapeUnvalidated: [],
+        zeroTestOperations: [],
+        trackedOperations: [],
+      };
+      writeFileSync(join(dir, 'summary.json'), JSON.stringify(summary));
+      writeFileSync(join(dir, 'rows.json'), JSON.stringify([]));
+      writeFileSync(
+        join(dir, 'issue-url.txt'),
+        'https://github.com/camunda/api-test-generator/issues/700\n',
+      );
+      execFileSync('python3', ['-B', pageScript, '--report', dir, '--fragment'], {
+        encoding: 'utf8',
+      });
+      const html = readFileSync(join(dir, 'page.html'), 'utf8');
+      expect(html).toContain('Where the gaps are');
+      expect(html).toContain('issues/700');
+      expect(html).toContain('The remaining gaps are listed in the tracking issue.');
+      // Must not claim the remaining gaps are only one kind — findings() also omits success/auth cards.
+      expect(html).not.toContain('bad-request-kind checks');
+      // The section is a landmark named by aria-labelledby="gaps"; its target must hold only the heading
+      // words, so a screen reader navigating by region hears "Where the gaps are", not the tracking link.
+      expect(html).toContain('<span id="gaps">Where the gaps are</span>');
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
