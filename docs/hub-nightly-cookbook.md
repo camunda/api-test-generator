@@ -16,8 +16,10 @@ without the one assertion Hub cannot meet yet. So any number above 0 is news.
 **Who acts.** The Hub team acts on everything in this channel — but not every post pages the person on call, so read
 every post, not only the ones that mention you. A **broken scheduled run** pings `test-automation-medic` (they own the
 CI machinery, not the Hub team): the **missing-post alert** (the nightly or its triage did not run), and the
-**spec-bump check** when a step of the check itself failed. The Hub-finding alerts are conditional: an ordinary
-**spec-drift** post pings nobody (it reaches the team through its bump PR's `@camunda/hub` reviewer); the **weekly
+**spec-bump check** when a step of the check itself failed. The Hub-finding alerts are conditional: a **clean**
+**spec-drift** post pings nobody (it reaches the team through its bump PR's `@camunda/hub` reviewer), while a
+**blocked** spec-drift post (one that only files a tracking issue, with no bump PR to carry a reviewer) pages
+`hub-medic`; the **weekly
 report** mentions `hub-medic` only when coverage regressed since the previous week; and the **re-enable check** pings
 `hub-medic` only when a reported item has no named fixer (otherwise it names the person who landed the Hub fix). See "Who gets pinged" in
 [how-it-works.md](how-it-works.md). A PR labelled `nightly-api-fix` (a suppress, fix or unskip PR) is closed after 3
@@ -158,7 +160,7 @@ Hub's latest spec. The headline says what changed:
 The last line says what to do:
 
 - **➡️ Adopt via bump PR #N** (PR opened automatically: **yes**): the new spec is safe, and the bot has already opened the bump PR for you. The generator owner reviews and merges it, which moves the pin. While it stays open, later checks update the same PR; once it is merged, the next change gets a new one.
-- **📋 Blocked — see tracking issue #N** (PR opened automatically: **no**, only an issue): the new spec breaks something, or needs a test the generator does not have. Read
+- **📋 Blocked — see tracking issue #N** (PR opened automatically: **no**, only an issue): the new spec breaks something, or needs a test the generator does not have. `hub-medic` is pinged — the Hub team owns the camunda-hub config, and a blocked drift has no bump PR reviewer to carry it. Read
   the issue. The pin does not move until it is fixed.
 - **⚠️ Spec-bump check failed for X** (PR opened automatically: **no**): a step of the job itself failed, so the drift result may be missing. `test-automation-medic` is pinged (a broken run is CI machinery, not a Hub finding). Open the run
   before trusting that there is no drift.

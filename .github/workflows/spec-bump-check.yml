@@ -499,6 +499,13 @@ jobs:
           N_ADDED: ${{ steps.opdiff.outputs.n_added }}
           N_REMOVED: ${{ steps.opdiff.outputs.n_removed }}
           UNMAPPED: ${{ steps.unmapped.outputs.unmapped }}
+          # Routing signals (the same inputs that choose bump-PR vs tracking-issue
+          # above) — used below to page hub-medic only when the auto-bump is blocked.
+          GEN_OUTCOME: ${{ steps.generate.outcome }}
+          INV_OUTCOME: ${{ steps.invariants.outcome }}
+          HAS_UNMAPPED: ${{ steps.unmapped.outputs.has_unmapped }}
+          HAS_NEWLY_REQUIRED: ${{ steps.fielddiff.outputs.has_newly_required }}
+          APP_TOKEN_EMPTY: ${{ steps.app-token.outputs.token == '' }}
           COOKBOOK_URL: ${{ github.server_url }}/${{ github.repository }}/blob/main/docs/hub-nightly-cookbook.md
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
@@ -520,6 +527,24 @@ jobs:
           else
             link="ℹ️ Canonical heads-up: the \`${ISSUE_TITLE}\` issue/PR."
           fi
+          # Page the Hub team ONLY when the auto-bump is BLOCKED (broken drift):
+          # generate/invariants failed, an uncovered operation, a newly-required
+          # unfixtured field, or no App token. A clean bump opens a PR that requests
+          # @camunda/hub review, so it carries its own reviewer and pages nobody; a
+          # blocked drift only files a tracking issue with no reviewer, so without
+          # this page it sits unseen (the Credential-removal drift did exactly that).
+          # The Hub team owns the camunda-hub config (docs/how-it-works.md "Who owns
+          # what"), so the page is hub-medic — a broken scheduled *run* still pages
+          # test-automation-medic separately below. Computed from the routing inputs,
+          # NOT the issue lookup above: GitHub search indexing lags, so a just-filed
+          # issue can be missing from the link (the Credential alert fell through to
+          # the "Canonical heads-up" branch for exactly that reason).
+          mention=""
+          if [ "${GEN_OUTCOME}" != "success" ] || [ "${INV_OUTCOME}" != "success" ] \
+            || [ "${HAS_UNMAPPED}" = "true" ] || [ "${HAS_NEWLY_REQUIRED}" = "true" ] \
+            || [ "${APP_TOKEN_EMPTY}" = "true" ]; then
+            mention=":rotating_light: <!subteam^S014VK4482H|hub-medic>"
+          fi
           # Comma-join the first 30 ids; append "… (+N more)" past the cap so a
           # big drift isn't silently truncated.
           csv() {
@@ -539,6 +564,7 @@ jobs:
           REMOVED_CSV="$(csv "${REMOVED:-}" "${N_REMOVED:-0}")" \
           UNMAPPED_LIST="${UNMAPPED:-}" \
           LINK="$link" \
+          MENTION="$mention" \
           COOKBOOK_URL="$COOKBOOK_URL" \
           RUN_URL="$RUN_URL" \
           node -e '
@@ -565,7 +591,13 @@ jobs:
               : hasUnmapped
               ? `:alert2: *camunda-hub coverage regression* vs latest \`${e.LATEST}\` (no operationId churn):`
               : `:alert2: *camunda-hub spec pin is behind* latest \`${e.LATEST}\` (no operationId churn, no coverage regression):`;
-            const text = headline + unmappedLine + `\n${e.LINK}\n<${e.RUN_URL}|📊 View run> · <${e.COOKBOOK_URL}|📖 What this alert means>`;
+            // Page the Hub team on a blocked drift; empty (no ping) on a clean bump.
+            const mention = e.MENTION ? `\n${e.MENTION}` : "";
+            const text =
+              headline +
+              unmappedLine +
+              `\n${e.LINK}\n<${e.RUN_URL}|📊 View run> · <${e.COOKBOOK_URL}|📖 What this alert means>` +
+              mention;
             require("fs").appendFileSync(process.env.GITHUB_OUTPUT, `text_json=${JSON.stringify(text)}\n`);
           '
 

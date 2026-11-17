@@ -1115,10 +1115,17 @@ For **camunda-hub** only, when the *operation* surface changed (an operationId
 added/removed, not just a field), it also posts a Slack alert to
 `#top-hub-nightly-test-results` (Slack bot token via the same Vault JWT auth)
 linking the bump PR / tracking issue it just created — so the hub team sees a
-new upstream domain in their channel, not only as a GitHub issue (#435). This
-drift alert **pings nobody** — a new domain reaches the Hub team through the bump
-PR's reviewer instead; only a failed-run alert pages `test-automation-medic` (a
-broken scheduled run is CI machinery, not a Hub finding). The
+new upstream domain in their channel, not only as a GitHub issue (#435). A
+**clean** drift alert **pings nobody** — the Hub team reaches it through the bump
+PR's `@camunda/hub` reviewer. A **blocked** drift (broken generate/invariants, an
+uncovered operation, a newly-required unfixtured field, or no App token — the same
+routing inputs that file a tracking issue instead of a bump PR) pages `hub-medic`,
+because the Hub team owns the camunda-hub config and that tracking issue carries no
+reviewer to notify anyone; the gate is that deterministic routing signal, not the
+issue link, which GitHub search indexing can lag (the Credential-removal drift fell
+through to the "Canonical heads-up" branch for exactly that reason). Only a
+failed-run alert pages `test-automation-medic` (a broken scheduled run is CI
+machinery, not a Hub finding). The
 op-surface diff is already computed for the routing above, so the Slack step
 only formats + links; it does not recompute.
 

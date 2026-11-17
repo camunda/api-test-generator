@@ -26,11 +26,32 @@ describe('spec-bump-check Slack pings', () => {
     expect(line).not.toContain('\\n');
   });
 
-  it('never pings hub-medic from spec-bump — drift pings nobody, a broken run pings test-automation', () => {
-    // The op-surface / coverage-drift alert deliberately pings nobody (its bump
-    // PR carries a reviewer instead); the failed-run alert pages test-automation-medic.
-    expect(workflow.split('S014VK4482H').length - 1).toBe(0);
+  it('pages hub-medic only when the auto-bump is BLOCKED (broken drift), never on a clean bump', () => {
+    // A CLEAN drift pings nobody: its bump PR already requests @camunda/hub review
+    // (the reviewer carries the signal). A BLOCKED drift only files a tracking
+    // issue with no reviewer, so without a page it sits unseen — the camunda-hub
+    // Credential-removal drift did exactly that. The Hub team owns the camunda-hub
+    // config (docs/how-it-works.md "Who owns what"), so the page is hub-medic. A
+    // broken scheduled *run* still pages test-automation-medic (the leg-failure line).
+    expect(workflow.split('S014VK4482H').length - 1).toBe(1);
     expect(workflow.split('S09UF0EV0HG').length - 1).toBe(1);
+
+    // The hub-medic page is set ONLY under the deterministic broken-drift
+    // condition — computed from the routing inputs, not the racy open-issue
+    // lookup (GitHub search indexing lags and can miss a just-filed issue, which
+    // is why the real Credential alert fell through to the "Canonical heads-up"
+    // branch rather than "Blocked — see tracking issue").
+    const payloadStep = workflow.slice(workflow.indexOf('Build hub drift Slack payload'));
+    expect(payloadStep).toContain('mention=":rotating_light: <!subteam^S014VK4482H|hub-medic>"');
+    for (const guard of [
+      'GEN_OUTCOME',
+      'INV_OUTCOME',
+      'HAS_UNMAPPED',
+      'HAS_NEWLY_REQUIRED',
+      'APP_TOKEN_EMPTY',
+    ]) {
+      expect(payloadStep).toContain(guard);
+    }
   });
 });
 
