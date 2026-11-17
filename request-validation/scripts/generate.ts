@@ -9,6 +9,8 @@ import {
   generateMultipleOfViolations,
   generateNestedAdditionalProps,
   generateUniqueItemsViolations,
+  isFormatInvalidEligible,
+  isNestedAdditionalPropEligible,
 } from '../src/analysis/advancedSchema.js';
 import {
   generateAllOfConflicts,
@@ -28,7 +30,10 @@ import {
   isMissingBodyEligible,
 } from '../src/analysis/bodyTopLevel.js';
 import { generateBodyTypeMismatch } from '../src/analysis/bodyTypeMismatch.js';
-import { generateConstraintViolations } from '../src/analysis/constraintViolations.js';
+import {
+  generateConstraintViolations,
+  isConstraintViolationEligible,
+} from '../src/analysis/constraintViolations.js';
 import { generateDeepMissingRequired } from '../src/analysis/deepMissingRequired.js';
 import { generateDiscriminatorMismatch } from '../src/analysis/discriminatorMismatch.js';
 import { generateEnumViolations } from '../src/analysis/enumViolations.js';
@@ -1439,14 +1444,17 @@ async function main() {
           }
           applicable.add('type-mismatch');
           applicable.add('body-top-type-mismatch');
-          applicable.add('additional-prop-general');
-          // additional-prop is narrower than -general: only when the schema
-          // itself declares additionalProperties: false (additionalProps.ts's
-          // own gate), unlike -general which fires for any object body.
+          // additional-prop applies only when the schema itself declares
+          // additionalProperties: false (additionalProps.ts's own gate). Its
+          // scenario has the same body shape as -general's, so the structural
+          // additional-prop dedupe keeps it and drops -general: count one or
+          // the other, never both.
           if (op.requestBodySchema?.additionalProperties === false) {
             applicable.add('additional-prop');
+          } else {
+            applicable.add('additional-prop-general');
           }
-          if (f.hasNestedObject) applicable.add('nested-additional-prop');
+          if (isNestedAdditionalPropEligible(op)) applicable.add('nested-additional-prop');
         }
         if (f.hasEnums) applicable.add('enum-violation');
         if (isUnionEligible(op)) applicable.add('union');
@@ -1462,8 +1470,14 @@ async function main() {
         if (isAllOfConflictEligible(op)) applicable.add('allof-conflict');
         if (f.hasUniqueItems) applicable.add('unique-items-violation');
         if (f.hasMultipleOf) applicable.add('multiple-of-violation');
-        if (f.hasConstraints) applicable.add('constraint-violation');
-        if (f.hasFormats) applicable.add('format-invalid');
+        if (isConstraintViolationEligible(op, { capabilityGates }))
+          applicable.add('constraint-violation');
+        if (
+          isFormatInvalidEligible(op, {
+            unenforcedStringFormats: rvConfig.unenforcedStringFormats,
+          })
+        )
+          applicable.add('format-invalid');
       }
     }
     // auth-absent/auth-invalid (#495) target the same operation set (shared
