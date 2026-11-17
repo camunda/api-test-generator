@@ -444,38 +444,67 @@ describe('per-endpoint issue lifecycle (stub gh)', () => {
   });
 
   it('records this week movement (new and closed gap counts) in gaps-progress.json', () => {
-    const r = runIssueScript(
-      'hub-coverage-endpoint-issues.sh',
-      endpointFiles('newOp', 'stillOpen'),
-      [
-        { number: 5, title: endpointTitle('stillOpen'), state: 'OPEN' },
-        // had a gap before, no longer in endpoints.json this run → closed this week
-        { number: 8, title: endpointTitle('fixedOp'), state: 'OPEN' },
-      ],
-      NO_HUB,
-    );
-    // closedOps names which endpoints were covered this run (fixedOp), so the page can list them, not
-    // just count them; closedThisWeek stays the count (= closedOps length).
-    expect(r.gapsProgress).toEqual({
-      newThisWeek: ['newOp'],
-      closedThisWeek: 1,
-      closedOps: ['fixedOp'],
-    });
-  });
-
-  it('appends a weekly reported-vs-closed row to progress-history.csv, continuing the previous file', () => {
-    const prevDir = mkdtempSync(join(tmpdir(), 'cov-prevprog-'));
-    const prev = join(prevDir, 'progress-history.csv');
-    writeFileSync(prev, 'date,reported,closed\n2026-11-10,4,2\n');
+    const prevDir = mkdtempSync(join(tmpdir(), 'cov-prevei-'));
+    const prevEI = join(prevDir, 'endpoint-issues.json');
+    // Last run: stillOpen and fixedOp each had a coverage issue.
+    writeFileSync(prevEI, JSON.stringify({ stillOpen: 5, fixedOp: 8 }));
     try {
       const r = runIssueScript(
         'hub-coverage-endpoint-issues.sh',
         endpointFiles('newOp', 'stillOpen'),
         [
           { number: 5, title: endpointTitle('stillOpen'), state: 'OPEN' },
-          { number: 8, title: endpointTitle('fixedOp'), state: 'OPEN' }, // closed this run
+          { number: 8, title: endpointTitle('fixedOp'), state: 'OPEN' }, // covered this run → closed
         ],
-        { ...NO_HUB, PREV_PROGRESS_HISTORY: prev },
+        { ...NO_HUB, PREV_ENDPOINT_ISSUES: prevEI },
+      );
+      // closedOps names which endpoints were covered since last run (fixedOp had an issue, no longer a
+      // gap), so the page and Slack can list them; closedThisWeek stays the count (= closedOps length).
+      expect(r.gapsProgress).toEqual({
+        newThisWeek: ['newOp'],
+        closedThisWeek: 1,
+        closedOps: ['fixedOp'],
+      });
+    } finally {
+      rmSync(prevDir, { recursive: true, force: true });
+    }
+  });
+
+  it('counts a gap closed since last report even if its issue was already closed by an owner', () => {
+    const prevDir = mkdtempSync(join(tmpdir(), 'cov-prevei2-'));
+    const prevEI = join(prevDir, 'endpoint-issues.json');
+    // alreadyClosed had an issue last run; this run it is covered, and its issue is not OPEN in $existing
+    // (an owner or an intervening non-dry run already closed it). The previous-map comparison still counts
+    // it, which the old "still-open issues we close now" set would have missed.
+    writeFileSync(prevEI, JSON.stringify({ alreadyClosed: 9 }));
+    try {
+      const r = runIssueScript(
+        'hub-coverage-endpoint-issues.sh',
+        endpointFiles('stillOpen'),
+        [{ number: 5, title: endpointTitle('stillOpen'), state: 'OPEN' }],
+        { ...NO_HUB, PREV_ENDPOINT_ISSUES: prevEI },
+      );
+      expect(r.gapsProgress.closedOps).toEqual(['alreadyClosed']);
+    } finally {
+      rmSync(prevDir, { recursive: true, force: true });
+    }
+  });
+
+  it('appends a weekly reported-vs-closed row to progress-history.csv, continuing the previous file', () => {
+    const prevDir = mkdtempSync(join(tmpdir(), 'cov-prevprog-'));
+    const prev = join(prevDir, 'progress-history.csv');
+    writeFileSync(prev, 'date,reported,closed\n2026-11-10,4,2\n');
+    const prevEI = join(prevDir, 'endpoint-issues.json');
+    writeFileSync(prevEI, JSON.stringify({ stillOpen: 5, fixedOp: 8 })); // both had issues last run
+    try {
+      const r = runIssueScript(
+        'hub-coverage-endpoint-issues.sh',
+        endpointFiles('newOp', 'stillOpen'),
+        [
+          { number: 5, title: endpointTitle('stillOpen'), state: 'OPEN' },
+          { number: 8, title: endpointTitle('fixedOp'), state: 'OPEN' }, // covered this run → closed
+        ],
+        { ...NO_HUB, PREV_PROGRESS_HISTORY: prev, PREV_ENDPOINT_ISSUES: prevEI },
       );
       const lines = r.progressHistory.trim().split('\n');
       expect(lines[0]).toBe('date,reported,closed');
@@ -1325,6 +1354,10 @@ describe("coverage report page — this week's movement", () => {
       expect(html).toContain('new coverage gap reported this week');
       expect(html).toContain('coverage gap closed this week');
       expect(html).toContain('<code>coveredNow</code>');
+      // the matrix section is a landmark named by aria-labelledby="matrix"; its label element must carry
+      // that id, or the region has no accessible name for screen-reader navigation
+      expect(html).toContain('aria-labelledby="matrix"');
+      expect(html).toContain('<span class="sumh" id="matrix">Every endpoint</span>');
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

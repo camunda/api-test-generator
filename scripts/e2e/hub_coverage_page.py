@@ -441,7 +441,7 @@ def render(s, rows, history=(), ages=None, progress=None, progress_history=()):
   {findings_html}
   <section aria-labelledby="matrix">
     <details class="matrix">
-      <summary><span class="sumh">Every endpoint</span><span class="h2link">show all {s['operations']} endpoints and their per-code status</span></summary>
+      <summary><span class="sumh" id="matrix">Every endpoint</span><span class="h2link">show all {s['operations']} endpoints and their per-code status</span></summary>
       <div class="tools">
         <div class="legend"><span><i class="k ok">●</i> tested</span><span><i class="k gap">×</i> in the spec, but no test</span><span><i class="k hold">◇</i> known and tracked elsewhere</span><span><i class="k na">n/a</i> the spec does not list it for this endpoint</span></div>
         <label class="toggle"><input type="checkbox" id="onlygaps"> Only endpoints missing a response test (ignoring 403)</label>

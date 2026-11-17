@@ -158,22 +158,22 @@ jq -R -s 'split("\n") | map(select(length > 0) | split("\t") | {(.[0]): (.[1] | 
 jq -R -s 'split("\n") | map(select(length > 0) | split("\t") | {(.[0]): (.[1] | tonumber)}) | add // {}' \
   "$ages" > "$REPORT_DIR/endpoint-ages.json"
 
-# This week's movement, for the report page: the brand-new gaps reported this run (ops that got a new
-# issue) and the gaps that closed. "Closed" = open per-endpoint issues whose endpoint no longer has a gap
-# (title in $existing OPEN but not in $current) — the same set the cleanup loop below closes. We record the
-# operationIds, not just a count, so the page can name which endpoints were covered this week.
+# This week's movement, for the report page and the Slack Wins section: the brand-new gaps reported this run
+# (ops that got a new issue), and the gaps closed since the previous report. "Closed" = endpoints that had a
+# per-endpoint coverage issue last run (previous endpoint-issues.json keys) but no longer have a gap this run
+# (not in endpoints.json). Comparing the previous map against the current gap set — rather than only counting
+# the still-open issues this invocation closes — also catches a gap an owner, or an intervening non-dry run,
+# already closed, which that narrower set would miss. operationIds, not just a count, so the page and Slack
+# can name which endpoints were covered.
 new_json=$(jq -R -s 'split("\n") | map(select(length > 0))' "$new_ops")
-closed_titles=$(jq -r --arg p "$prefix" --arg x "$endpoint_suffix" \
-  '.[] | select(.state == "OPEN" and (.title | startswith($p)) and (.title | endswith($x))) | .title' \
-  <<< "$existing" | grep -xvF -f "$current" 2>/dev/null || true)
-# Map each closed title back to its operationId by stripping the fixed prefix and suffix (bash parameter
-# expansion, so the "[" in the prefix needs no regex escaping).
-closed_ops=$(mktemp)
-while IFS= read -r t; do
-  [ -z "$t" ] && continue
-  o=${t#"$prefix"}; o=${o%"$endpoint_suffix"}
-  printf '%s\n' "$o" >> "$closed_ops"
-done <<< "$closed_titles"
+cur_ops=$(mktemp)
+jq -r '.[].operationId' "$endpoints_json" | sort -u > "$cur_ops"
+prev_ops=$(mktemp)  # endpoints that had a coverage issue last run (empty on the first run)
+if [ -n "${PREV_ENDPOINT_ISSUES:-}" ] && [ -s "$PREV_ENDPOINT_ISSUES" ]; then
+  jq -r 'keys[]' "$PREV_ENDPOINT_ISSUES" 2>/dev/null | sort -u > "$prev_ops" || true
+fi
+closed_ops=$(mktemp)  # had an issue last run, no longer a gap this run
+comm -23 "$prev_ops" "$cur_ops" > "$closed_ops"
 closed_json=$(jq -R -s 'split("\n") | map(select(length > 0))' "$closed_ops")
 jq -n --argjson new "$new_json" --argjson closedops "$closed_json" \
   '{newThisWeek: $new, closedThisWeek: ($closedops | length), closedOps: $closedops}' \

@@ -200,6 +200,9 @@ jobs:
           # Previous week's reported-vs-closed rows (from the downloaded previous artifact), so this run
           # appends to them and the page can chart engagement over weeks. Absent on the first run.
           PREV_PROGRESS_HISTORY: previous/progress-history.csv
+          # Previous run's endpoint→issue map, so "closed this week" counts every endpoint that had an issue
+          # last run and no longer has a gap — even one an owner or an intervening run already closed.
+          PREV_ENDPOINT_ISSUES: previous/endpoint-issues.json
         run: bash .github/scripts/hub-coverage-endpoint-issues.sh
 
       # Same gate as Slack: a dry run or a test trigger never touches issues. An existing open
