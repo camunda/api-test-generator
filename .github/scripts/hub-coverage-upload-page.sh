@@ -48,9 +48,10 @@ if ! curl -fsS -F "file=@${file};type=text/html" "$upload_url" >/dev/null; then
 fi
 
 # 3. Complete the upload, posting the file to the channel (top-level) — or in a thread when THREAD_TS is set.
+# No initial_comment: the weekly message already carries the ":bar_chart: Full coverage report — open the
+# attached page" line that points here, so a caption on the file would just repeat it.
 payload=$(jq -n --arg id "$file_id" --arg ch "$CHANNEL" --arg ts "${THREAD_TS:-}" \
-  '{files: [{id: $id, title: "Hub coverage report"}], channel_id: $ch,
-    initial_comment: "Full coverage report (open the attached page)."}
+  '{files: [{id: $id, title: "Hub coverage report"}], channel_id: $ch}
    + (if $ts == "" then {} else {thread_ts: $ts} end)')
 done=$(curl -fsS -X POST "https://slack.com/api/files.completeUploadExternal" \
   -H "Authorization: Bearer ${SLACK_BOT_TOKEN}" \
