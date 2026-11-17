@@ -478,9 +478,11 @@ describe('per-endpoint issue lifecycle (stub gh)', () => {
       NO_HUB,
     );
     expect(r.calls).toContain('gh issue reopen 7');
-    // a returning gap is a regression reported this week — it joins the new-issue op in newThisWeek, so the
-    // chart's Reported count and the "newly reported" list include it (a regress→fix cycle is not net progress)
-    expect(r.gapsProgress.newThisWeek).toEqual(['returned', 'brandNew']);
+    // a returning gap is a regression reported this week: reopening it puts it in this run's issue set, and it
+    // was not in the previous report (no PREV_ENDPOINT_ISSUES here), so the movement block counts it as
+    // reported alongside the brand-new op (a regress→fix cycle is not net progress). The list is the sorted
+    // set-difference of the two issue maps, so the order is alphabetical, not creation order.
+    expect(r.gapsProgress.newThisWeek).toEqual(['brandNew', 'returned']);
   });
 
   it('reopens a returning gap even when the brand-new issue cap is reached (reopen is not a creation)', () => {
@@ -500,8 +502,9 @@ describe('per-endpoint issue lifecycle (stub gh)', () => {
     const prevEI = join(prevDir, 'endpoint-issues.json');
     // alreadyClosed had an issue last run; this run it is covered, and its issue is not OPEN in $existing
     // (an owner or an intervening non-dry run already closed it). The previous-map comparison still counts
-    // it, which the old "still-open issues we close now" set would have missed.
-    writeFileSync(prevEI, JSON.stringify({ alreadyClosed: 9 }));
+    // it, which the old "still-open issues we close now" set would have missed. stillOpen also had an issue
+    // last run (it is still a gap now), so the previous map lists it too — an ongoing gap, not newly reported.
+    writeFileSync(prevEI, JSON.stringify({ alreadyClosed: 9, stillOpen: 5 }));
     try {
       const r = runIssueScript(
         'hub-coverage-endpoint-issues.sh',
@@ -510,6 +513,38 @@ describe('per-endpoint issue lifecycle (stub gh)', () => {
         { ...NO_HUB, PREV_ENDPOINT_ISSUES: prevEI },
       );
       expect(r.gapsProgress.closedOps).toEqual(['alreadyClosed']);
+      // an ongoing gap (tracked both reports) is neither reported nor closed this week
+      expect(r.gapsProgress.newThisWeek).toEqual([]);
+    } finally {
+      rmSync(prevDir, { recursive: true, force: true });
+    }
+  });
+
+  it('counts a gap an intervening run already issued as reported this week (OPEN, absent from the previous report)', () => {
+    const prevDir = mkdtempSync(join(tmpdir(), 'cov-prevei3-'));
+    const prevEI = join(prevDir, 'endpoint-issues.json');
+    // Between two scheduled reports, a non-dry manual run (or a failed run that already reconciled issues)
+    // opened the issue for interveningGap. So this scheduled run finds it already OPEN and only edits it —
+    // it does not create or reopen it — yet it is a real gap reported since the last report. Counting only
+    // this invocation's own create/reopen mutations would miss it (the bug this guards). It is absent from
+    // the previous report's map but present in this run's issue set, so the set-difference counts it.
+    writeFileSync(prevEI, JSON.stringify({ ongoing: 4 }));
+    try {
+      const r = runIssueScript(
+        'hub-coverage-endpoint-issues.sh',
+        endpointFiles('interveningGap', 'ongoing'),
+        [
+          { number: 11, title: endpointTitle('interveningGap'), state: 'OPEN' }, // opened by an intervening run
+          { number: 4, title: endpointTitle('ongoing'), state: 'OPEN' },
+        ],
+        { ...NO_HUB, PREV_ENDPOINT_ISSUES: prevEI },
+      );
+      // not created or reopened this run — only edited
+      expect(r.calls).not.toContain('gh issue reopen 11');
+      // still reported, because it is tracked now and was not in the previous report; ongoing is in both, so
+      // it is neither reported nor closed
+      expect(r.gapsProgress.newThisWeek).toEqual(['interveningGap']);
+      expect(r.gapsProgress.closedOps).toEqual([]);
     } finally {
       rmSync(prevDir, { recursive: true, force: true });
     }

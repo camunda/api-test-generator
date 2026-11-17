@@ -91,7 +91,6 @@ if [ "$(jq 'length' <<< "$existing")" -ge "$lookup_limit" ]; then
   echo "::warning::coverage-issue lookup hit the ${lookup_limit}-result cap; dedup and cleanup may be incomplete — split the search by area or state." >&2
 fi
 new=0
-new_ops=$(mktemp)  # operationId of each gap reported this run: a brand-new issue, or a returning gap reopened
 current=$(mktemp)
 # operationId<TAB>issue-number, one line per endpoint that has an issue this run; folded into
 # endpoint-issues.json below.
@@ -115,20 +114,16 @@ while read -r entry; do
     url=$(gh issue create --title "$title" --body-file "$file" \
       --label missing-coverage --label auto-generated --label hub --label team/hub)
     new=$((new + 1))
-    printf '%s\n' "$op" >> "$new_ops"
     assign_owner "${url##*/}" "$op"
     # Freshly opened this run, so its gap is zero days old.
     open_day="$today"
   else
     IFS=$'\t' read -r num state created <<< "$found"
-    if [ "$state" != "OPEN" ]; then
-      gh issue reopen "$num"
-      # A returning gap is a regression reported this week: count it in the reported set (so the chart's
-      # Reported bar and the "newly reported" list include it, and a regress→fix cycle does not read as net
-      # progress). Not against the brand-new flood-guard counter ($new), since reopening is not creating —
-      # so a returning gap is reopened even when the cap on brand-new issues is reached.
-      printf '%s\n' "$op" >> "$new_ops"
-    fi
+    # Reopen a returning gap (its endpoint was covered, now regressed). Not gated on the brand-new
+    # flood-guard counter ($new) — reopening is not creating — so a returning gap is reopened even when the
+    # cap on brand-new issues is reached. It lands in this run's endpoint-issues.json like any other tracked
+    # gap, so the movement block below counts it as reported-this-week on its own.
+    [ "$state" = "OPEN" ] || gh issue reopen "$num"
     # Add team/hub on the edit path too, so a pre-existing open endpoint issue also lands on the Hub board.
     gh issue edit "$num" --body-file "$file" --add-label team/hub
     gh issue comment "$num" --body "Re-checked on $today: still missing. $RUN_URL"
@@ -165,23 +160,26 @@ jq -R -s 'split("\n") | map(select(length > 0) | split("\t") | {(.[0]): (.[1] | 
 jq -R -s 'split("\n") | map(select(length > 0) | split("\t") | {(.[0]): (.[1] | tonumber)}) | add // {}' \
   "$ages" > "$REPORT_DIR/endpoint-ages.json"
 
-# This week's movement, for the report page and the Slack Wins section: the gaps reported this run (a new
-# issue opened, or a returning gap reopened), and the gaps closed since the previous report. "Closed" = endpoints that had a
-# per-endpoint coverage issue last run (previous endpoint-issues.json keys) but no longer have a gap this run
-# (not in endpoints.json). Comparing the previous map against the current gap set — rather than only counting
-# the still-open issues this invocation closes — also catches a gap an owner, or an intervening non-dry run,
-# already closed, which that narrower set would miss. operationIds, not just a count, so the page and Slack
-# can name which endpoints were covered.
-new_json=$(jq -R -s 'split("\n") | map(select(length > 0))' "$new_ops")
-cur_ops=$(mktemp)
-jq -r '.[].operationId' "$endpoints_json" | sort -u > "$cur_ops"
-prev_ops=$(mktemp)  # endpoints that had a coverage issue last run (empty on the first run)
+# This week's movement, for the report page and the Slack Wins section — computed symmetrically from two
+# tracking-issue sets so it is robust to runs between two scheduled reports (a non-dry manual run, or a failed
+# run that already reconciled issues): the endpoints that have a per-endpoint coverage issue THIS run (keys of
+# the endpoint-issues.json just written above) against the endpoints that had one in the previous scheduled
+# report (previous endpoint-issues.json keys, PREV_ENDPOINT_ISSUES). "Reported" = tracked this run but not in
+# the previous report (a brand-new issue, a reopened returning gap, or a gap an intervening run already
+# issued); "closed" = in the previous report but no longer a gap this run (also catching a gap an owner or an
+# intervening run already closed). Counting only this invocation's own create/reopen mutations would miss a
+# gap an intervening run already issued, leaving Reported understated while its eventual fix still bumps
+# Closed. Using this run's issue set (not every gappy endpoint) keeps a capped endpoint — gappy but not yet
+# issued — out of both sides until its issue actually opens, so it is reported once, not every run until the
+# cap clears. operationIds, not just counts, so the page and Slack can name the endpoints.
+cur_ops=$(mktemp)  # endpoints with a coverage issue this run (reopened gaps included; capped-but-unissued excluded)
+jq -r 'keys[]' "$REPORT_DIR/endpoint-issues.json" 2>/dev/null | sort -u > "$cur_ops" || true
+prev_ops=$(mktemp)  # endpoints that had a coverage issue in the previous scheduled report (empty on the first run)
 if [ -n "${PREV_ENDPOINT_ISSUES:-}" ] && [ -s "$PREV_ENDPOINT_ISSUES" ]; then
   jq -r 'keys[]' "$PREV_ENDPOINT_ISSUES" 2>/dev/null | sort -u > "$prev_ops" || true
 fi
-closed_ops=$(mktemp)  # had an issue last run, no longer a gap this run
-comm -23 "$prev_ops" "$cur_ops" > "$closed_ops"
-closed_json=$(jq -R -s 'split("\n") | map(select(length > 0))' "$closed_ops")
+new_json=$(comm -13 "$prev_ops" "$cur_ops" | jq -R -s 'split("\n") | map(select(length > 0))')
+closed_json=$(comm -23 "$prev_ops" "$cur_ops" | jq -R -s 'split("\n") | map(select(length > 0))')
 jq -n --argjson new "$new_json" --argjson closedops "$closed_json" \
   '{newThisWeek: $new, closedThisWeek: ($closedops | length), closedOps: $closedops}' \
   > "$REPORT_DIR/gaps-progress.json"
