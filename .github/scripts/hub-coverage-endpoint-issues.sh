@@ -91,7 +91,7 @@ if [ "$(jq 'length' <<< "$existing")" -ge "$lookup_limit" ]; then
   echo "::warning::coverage-issue lookup hit the ${lookup_limit}-result cap; dedup and cleanup may be incomplete — split the search by area or state." >&2
 fi
 new=0
-new_ops=$(mktemp)  # operationId of each endpoint that gets a brand-new issue this run (a "new gap")
+new_ops=$(mktemp)  # operationId of each gap reported this run: a brand-new issue, or a returning gap reopened
 current=$(mktemp)
 # operationId<TAB>issue-number, one line per endpoint that has an issue this run; folded into
 # endpoint-issues.json below.
@@ -121,7 +121,14 @@ while read -r entry; do
     open_day="$today"
   else
     IFS=$'\t' read -r num state created <<< "$found"
-    [ "$state" = "OPEN" ] || gh issue reopen "$num"
+    if [ "$state" != "OPEN" ]; then
+      gh issue reopen "$num"
+      # A returning gap is a regression reported this week: count it in the reported set (so the chart's
+      # Reported bar and the "newly reported" list include it, and a regress→fix cycle does not read as net
+      # progress). Not against the brand-new flood-guard counter ($new), since reopening is not creating —
+      # so a returning gap is reopened even when the cap on brand-new issues is reached.
+      printf '%s\n' "$op" >> "$new_ops"
+    fi
     # Add team/hub on the edit path too, so a pre-existing open endpoint issue also lands on the Hub board.
     gh issue edit "$num" --body-file "$file" --add-label team/hub
     gh issue comment "$num" --body "Re-checked on $today: still missing. $RUN_URL"
@@ -158,8 +165,8 @@ jq -R -s 'split("\n") | map(select(length > 0) | split("\t") | {(.[0]): (.[1] | 
 jq -R -s 'split("\n") | map(select(length > 0) | split("\t") | {(.[0]): (.[1] | tonumber)}) | add // {}' \
   "$ages" > "$REPORT_DIR/endpoint-ages.json"
 
-# This week's movement, for the report page and the Slack Wins section: the brand-new gaps reported this run
-# (ops that got a new issue), and the gaps closed since the previous report. "Closed" = endpoints that had a
+# This week's movement, for the report page and the Slack Wins section: the gaps reported this run (a new
+# issue opened, or a returning gap reopened), and the gaps closed since the previous report. "Closed" = endpoints that had a
 # per-endpoint coverage issue last run (previous endpoint-issues.json keys) but no longer have a gap this run
 # (not in endpoints.json). Comparing the previous map against the current gap set — rather than only counting
 # the still-open issues this invocation closes — also catches a gap an owner, or an intervening non-dry run,

@@ -470,6 +470,31 @@ describe('per-endpoint issue lifecycle (stub gh)', () => {
     }
   });
 
+  it('counts a returning (reopened) gap as reported this week, alongside brand-new ones', () => {
+    const r = runIssueScript(
+      'hub-coverage-endpoint-issues.sh',
+      endpointFiles('returned', 'brandNew'),
+      [{ number: 7, title: endpointTitle('returned'), state: 'CLOSED' }], // reopened this run
+      NO_HUB,
+    );
+    expect(r.calls).toContain('gh issue reopen 7');
+    // a returning gap is a regression reported this week — it joins the new-issue op in newThisWeek, so the
+    // chart's Reported count and the "newly reported" list include it (a regress→fix cycle is not net progress)
+    expect(r.gapsProgress.newThisWeek).toEqual(['returned', 'brandNew']);
+  });
+
+  it('reopens a returning gap even when the brand-new issue cap is reached (reopen is not a creation)', () => {
+    const r = runIssueScript(
+      'hub-coverage-endpoint-issues.sh',
+      endpointFiles('returned'),
+      [{ number: 7, title: endpointTitle('returned'), state: 'CLOSED' }],
+      { ...NO_HUB, MAX_NEW_ENDPOINT_ISSUES: '0' },
+    );
+    // the cap gates only brand-new issue creation; a reopen still happens and still counts as reported
+    expect(r.calls).toContain('gh issue reopen 7');
+    expect(r.gapsProgress.newThisWeek).toEqual(['returned']);
+  });
+
   it('counts a gap closed since last report even if its issue was already closed by an owner', () => {
     const prevDir = mkdtempSync(join(tmpdir(), 'cov-prevei2-'));
     const prevEI = join(prevDir, 'endpoint-issues.json');
