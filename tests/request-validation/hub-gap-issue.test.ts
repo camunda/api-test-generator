@@ -888,6 +888,7 @@ function slackText(
   mention = '',
   prevIssueOps: string[] = [],
   progress: Record<string, unknown> | null = null,
+  ages: Record<string, number> | null = null,
 ): string {
   const code = [
     'import sys, json, types, importlib.util',
@@ -895,10 +896,17 @@ function slackText(
     'h = importlib.util.module_from_spec(spec); spec.loader.exec_module(h)',
     'd = json.load(sys.stdin)',
     "args = types.SimpleNamespace(spec_ref='abcdef1234', run_url='http://run', tracking_url='http://track', regression_mention=d['m'], prev_issue_ops=set(d['pio']))",
-    "sys.stdout.write(h.slack(d['s'], d['p'], args, d.get('prog')))",
+    "sys.stdout.write(h.slack(d['s'], d['p'], args, d.get('prog'), d.get('ages')))",
   ].join('\n');
   return execFileSync('python3', ['-B', '-c', code], {
-    input: JSON.stringify({ s: summary, p: prev, m: mention, pio: prevIssueOps, prog: progress }),
+    input: JSON.stringify({
+      s: summary,
+      p: prev,
+      m: mention,
+      pio: prevIssueOps,
+      prog: progress,
+      ages,
+    }),
     encoding: 'utf8',
   });
 }
@@ -1006,12 +1014,12 @@ describe('weekly Slack message', () => {
       }),
       null,
     );
-    // tracked no-test endpoints stay calm, each with its tracking issue linked (b has none)
+    // tracked no-test endpoints stay calm (orange), counted, each with its tracking issue linked (b has none)
     expect(text).toContain(
-      ':warning: No test, tracked: `a` (<https://github.com/camunda/camunda-hub/issues/25907|camunda-hub#25907>, <https://github.com/camunda/camunda-hub/issues/26448|camunda-hub#26448>), `b`',
+      ':large_orange_circle: 2 no test, tracked: `a` (<https://github.com/camunda/camunda-hub/issues/25907|camunda-hub#25907>, <https://github.com/camunda/camunda-hub/issues/26448|camunda-hub#26448>), `b`',
     );
-    // the untracked one (c) is escalated to its own red line, with no tracking note
-    expect(text).toContain(':red_circle: No test, untracked: `c`');
+    // the untracked one (c) is escalated to its own red line, counted, with no tracking note
+    expect(text).toContain(':red_circle: 1 no test, untracked: `c`');
     expect(text).not.toContain('`c` (');
   });
 
@@ -1028,46 +1036,76 @@ describe('weekly Slack message', () => {
     expect(text).toContain('Gaps by code:');
   });
 
-  it('shows a Wins section naming the gaps closed this week, from gaps-progress', () => {
-    const text = slackText(baseSummary(), null, '', [], {
-      closedOps: ['createFile', 'updateFile'],
-    });
-    expect(text).toContain('*:tada: Wins*');
-    expect(text).toContain(
-      ':white_check_mark: 2 coverage gaps closed this week: `createFile`, `updateFile`',
+  it('names the gaps reported, closed and stalled this week on one activity line', () => {
+    const text = slackText(
+      baseSummary(),
+      null,
+      '',
+      [],
+      { newThisWeek: ['newA', 'newB'], closedOps: ['createFile', 'updateFile'] },
+      { stalledOp: 40, freshOp: 3 }, // 40 days ≥ 28 → stalled; 3 days → not
     );
+    expect(text).toContain(':new: 2 reported: `newA`, `newB`');
+    expect(text).toContain(':white_check_mark: 2 closed: `createFile`, `updateFile`');
+    expect(text).toContain(':hourglass_flowing_sand: 1 stalled: `stalledOp`');
+    expect(text).not.toContain('`freshOp`');
+    // no Wins header and no green "all good" line anywhere
+    expect(text).not.toContain(':tada: Wins');
+    expect(text).not.toContain(':large_green_circle:');
   });
 
-  it('uses the singular when exactly one gap closed', () => {
-    const text = slackText(baseSummary(), null, '', [], { closedOps: ['createFile'] });
-    expect(text).toContain(':white_check_mark: 1 coverage gap closed this week: `createFile`');
+  it('shows only the non-zero parts of the activity line', () => {
+    // only closures this week → just the closed part, no reported/stalled, no empty activity noise
+    const text = slackText(baseSummary(), null, '', [], {
+      newThisWeek: [],
+      closedOps: ['createFile'],
+    });
+    expect(text).toContain(':white_check_mark: 1 closed: `createFile`');
+    expect(text).not.toContain(':new:');
+    expect(text).not.toContain(':hourglass_flowing_sand:');
   });
 
-  it('counts a fully-tracked no-test set as a win', () => {
+  it('omits the activity line entirely on a flat week', () => {
+    // no reconciled progress/ages (as on the audit base message or a dry run) → no activity line at all
+    const text = slackText(baseSummary(), null);
+    expect(text).not.toContain(':new:');
+    expect(text).not.toContain(':white_check_mark:');
+    expect(text).not.toContain(':hourglass_flowing_sand:');
+  });
+
+  it('never shows a green win or a Wins header, even when every no-test endpoint is tracked', () => {
     const text = slackText(
       baseSummary({ operationIds: ['a'], zeroTestOperations: ['a'], trackedOperations: ['a'] }),
       null,
     );
-    expect(text).toContain('*:tada: Wins*');
-    expect(text).toContain(':large_green_circle: Every endpoint with no test is tracked');
-  });
-
-  it('omits the Wins section when there is nothing to celebrate', () => {
-    // no gaps closed (no progress) and no no-test endpoints, so neither win applies
-    const text = slackText(baseSummary(), null);
+    expect(text).not.toContain(':large_green_circle:');
     expect(text).not.toContain(':tada: Wins');
+    // the tracked no-test endpoint still shows, as the calm orange line
+    expect(text).toContain(':large_orange_circle: 1 no test, tracked: `a`');
   });
 
-  it('re-renders slack.txt from summary.json + gaps-progress.json via --render-slack', () => {
-    // The workflow runs this after issue reconciliation so the message can name the closed gaps the audit
-    // (which runs first) could not. It reuses the written summary.json rather than re-auditing.
+  it('points to the full coverage report page after the needs-attention section', () => {
+    const text = slackText(baseSummary(), null);
+    expect(text).toContain(':bar_chart: *Full coverage report* — open the attached page');
+    // it comes after Needs attention and before the links line
+    expect(text.indexOf(':pushpin: Needs attention')).toBeLessThan(
+      text.indexOf('Full coverage report'),
+    );
+    expect(text.indexOf('Full coverage report')).toBeLessThan(text.indexOf('|📖 Guide>'));
+  });
+
+  it('re-renders slack.txt from summary.json + gaps-progress.json + endpoint-ages.json via --render-slack', () => {
+    // The workflow runs this after issue reconciliation so the message can name the gaps reported, closed and
+    // stalled this week — the audit (which runs first) has none of that state. It reuses the written
+    // summary.json rather than re-auditing.
     const dir = mkdtempSync(join(tmpdir(), 'cov-renderslack-'));
     try {
       writeFileSync(join(dir, 'summary.json'), JSON.stringify(baseSummary()));
       writeFileSync(
         join(dir, 'gaps-progress.json'),
-        JSON.stringify({ newThisWeek: [], closedThisWeek: 1, closedOps: ['createFile'] }),
+        JSON.stringify({ newThisWeek: ['newA'], closedThisWeek: 1, closedOps: ['createFile'] }),
       );
+      writeFileSync(join(dir, 'endpoint-ages.json'), JSON.stringify({ stalledOp: 40, freshOp: 2 }));
       execFileSync(
         'python3',
         [
@@ -1078,14 +1116,18 @@ describe('weekly Slack message', () => {
           dir,
           '--gaps-progress',
           join(dir, 'gaps-progress.json'),
+          '--endpoint-ages',
+          join(dir, 'endpoint-ages.json'),
           '--run-url',
           'http://run',
         ],
         { encoding: 'utf8' },
       );
       const txt = readFileSync(join(dir, 'slack.txt'), 'utf8');
-      expect(txt).toContain('*:tada: Wins*');
-      expect(txt).toContain(':white_check_mark: 1 coverage gap closed this week: `createFile`');
+      expect(txt).toContain(':new: 1 reported: `newA`');
+      expect(txt).toContain(':white_check_mark: 1 closed: `createFile`');
+      expect(txt).toContain(':hourglass_flowing_sand: 1 stalled: `stalledOp`');
+      expect(txt).not.toContain(':tada: Wins');
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -1205,7 +1247,7 @@ describe('weekly Slack trend + no-test escalation', () => {
       trackedOperations: [],
     };
     const m = slackText(baseSummary(over), baseSummary(over), '<!subteam^X>');
-    expect(m).toMatch(/:red_circle: No test, untracked:.*newGap/);
+    expect(m).toMatch(/:red_circle: \d+ no test, untracked:.*newGap/);
     expect((m.match(/<!subteam\^X>/g) || []).length).toBe(1);
   });
 
@@ -1216,7 +1258,7 @@ describe('weekly Slack trend + no-test escalation', () => {
       trackedOperations: ['known'],
     };
     const t = slackText(baseSummary(over), baseSummary(over), '<!subteam^X>');
-    expect(t).toContain(':warning: No test, tracked');
+    expect(t).toContain(':large_orange_circle: 1 no test, tracked');
     expect(t).not.toContain('<!subteam^X>');
     expect(t).not.toContain(':red_circle:');
   });
@@ -1230,7 +1272,7 @@ describe('weekly Slack trend + no-test escalation', () => {
     // hadIssue is not suppressed, but it had a per-endpoint coverage issue last run → tracked now, so it
     // stays on the calm line and does not re-page every week.
     const t = slackText(baseSummary(over), baseSummary(over), '<!subteam^X>', ['hadIssue']);
-    expect(t).toContain(':warning: No test, tracked');
+    expect(t).toContain(':large_orange_circle: 1 no test, tracked');
     expect(t).not.toContain(':red_circle:');
     expect(t).not.toContain('<!subteam^X>');
   });

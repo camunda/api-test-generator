@@ -1,20 +1,25 @@
 #!/usr/bin/env bash
-# Uploads the rendered coverage report page (page.html) as a file into the weekly Slack message's
-# thread, so people can open the full report straight from the channel. Uses Slack's external-upload
-# flow (files.getUploadURLExternal -> POST the bytes -> files.completeUploadExternal).
+# Uploads the rendered coverage report page (page.html) as a file to the weekly message's channel, so
+# people can open the full report straight from the channel. Uses Slack's external-upload flow
+# (files.getUploadURLExternal -> POST the bytes -> files.completeUploadExternal).
+#
+# It posts the page to the channel itself (a top-level file right after the weekly message), NOT as a
+# thread reply, so the message's own ":bar_chart: Full coverage report — open the attached page" line
+# points at it directly. THREAD_TS is therefore optional: set it to reply in a thread instead, leave it
+# empty (the default now) to post at channel level.
 #
 # Best-effort by design: the weekly message itself matters more, so every Slack-side problem (a missing
-# files:write scope, an empty channel/thread id, an API error) is logged as a warning and the script
-# still exits 0 — it must never fail the weekly run. Only a usage error (no file argument) is fatal.
+# files:write scope, an empty channel id, an API error) is logged as a warning and the script still
+# exits 0 — it must never fail the weekly run. Only a usage error (no file argument) is fatal.
 #
 # Env: SLACK_BOT_TOKEN (needs the files:write scope), CHANNEL (the channel id from the posted message),
-#      THREAD_TS (the posted message's ts). Arg: $1 = path to page.html.
+#      THREAD_TS (optional: the posted message's ts, to reply in-thread). Arg: $1 = path to page.html.
 set -euo pipefail
 
 file="${1:?usage: hub-coverage-upload-page.sh <page.html>}"
 
-if [ -z "${SLACK_BOT_TOKEN:-}" ] || [ -z "${CHANNEL:-}" ] || [ -z "${THREAD_TS:-}" ]; then
-  echo "::warning::no Slack token, channel or thread id — skipping the report-page upload."
+if [ -z "${SLACK_BOT_TOKEN:-}" ] || [ -z "${CHANNEL:-}" ]; then
+  echo "::warning::no Slack token or channel id — skipping the report-page upload."
   exit 0
 fi
 if [ ! -s "$file" ]; then
@@ -42,10 +47,11 @@ if ! curl -fsS -F "file=@${file};type=text/html" "$upload_url" >/dev/null; then
   exit 0
 fi
 
-# 3. Complete the upload, posting the file as a reply in the weekly message's thread.
-payload=$(jq -n --arg id "$file_id" --arg ch "$CHANNEL" --arg ts "$THREAD_TS" \
-  '{files: [{id: $id, title: "Hub coverage report"}], channel_id: $ch, thread_ts: $ts,
-    initial_comment: "Full coverage report (open the attached page)."}')
+# 3. Complete the upload, posting the file to the channel (top-level) — or in a thread when THREAD_TS is set.
+payload=$(jq -n --arg id "$file_id" --arg ch "$CHANNEL" --arg ts "${THREAD_TS:-}" \
+  '{files: [{id: $id, title: "Hub coverage report"}], channel_id: $ch,
+    initial_comment: "Full coverage report (open the attached page)."}
+   + (if $ts == "" then {} else {thread_ts: $ts} end)')
 done=$(curl -fsS -X POST "https://slack.com/api/files.completeUploadExternal" \
   -H "Authorization: Bearer ${SLACK_BOT_TOKEN}" \
   -H "Content-Type: application/json; charset=utf-8" --data "$payload" || true)
@@ -53,4 +59,4 @@ if [ "$(jq -r '.ok // false' <<< "${done:-}" 2>/dev/null)" != "true" ]; then
   echo "::warning::files.completeUploadExternal failed: $(jq -r '.error // "no response"' <<< "${done:-}" 2>/dev/null) — report page not uploaded."
   exit 0
 fi
-echo "Uploaded ${name} into the Slack thread."
+echo "Uploaded ${name} to the channel."

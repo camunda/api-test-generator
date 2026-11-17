@@ -593,14 +593,17 @@ def trend_line(history, s):
     return line
 
 
-def slack(s, prev, args, progress=None):
+STALLED_DAYS = 28  # a gap open this long (4 weeks) is "stalled" — matches the report page's STALLED_WEEKS
+
+
+def slack(s, prev, args, progress=None, ages=None):
     # Structured like the QA metrics digests: a headline (both documented angles with their week-over-week
-    # change and the movement trajectory), then a *Wins* section (good news — gaps the teams closed, a
-    # fully-tracked no-test set) and a *Needs attention* section (the actionable gaps). `progress` is the
-    # reconciled gaps-progress.json (closedOps), available when the message is rendered after issue
-    # reconciliation; absent at audit time (the base message then carries no closed line). Numbers come
-    # straight from the summary; nothing new is computed here. Caveats (a documented 500 is not checked; the
-    # bad-request "applies" count is an upper bound) live in the Guide, not inline, to keep it scannable.
+    # change), the movement trajectory, a one-line "this week" activity summary (new / closed / stalled gaps,
+    # each shown only when non-zero), then a *Needs attention* section (the actionable gaps). `progress` is the
+    # reconciled gaps-progress.json (newThisWeek, closedOps) and `ages` is endpoint-ages.json — both written by
+    # the issue step, so the activity line is present only on a reconciled run, not the audit's base message.
+    # Numbers come straight from the summary; nothing new is computed here. Caveats (a documented 500 is not
+    # checked; the bad-request "applies" count is an upper bound) live in the Guide, not inline.
     ref = f'camunda-hub@{args.spec_ref[:7]}' if args.spec_ref else 'spec ' + s['specHash'].replace('sha256:', '')[:7]
     n = s['operations']
     pf = prev['fullyAsserted'] if prev else None
@@ -617,6 +620,27 @@ def slack(s, prev, args, progress=None):
     if tl:
         lines.append(tl)
 
+    # This week's activity, right under the movement %: new gaps reported, gaps closed (the week's win), and
+    # gaps that have stalled (open 4+ weeks). Each part renders only when non-zero, so a flat week adds no
+    # line at all — the same "hide zeros" rule as the untracked line below. new / closed come from the
+    # reconciled gaps-progress.json, stalled from endpoint-ages.json, so this line appears only on a run that
+    # reconciled issues (the audit's base message, and a dry run, have neither file and so omit it).
+    def _named(ops, cap=8):
+        shown = ', '.join(f'`{o}`' for o in ops[:cap])
+        return shown + (f' and {len(ops) - cap} more' if len(ops) > cap else '')
+    new_this_week = (progress or {}).get('newThisWeek') or []
+    closed_ops = (progress or {}).get('closedOps') or []
+    stalled = sorted(o for o, d in (ages or {}).items() if int(d) >= STALLED_DAYS)
+    activity = []
+    if new_this_week:
+        activity.append(f':new: {len(new_this_week)} reported: {_named(new_this_week)}')
+    if closed_ops:
+        activity.append(f':white_check_mark: {len(closed_ops)} closed: {_named(closed_ops)}')
+    if stalled:
+        activity.append(f':hourglass_flowing_sand: {len(stalled)} stalled: {_named(stalled)}')
+    if activity:
+        lines.append('   ·   '.join(activity))
+
     # Classify no-test endpoints. "Tracked" = a known/suppressed issue (trackedOperations) OR an endpoint
     # that already had a per-endpoint coverage issue last run (prev_issue_ops), so a no-test endpoint only
     # pages the first week, not every week.
@@ -625,27 +649,18 @@ def slack(s, prev, args, progress=None):
     tracked_zero = [o for o in s['zeroTestOperations'] if o in tracked]
     urls = s.get('trackedUrls', {})
 
-    # Wins — good news first, so the weekly report is not only a list of problems. Closed gaps show the
-    # teams acted on what the generator reported (named, from the reconciled gaps-progress.json); a
-    # fully-tracked no-test set is a smaller win.
-    closed_ops = (progress or {}).get('closedOps') or []
-    wins = []
-    if closed_ops:
-        shown = ', '.join(f'`{o}`' for o in closed_ops[:8])
-        extra = f' and {len(closed_ops) - 8} more' if len(closed_ops) > 8 else ''
-        word = 'coverage gap' if len(closed_ops) == 1 else 'coverage gaps'
-        wins.append(f':white_check_mark: {len(closed_ops)} {word} closed this week: {shown}{extra}')
-    if s['zeroTestOperations'] and not untracked:
-        wins.append(':large_green_circle: Every endpoint with no test is tracked by an issue')
-    if wins:
-        lines += ['', "*:tada: Wins*"] + wins
-
-    # Needs attention — the actionable gaps: untracked no-test endpoints, the gaps by code and area, the
-    # out-of-scope dimensions roll-up, and the calm tracked no-test line.
+    # Needs attention — the actionable gaps. No-test endpoints lead, split by whether they are tracked: a
+    # :red_circle: untracked line (an unexplained gap — shown only when there is one, and it pages) and a calm
+    # :large_orange_circle: tracked line with the issue links. A fully-tested week (no untracked and no
+    # tracked) shows neither — there is no green "all good" line, by design. Then the response gaps by code
+    # and area, and the one-line roll-up of the other dimensions.
     need = []
     if untracked:
-        need.append(':red_circle: No test, untracked: ' + ', '.join(
+        need.append(f':red_circle: {len(untracked)} no test, untracked: ' + ', '.join(
             f'`{o}`' + (' (new this week)' if o in new_ops else '') for o in untracked))
+    if tracked_zero:
+        need.append(f':large_orange_circle: {len(tracked_zero)} no test, tracked: '
+                    + ', '.join(f'`{o}`' + known_note(urls.get(o, [])) for o in tracked_zero))
     code_bits = [f'{b} ({s["codeGaps"][b]})' for b in BUCKETS if s['codeGaps'].get(b)]
     areas = sorted(s['areaResponseGaps'].items(), key=lambda kv: (-kv[1], kv[0]))
     if code_bits or areas:
@@ -665,9 +680,6 @@ def slack(s, prev, args, progress=None):
         other.append(f'{len(s["shapeUnvalidated"])} response-shape')
     if other:
         need.append('Other: ' + ' · '.join(other))
-    if tracked_zero:
-        need.append(':warning: No test, tracked: '
-                    + ', '.join(f'`{o}`' + known_note(urls.get(o, [])) for o in tracked_zero))
     if need:
         lines += ['', "*:pushpin: Needs attention*"] + need
 
@@ -685,6 +697,11 @@ def slack(s, prev, args, progress=None):
         lines.insert(
             0,
             f':rotating_light: {mention} — Hub API test coverage: {" and ".join(reasons)}. Details below.')
+
+    # The full rendered report page is uploaded to the channel alongside this message (not as a thread reply),
+    # so point to it right after Needs attention. The workflow posts the page only on a real (non-dry) run,
+    # which is the only time this message reaches Slack, so the pointer is always accurate for a posted message.
+    lines += ['', ':bar_chart: *Full coverage report* — open the attached page']
 
     links = []
     if args.run_url:
@@ -904,7 +921,13 @@ def render_slack(args):
             progress = json.load(open(args.gaps_progress))
         except ValueError:
             progress = None
-    open(f'{args.out}/slack.txt', 'w').write(slack(summary, prev, args, progress))
+    ages = None
+    if getattr(args, 'endpoint_ages', None) and os.path.exists(args.endpoint_ages):
+        try:
+            ages = json.load(open(args.endpoint_ages))
+        except ValueError:
+            ages = None
+    open(f'{args.out}/slack.txt', 'w').write(slack(summary, prev, args, progress, ages))
     print(open(f'{args.out}/slack.txt').read())
 
 
@@ -928,7 +951,11 @@ def main():
                          'without re-running the audit. Run after issue reconciliation so the message can '
                          'name the gaps closed this week (the audit runs before that, so its message cannot).')
     ap.add_argument('--gaps-progress',
-                    help='gaps-progress.json from this run (closedOps), for the --render-slack Wins line.')
+                    help='gaps-progress.json from this run (newThisWeek, closedOps), for the --render-slack '
+                         'activity line (gaps reported and closed this week).')
+    ap.add_argument('--endpoint-ages',
+                    help='endpoint-ages.json from this run (operationId -> days open), for the --render-slack '
+                         'activity line (gaps stalled 4+ weeks).')
     args = ap.parse_args()
 
     if args.render_slack:

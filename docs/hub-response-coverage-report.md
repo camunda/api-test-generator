@@ -20,7 +20,7 @@ Workflow: [`hub-response-coverage.yml`](../.github/workflows/hub-response-covera
 
 The report job starts at 05:00 UTC on Monday, and the Slack message and issues appear when it finishes. The coverage-fix agent starts after that.
 
-**Who acts.** The Hub team. The tracking issue and the per-endpoint issues carry the `team/hub` label, so — once the Hub project has an auto-add rule on `label:team/hub` — they land on the Hub team board automatically and stay there until closed, rather than depending on someone noticing the Monday message. **Each per-endpoint issue is assigned to whoever added the endpoint** (git-blame of the operation's spec line; an `@camunda/hub` mention when no author resolves), so every gap has a DRI — the 2026-10-28 handover decision. `hub-medic` is **@-mentioned on something actionable** — coverage regressed since last week (fewer endpoints fully tested, fewer with all bad-request kinds, more endpoints with no test, or a new endpoint shipped untested), **or** an endpoint has no test and no tracking issue; on a flat or improving week with every no-test endpoint tracked the message posts with no mention. There is exactly one mention per message. The agent's draft PRs are listed in the thread under the weekly message as before.
+**Who acts.** The Hub team. The tracking issue and the per-endpoint issues carry the `team/hub` label, so — once the Hub project has an auto-add rule on `label:team/hub` — they land on the Hub team board automatically and stay there until closed, rather than depending on someone noticing the Monday message. **Each per-endpoint issue is assigned to whoever added the endpoint** (git-blame of the operation's spec line; an `@camunda/hub` mention when no author resolves), so every gap has a DRI — the 2026-10-28 handover decision. `hub-medic` is **@-mentioned on something actionable** — coverage regressed since last week (fewer endpoints fully tested, fewer with all request-validation kinds, more endpoints with no test, or a new endpoint shipped untested), **or** an endpoint has no test and no tracking issue; on a flat or improving week with every no-test endpoint tracked the message posts with no mention. There is exactly one mention per message. The agent's draft PRs are listed in the thread under the weekly message as before.
 
 > **One-time board setup (project admin).** The workflow adds the `team/hub` label, but the board auto-add is a GitHub Project setting it cannot flip. To route these issues onto the Hub team board, open the Hub team **GitHub Project → Settings → Workflows → "Auto-add to project"**, enable it, and set the filter to `is:issue label:team/hub` scoped to `camunda/api-test-generator`. Until this is set, the issues carry the label but do not appear on the board — nothing breaks, they just stay in the repo's issue list. (A single rule on `label:team/hub` is enough; do **not** filter on the broad `hub` label, which also tags test-automation's own generator work.)
 
@@ -32,15 +32,15 @@ The numbers below are an example.
 Hub API test coverage (weekly) · camunda-hub@abc1234 · 66 endpoints
 57/66 tested for every status code (+2)  ·  32/64 tested for every request-validation kind (-1)
 :chart_with_upwards_trend: This week's movement: 86% of endpoints tested for every status code — ▲ up 6 pts over the last 8 reports · no-test 2→1
-
-:tada: Wins
-:white_check_mark: 2 coverage gaps closed this week: createFile, updateFile
+:new: 2 reported: createFile, updateFile   ·   :white_check_mark: 4 closed: oldA, oldB, oldC, oldD   ·   :hourglass_flowing_sand: 1 stalled: getClusterUsageMetrics
 
 :pushpin: Needs attention
-:red_circle: No test, untracked: exportWorkspace (new this week)
+:red_circle: 1 no test, untracked: exportWorkspace (new this week)
+:large_orange_circle: 1 no test, tracked: getClusterUsageMetrics (camunda-hub#25907, camunda-hub#26448)
 Gaps by code: 403 (1) · 404 (2) · 409 (3)      by area: Project Snapshot 2 · File 1 · Member 1
 Other: 5 optional fields
-:warning: No test, tracked: getClusterUsageMetrics (camunda-hub#25907, camunda-hub#26448)
+
+:bar_chart: Full coverage report — open the attached page
 
 Full table · Tracking issue · Guide
 ```
@@ -49,13 +49,17 @@ The message is sectioned so it reads at a glance. The headline carries both angl
 every status code it can return?* (the 2xx/400/401/403/404/409 the spec lists; a documented 500 is deliberately
 not counted) and *is it tested with every applicable request-validation kind?* (an upper bound; most kinds are
 bad requests the server must reject, but a few are accepted edge cases that expect 200, such as `pagination-offset-past-total`) — each with its
-bracketed change since the last report, then the movement line. A **Wins** section leads with the good news:
-the gaps the teams closed this week (named), and a note when every no-test endpoint is already tracked. A
-**Needs attention** section then lists the actionable gaps: the untracked no-test line, the gaps by status code
-and by API area, a one-line roll-up of the other dimensions (lifecycle, optional-field, response-shape), and the
-calm tracked no-test line. The caveats live in the Guide rather than inline. The closed-gaps Win needs this
-run's reconciled issue state, so the workflow re-renders the message after the per-endpoint issues are
-reconciled — a dry run shows the message without that line.
+bracketed change since the last report, then the movement line. Under it, a one-line **activity** summary of this
+week's gaps **reported** (:new:), **closed** (:white_check_mark:) and **stalled** (:hourglass_flowing_sand:, open
+4+ weeks) — each part named and shown only when non-zero, so a flat week adds no line (there is deliberately no
+green "all good" line). A **Needs attention** section then leads with the no-test endpoints, split by tracking:
+a `:red_circle:` **untracked** line (only when there is one) and a calm `:large_orange_circle:` **tracked** line
+with its issues linked; then the gaps by status code and by API area, and a one-line roll-up of the other
+dimensions (lifecycle, optional-field, response-shape). After it, a `:bar_chart: Full coverage report` line
+points at the page posted to the channel alongside the message. The caveats live in the Guide rather than inline.
+The activity line needs this run's reconciled issue state (reported/closed from `gaps-progress.json`, stalled
+from `endpoint-ages.json`), so the workflow re-renders the message after the per-endpoint issues are reconciled —
+a dry run shows the message without that line.
 
 A `:chart_with_upwards_trend: *This week's movement:*` line shows the **trajectory** — the same headline the
 report page leads with: the share of endpoints tested for every status code now and how far it has moved (in
@@ -65,10 +69,11 @@ the week-over-week step, this line shows the direction over the whole history. T
 opens with the same **"This week's movement"** headline, and adds plain lines naming which coverage gaps were
 newly reported and **closed** this week (the endpoints whose tracking issue closed because they are now
 covered) and how many have stalled (open 4+ weeks), so a manager can see at a glance whether the team is acting
-on the gaps. The **closed** list is the same one the Slack **Wins** section names — both read the reconciled
-`gaps-progress.json`, which is exactly why the Slack message is re-rendered after the per-endpoint issues are
-reconciled (above). The **newly reported** and **stalled** lines are extra detail the page carries that the
-Slack message does not. The page header shows the **report date** (the run that
+on the gaps. These three — **reported**, **closed** and **stalled** — are the same ones the Slack message's
+activity line names (both read the reconciled `gaps-progress.json` for reported/closed and `endpoint-ages.json`
+for stalled, which is exactly why the Slack message is re-rendered after the per-endpoint issues are reconciled,
+above); the page keeps the week-by-week **chart** below as detail Slack condenses to that one line. The page
+header shows the **report date** (the run that
 generated it), and the workflow publishes the page as its own dated artifact, **`hub-coverage-page-<date>`**, so
 it is one click from the run rather than buried in the full report bundle.
 
@@ -83,7 +88,7 @@ closed), so a screen reader can read every week's values that the chart shows. A
 reopened), so a gap that was fixed, closed, then returned is counted from its return — not reported as open
 the whole time it was closed. An endpoint with **no test *and* no tracking issue** is an
 unexplained gap: it is escalated to a `:red_circle:` alert line and pages `hub-medic`. A known/tracked no-test
-endpoint (like `getClusterUsageMetrics` above) stays on the calm `:warning:` line and pages no one.
+endpoint (like `getClusterUsageMetrics` above) stays on the calm `:large_orange_circle:` line and pages no one.
 
 When the coverage-fix agent has pull requests waiting for review, a reply appears **in the thread** of this message (a week without any such pull requests has no reply):
 
