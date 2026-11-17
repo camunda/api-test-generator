@@ -97,7 +97,7 @@ current=$(mktemp)
 # endpoint-issues.json below.
 pairs=$(mktemp)
 # operationId<TAB>days-open, folded into endpoint-ages.json below so the page can show how long each
-# gap has been open (from its tracking issue's creation date).
+# gap has been open (from its tracking issue's latest reopen, or its creation when never reopened).
 ages=$(mktemp)
 while read -r entry; do
   title=$(jq -r '.title' <<< "$entry")
@@ -118,7 +118,7 @@ while read -r entry; do
     printf '%s\n' "$op" >> "$new_ops"
     assign_owner "${url##*/}" "$op"
     # Freshly opened this run, so its gap is zero days old.
-    created="$today"
+    open_day="$today"
   else
     IFS=$'\t' read -r num state created <<< "$found"
     [ "$state" = "OPEN" ] || gh issue reopen "$num"
@@ -126,13 +126,21 @@ while read -r entry; do
     gh issue edit "$num" --body-file "$file" --add-label team/hub
     gh issue comment "$num" --body "Re-checked on $today: still missing. $RUN_URL"
     url="$REPO_URL/issues/$num"
+    # Age the gap from the latest reopen, not the original createdAt. An endpoint issue is reopened when a
+    # gap returns, so counting from creation would include the interval it was closed — over-reporting a
+    # returning gap as continuously unaddressed, and stalling it. The timeline is read AFTER the reopen
+    # above, so a gap that returned THIS run already carries today's reopen event and reads as 0 days open.
+    # Falls back to createdAt when never reopened; a timeline-lookup failure degrades to createdAt too.
+    open_day="${created%%T*}"
+    reopened_at=$(gh api --paginate "repos/{owner}/{repo}/issues/${num}/timeline" 2>/dev/null \
+      | jq -s -r '[.[][]? | select(.event == "reopened") | .created_at] | max // empty' 2>/dev/null || true)
+    [ -n "$reopened_at" ] && open_day="${reopened_at%%T*}"
   fi
   printf -- '- [ ] #%s `%s` — %s\n' "${url##*/}" "$op" "$area" >> "$REPORT_DIR/endpoint-index.md"
   printf '%s\t%s\n' "$op" "${url##*/}" >> "$pairs"
-  # Days this endpoint's gap has been open, from its issue's creation date (0 for one opened this run).
-  # Robust to a bad/absent date: skip the age rather than fail the run.
-  created_day=${created%%T*}
-  c_epoch=$(date -u -d "${created_day:-$today}" +%s 2>/dev/null || true)
+  # Days this endpoint's gap has been open, from the latest reopen (or creation if never reopened); 0 for
+  # one opened or reopened this run. Robust to a bad/absent date: skip the age rather than fail the run.
+  c_epoch=$(date -u -d "${open_day:-$today}" +%s 2>/dev/null || true)
   t_epoch=$(date -u -d "$today" +%s 2>/dev/null || true)
   if [ -n "$c_epoch" ] && [ -n "$t_epoch" ]; then
     days=$(( (t_epoch - c_epoch) / 86400 ))

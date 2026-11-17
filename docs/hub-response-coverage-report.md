@@ -55,7 +55,9 @@ runs plus the current one); the bracketed deltas show only the week-over-week st
 direction. The report page (`page.html`) opens with a **"This week's movement"** summary instead: a one-line
 trajectory of the headline %, then plain lines for how many coverage gaps were newly reported and closed this
 week and how many have stalled (open 4+ weeks), so a manager can see at a glance whether the team is acting on
-the gaps. An endpoint with **no test *and* no tracking issue** is an
+the gaps. A gap's age is measured from its tracking issue's latest reopen (or its creation when never
+reopened), so a gap that was fixed, closed, then returned is counted from its return — not reported as open
+the whole time it was closed. An endpoint with **no test *and* no tracking issue** is an
 unexplained gap: it is escalated to a `:red_circle:` alert line and pages `hub-medic`. A known/tracked no-test
 endpoint (like `getClusterUsageMetrics` above) stays on the calm `:warning:` line and pages no one.
 

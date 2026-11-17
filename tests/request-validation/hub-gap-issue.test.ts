@@ -235,6 +235,15 @@ if [ "$1 $2" = "issue list" ]; then
   if [ -n "$expr" ]; then jq -r "$expr" "$GH_EXISTING"; else cat "$GH_EXISTING"; fi
 elif [ "$1 $2" = "issue create" ]; then
   echo "https://example.test/issues/$((100 + $(grep -c 'issue create' "$GH_LOG")))"
+elif [ "$1" = "api" ]; then
+  # Serve a per-issue timeline fixture for the reopen-age lookup: GH_TIMELINE_DIR/<num>.json, keyed by
+  # the issue number parsed out of repos/{owner}/{repo}/issues/<num>/timeline. Absent => empty (no reopen).
+  _tl=""
+  for a in "$@"; do case "$a" in */issues/*/timeline) _tl="$a" ;; esac; done
+  _num="\${_tl#*/issues/}"; _num="\${_num%/timeline}"
+  if [ -n "$_num" ] && [ -n "\${GH_TIMELINE_DIR:-}" ] && [ -f "$GH_TIMELINE_DIR/$_num.json" ]; then
+    cat "$GH_TIMELINE_DIR/$_num.json"
+  fi
 fi
 `,
   );
@@ -402,6 +411,35 @@ describe('per-endpoint issue lifecycle (stub gh)', () => {
     );
     // oldGap's issue has existed 42 days; newGap's issue is created this run, so its gap is 0 days old
     expect(r.endpointAges).toEqual({ oldGap: 42, newGap: 0 });
+  });
+
+  it('ages a reopened gap from the latest reopen, not the original createdAt', () => {
+    const daysAgo = (n: number) => new Date(Date.now() - n * 86_400_000).toISOString().slice(0, 10);
+    // Issue 9 was created 60 days ago, fixed and closed, then reopened 5 days ago when the gap returned.
+    // Its age must be measured from the reopen (5 days), not creation (60), so a returning gap is not
+    // reported as continuously unaddressed (and wrongly marked stalled).
+    const timelineDir = mkdtempSync(join(tmpdir(), 'gap-timeline-'));
+    writeFileSync(
+      join(timelineDir, '9.json'),
+      JSON.stringify([
+        { event: 'closed', created_at: `${daysAgo(40)}T00:00:00Z` },
+        { event: 'reopened', created_at: `${daysAgo(5)}T00:00:00Z` },
+      ]),
+    );
+    const r = runIssueScript(
+      'hub-coverage-endpoint-issues.sh',
+      endpointFiles('returnedGap'),
+      [
+        {
+          number: 9,
+          title: endpointTitle('returnedGap'),
+          state: 'OPEN',
+          createdAt: `${daysAgo(60)}T00:00:00Z`,
+        },
+      ],
+      { ...NO_HUB, GH_TIMELINE_DIR: timelineDir },
+    );
+    expect(r.endpointAges).toEqual({ returnedGap: 5 });
   });
 
   it('records this week movement (new and closed gap counts) in gaps-progress.json', () => {
