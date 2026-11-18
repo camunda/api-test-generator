@@ -943,7 +943,7 @@ it closes every open PR labelled **`nightly-api-fix`** that has gone stale
 for long. A PR the triage agent skips because one is already open for the same operation is therefore skipped for up to 3 days. It runs a **matrix over both repos the flow spans** —
 `api-test-generator` (test-generation fixes) and `camunda-hub` (product fixes for
 issues the triage agent filed) — minting a per-repo **qa-processes** App token
-(Vault approle, same wiring as spec-bump-check; a leg with no token skips with a
+(Vault JWT/OIDC, same wiring as spec-bump-check; a leg with no token skips with a
 warning). `do-not-close` holds a PR across the daily reset; `dry_run` previews.
 Fix PRs must carry the `nightly-api-fix` label to be managed (the filed issues say
 so).
@@ -1105,7 +1105,7 @@ tracking issue; **no content change** → closes the artifact. Generate + invari
 are gated on real content drift (SHA-only moves are cheap no-ops). Two App tokens:
 **preview-envs** (Vault JWT/OIDC) mints a read token to clone the private
 `camunda-hub` sibling (oca is a public network-fetch, no token); **qa-processes**
-(Vault approle) opens the bump PR as `app/qa-processes` so `ci.yml` triggers on it
+(Vault JWT/OIDC) opens the bump PR as `app/qa-processes` so `ci.yml` triggers on it
 (the built-in `GITHUB_TOKEN` can't — loop-prevention). If the qa-processes token
 is unavailable, routing falls back to the tracking issue. Checkout uses
 `persist-credentials: false` so its read-only header can't shadow the App-token
