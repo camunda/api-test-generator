@@ -46,33 +46,37 @@ if [ -n "$hub_label" ]; then
   gh label create "$hub_label" --color 1D76DB --description "Hub-related" 2>/dev/null || true
 fi
 
-# Hub bump PR: request the @camunda/hub team's review explicitly, so review
-# ownership does not depend on a CODEOWNERS file (this repo has none yet). The
-# upstream op-surface drift alert no longer pings the channel, so the reviewer
-# request is how the Hub team is brought to a new-domain bump. Best-effort and
-# hub-leg only ($1 = PR number or branch): a team that lacks repo access just
-# logs a warning, never fails the run; oca's pin routes to its own team.
+# Bump PR: request the owning team's review explicitly, so review ownership does
+# not depend on CODEOWNERS (which never auto-requests review on a draft PR, and
+# the bump PR is opened as a draft). Hub's pin goes to @camunda/hub; camunda-oca's
+# goes to @camunda/test-automation-team. Best-effort ($1 = PR number or branch): a
+# team that lacks repo access just logs a warning, never fails the run.
 #
 # Request it ONCE over the life of the rolling bump PR. The existing-PR path runs
 # every day, and re-adding a reviewer who has already reviewed re-opens their
 # completed review and re-notifies them — so a marker label makes the request
 # idempotent across runs. The label is only set after a successful request, so a
 # request that failed (team without access yet) is retried on the next run.
-HUB_REVIEW_MARKER="hub-review-requested"
-request_hub_review() {
-  [ "${IS_PRIVATE:-}" = "true" ] || return 0
+if [ "${IS_PRIVATE:-}" = "true" ]; then
+  REVIEW_TEAM="camunda/hub"
+  REVIEW_MARKER="hub-review-requested"
+else
+  REVIEW_TEAM="camunda/test-automation-team"
+  REVIEW_MARKER="test-automation-review-requested"
+fi
+request_team_review() {
   if gh pr view "$1" --json labels --jq '.labels[].name' 2>/dev/null \
-      | grep -qx "$HUB_REVIEW_MARKER"; then
-    echo "@camunda/hub review already requested on the bump PR (marker present) — not re-requesting."
+      | grep -qx "$REVIEW_MARKER"; then
+    echo "@${REVIEW_TEAM} review already requested on the bump PR (marker present) — not re-requesting."
     return 0
   fi
-  gh label create "$HUB_REVIEW_MARKER" --color 0e8a16 \
-    --description "spec-bump bump PR: @camunda/hub review already requested" 2>/dev/null || true
-  if gh pr edit "$1" --add-reviewer camunda/hub >/dev/null 2>&1; then
-    gh pr edit "$1" --add-label "$HUB_REVIEW_MARKER" >/dev/null 2>&1 || true
-    echo "Requested @camunda/hub review on the bump PR."
+  gh label create "$REVIEW_MARKER" --color 0e8a16 \
+    --description "spec-bump bump PR: @${REVIEW_TEAM} review already requested" 2>/dev/null || true
+  if gh pr edit "$1" --add-reviewer "$REVIEW_TEAM" >/dev/null 2>&1; then
+    gh pr edit "$1" --add-label "$REVIEW_MARKER" >/dev/null 2>&1 || true
+    echo "Requested @${REVIEW_TEAM} review on the bump PR."
   else
-    echo "::warning::Could not request @camunda/hub review on the bump PR (the team may lack ${GITHUB_REPOSITORY:-this repo} access) — will retry next run."
+    echo "::warning::Could not request @${REVIEW_TEAM} review on the bump PR (the team may lack ${GITHUB_REPOSITORY:-this repo} access) — will retry next run."
   fi
 }
 
@@ -91,7 +95,7 @@ if [ -n "$existing" ]; then
   # issue-close is the actual point of this path).
   gh pr edit "$existing" --add-label "$DRIFT_LABEL" --add-label auto-generated >/dev/null || true
   if [ -n "$hub_label" ]; then gh pr edit "$existing" --add-label "$hub_label" >/dev/null || true; fi
-  request_hub_review "$existing"
+  request_team_review "$existing"
   issue="$(find_rolling_issue)"
   if [ -n "$issue" ]; then
     gh issue close "$issue" --comment "Superseded by the open auto-bump PR #${existing}. Closing." >/dev/null
@@ -174,7 +178,7 @@ echo "Opening bump PR."
 gh pr create --draft --base main --head "$branch" --title "$title" --body-file "$body_file" \
   --label "$DRIFT_LABEL" --label auto-generated >/dev/null
 if [ -n "$hub_label" ]; then gh pr edit "$branch" --add-label "$hub_label" >/dev/null || true; fi
-request_hub_review "$branch"
+request_team_review "$branch"
 
 # Clean up the tracking issue if one is open — the PR supersedes it.
 issue="$(find_rolling_issue)"
