@@ -249,6 +249,51 @@ jobs:
         source_sha: `${{ needs.validate.outputs.source_sha }}` · image: `registry.camunda.cloud/team-hub/hub-restapi-self-managed:pr-${{ needs.validate.outputs.source_sha }}`
         ${{ needs.validate.outputs.caller_run_url != '' && format('Triggered by: [camunda-hub run]({0})', needs.validate.outputs.caller_run_url) || '' }}
 
+  classify-secrets:
+    name: Wrap secrets for the classification agent
+    needs: [validate, run]
+    if: always() && needs.run.result == 'failure' && needs.run.outputs.suites_ran == 'true' && needs.validate.outputs.is_draft != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      wrap-token: ${{ steps.wrap.outputs.wrap-token }}
+    steps:
+      # Contents:Read only — same token type _hub-suite-run.yml itself already
+      # uses to clone for generation, never a write-capable App token.
+      - name: Mint camunda-hub clone token (read-only)
+        id: hub-token
+        continue-on-error: true
+        uses: camunda/infra-global-github-actions/generate-github-app-token-from-vault-secrets@7a9c6f3e477321400802c88290068f88a7ed5684
+        with:
+          github-app-id-vault-key: GITHUB_PREVIEW_ENVIRONMENTS_APP_ID
+          github-app-id-vault-path: secret/data/products/web-modeler/ci/preview-envs
+          github-app-private-key-vault-key: GITHUB_PREVIEW_ENVIRONMENTS_APP_PRIVATE_KEY
+          github-app-private-key-vault-path: secret/data/products/web-modeler/ci/preview-envs
+          vault-auth-method: jwt
+          vault-auth-jwt-path: ${{ secrets.VAULT_JWT_PATH }}
+          vault-auth-jwt-role: ${{ secrets.VAULT_JWT_ROLE }}
+          vault-auth-jwt-audience: ${{ secrets.VAULT_JWT_AUDIENCE }}
+          vault-url: ${{ secrets.VAULT_ADDR }}
+          owner: camunda
+          repositories: camunda-hub
+          skip-token-revoke: true
+
+      - name: Wrap secrets for the agent job
+        id: wrap
+        continue-on-error: true
+        uses: camunda/infra-global-github-actions/vault-wrapped-secrets/wrap@c21e31eece771eb13d6c5e08e8831c9de62888bd # vault-wrapped-secrets-1.0.0
+        with:
+          vault-url: ${{ secrets.VAULT_ADDR }}
+          vault-auth-jwt-path: ${{ secrets.VAULT_JWT_PATH }}
+          vault-auth-jwt-role: ${{ secrets.VAULT_JWT_ROLE }}
+          vault-auth-jwt-audience: ${{ secrets.VAULT_JWT_AUDIENCE }}
+          secrets: |
+            secret/data/products/qa/ci/common CLAUDE_API_KEY | ANTHROPIC_API_KEY
+          values: '{"HUB_CLONE_TOKEN": "${{ steps.hub-token.outputs.token }}"}'
+
   # Best-effort, READ-ONLY classification of a failing run — this suite is
   # regenerated fresh from the PR's own spec every time, so a failure is just
   # as likely to be api-test-generator not yet handling a new/changed
@@ -264,7 +309,6 @@ jobs:
   # original three-way hedge if this job doesn't produce a usable result.
   classify:
     name: Classify hub-suite failure (read-only)
-    needs: [validate, run]
     # `always()` is required, not decorative: a job-level `if:` that doesn't
     # reference a status-check function gets an implicit `success() &&`
     # prepended by GitHub Actions, which is always false here (`run` failed)
@@ -281,11 +325,11 @@ jobs:
     # no reports to classify, so the agent can only answer "unknown".
     # `report` states the startup failure directly instead.
     if: always() && needs.run.result == 'failure' && needs.run.outputs.suites_ran == 'true' && needs.validate.outputs.is_draft != 'true'
+    needs: [validate, run, classify-secrets]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
       contents: read
-      id-token: write # OIDC → Vault
     outputs:
       category: ${{ steps.parse.outputs.category }}
       confidence: ${{ steps.parse.outputs.confidence }}
@@ -296,6 +340,17 @@ jobs:
       caused_by_pr: ${{ steps.parse.outputs.caused_by_pr }}
       affected_operation_ids: ${{ steps.parse.outputs.affected_operation_ids }}
     steps:
+      # First step: the secrets come from the classify-secrets job, so this job needs no Vault login.
+      # Best effort like the rest of this job: an unwrap failure leaves the outputs empty and the
+      # agent step is skipped.
+      - name: Unwrap secrets from Vault
+        id: vault
+        continue-on-error: true
+        uses: camunda/infra-global-github-actions/vault-wrapped-secrets/unwrap@c21e31eece771eb13d6c5e08e8831c9de62888bd # vault-wrapped-secrets-1.0.0
+        with:
+          vault-url: ${{ secrets.VAULT_ADDR }}
+          wrap-token: ${{ needs.classify-secrets.outputs.wrap-token }}
+
       - name: Checkout api-test-generator
         uses: actions/checkout@v6
         with:
@@ -363,24 +418,12 @@ jobs:
             --pr "$PR_NUMBER" --sha "$SHA" \
             --out "${GITHUB_WORKSPACE}/hub-pr-evidence.json"
 
-      # Contents:Read only — same token type _hub-suite-run.yml itself already
-      # uses to clone for generation, never a write-capable App token.
-      - name: Mint camunda-hub clone token (read-only)
-        id: hub-token
-        continue-on-error: true
-        uses: ./.github/actions/hub-clone-token
-        with:
-          vault-url: ${{ secrets.VAULT_ADDR }}
-          vault-jwt-path: ${{ secrets.VAULT_JWT_PATH }}
-          vault-jwt-role: ${{ secrets.VAULT_JWT_ROLE }}
-          vault-jwt-audience: ${{ secrets.VAULT_JWT_AUDIENCE }}
-
       - name: Clone camunda-hub @ PR sha (sibling ../camunda-hub)
-        if: steps.hub-token.outputs.token != ''
+        if: fromJSON(steps.vault.outputs.secrets || '{}').HUB_CLONE_TOKEN != ''
         continue-on-error: true
         uses: ./.github/actions/clone-hub-sibling
         with:
-          token: ${{ steps.hub-token.outputs.token }}
+          token: ${{ fromJSON(steps.vault.outputs.secrets || '{}').HUB_CLONE_TOKEN }}
           ref: ${{ needs.validate.outputs.source_sha }}
 
       # One clone, diffed against the PR's base, instead of cloning both refs
@@ -389,12 +432,12 @@ jobs:
       # is new/changed in this PR) from "hub regressed" (operation unchanged).
       - name: Diff the OpenAPI spec against the PR's base
         id: specdiff
-        if: steps.hub-token.outputs.token != ''
+        if: fromJSON(steps.vault.outputs.secrets || '{}').HUB_CLONE_TOKEN != ''
         continue-on-error: true
         env:
           SHA: ${{ needs.validate.outputs.source_sha }}
           BASE_REF: ${{ needs.validate.outputs.base_ref }}
-          HUB_TOKEN: ${{ steps.hub-token.outputs.token }}
+          HUB_TOKEN: ${{ fromJSON(steps.vault.outputs.secrets || '{}').HUB_CLONE_TOKEN }}
         run: |
           set -euo pipefail
           cd ../camunda-hub
@@ -457,22 +500,9 @@ jobs:
           git diff "origin/${base}" "${SHA}" -- restapi/public-api/src/main/resources/openapi/v2 \
             > "${GITHUB_WORKSPACE}/spec-diff.txt" || true
 
-      - name: Fetch Anthropic key from Vault
-        id: vault
-        continue-on-error: true
-        uses: hashicorp/vault-action@v4
-        with:
-          url: ${{ secrets.VAULT_ADDR }}
-          method: jwt
-          path: ${{ secrets.VAULT_JWT_PATH }}
-          role: ${{ secrets.VAULT_JWT_ROLE }}
-          jwtGithubAudience: ${{ secrets.VAULT_JWT_AUDIENCE }}
-          secrets: |
-            secret/data/products/qa/ci/common CLAUDE_API_KEY | ANTHROPIC_API_KEY ;
-
       # Pinned version — same as triage-camunda-hub-nightly.yml. Bump intentionally.
       - name: Install Claude Code CLI
-        if: steps.vault.outputs.ANTHROPIC_API_KEY != ''
+        if: fromJSON(steps.vault.outputs.secrets || '{}').ANTHROPIC_API_KEY != ''
         continue-on-error: true
         run: |
           set -euo pipefail
@@ -481,10 +511,10 @@ jobs:
 
       - name: Run classification agent (read-only)
         id: agent
-        if: steps.vault.outputs.ANTHROPIC_API_KEY != ''
+        if: fromJSON(steps.vault.outputs.secrets || '{}').ANTHROPIC_API_KEY != ''
         continue-on-error: true
         env:
-          ANTHROPIC_API_KEY: ${{ steps.vault.outputs.ANTHROPIC_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ fromJSON(steps.vault.outputs.secrets || '{}').ANTHROPIC_API_KEY }}
           REPORTS_DIR: ${{ github.workspace }}/test-results/e2e-camunda-hub
           SPEC_DIR: ${{ github.workspace }}/../camunda-hub/restapi/public-api/src/main/resources/openapi/v2
           SPEC_DIFF_FILE: ${{ github.workspace }}/spec-diff.txt

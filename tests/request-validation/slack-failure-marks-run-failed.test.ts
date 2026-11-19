@@ -107,8 +107,21 @@ describe('the fail-if-slack-failed action', () => {
   });
 });
 
+// A job that only wraps secrets for an agent job (vault-wrapped-secrets/wrap) posts nothing to Slack, so it has no Slack check.
+const isSecretsBroker = (steps: Step[]) =>
+  steps.some((st) => st.uses?.includes('vault-wrapped-secrets/wrap@'));
+// The Slack token comes from the slack-token action, or, in a job that must not log in to Vault itself, from an
+// unwrap step (id "slack") that redeems the token wrapped by the job's secrets broker.
+const isSlackTokenStep = (st: Step) =>
+  st.uses === './.github/actions/slack-token' ||
+  (st.id === 'slack' && st.uses?.includes('vault-wrapped-secrets/unwrap@') === true);
+const emptyTokenChecks = (id: string | undefined) => [
+  `steps.${id}.outputs.SLACK_BOT_TOKEN == ''`,
+  `fromJSON(steps.${id}.outputs.secrets || '{}').SLACK_BOT_TOKEN == ''`,
+];
+
 describe.each(WORKFLOWS)('%s', (file) => {
-  const jobs = stepsOf(file);
+  const jobs = stepsOf(file).filter((steps) => !isSecretsBroker(steps));
 
   it('ends with the Slack check, which always runs', () => {
     expect(jobs.length).toBeGreaterThan(0);
@@ -122,12 +135,13 @@ describe.each(WORKFLOWS)('%s', (file) => {
   it('also fails when a token step succeeded but produced an empty token', () => {
     for (const steps of jobs) {
       const outcomes = steps[steps.length - 1]?.outcomes ?? '';
-      const tokenSteps = steps.filter((st) => st.uses === './.github/actions/slack-token');
+      const tokenSteps = steps.filter(isSlackTokenStep);
       expect(tokenSteps.length).toBeGreaterThan(0);
       for (const st of tokenSteps) {
-        expect(outcomes, `token step "${st.name}" is not checked for an empty token`).toContain(
-          `steps.${st.id}.outputs.SLACK_BOT_TOKEN == ''`,
-        );
+        expect(
+          emptyTokenChecks(st.id).some((check) => outcomes.includes(check)),
+          `token step "${st.name}" is not checked for an empty token`,
+        ).toBe(true);
       }
     }
   });
