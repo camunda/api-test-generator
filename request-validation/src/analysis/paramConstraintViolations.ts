@@ -4,7 +4,7 @@ import {
   buildSiblingValues,
   isUrlCollapsingPathSegment,
   type ResolvedParamSchema,
-  resolveParamSchema,
+  resolveParamViolationSchema,
 } from '../util/paramSchema.js';
 import { buildGuaranteedPatternMismatch } from '../util/patternMismatch.js';
 import { makeId } from './common.js';
@@ -94,9 +94,11 @@ function eligibleViolations(
 
 /**
  * Is `op` eligible for a param-constraint-violation scenario? Calls
- * {@link buildViolations} itself (via `resolveParamSchema`, which merges the
- * top-level `allOf` chain — Camunda key types carry pattern/maxLength inside
- * an `allOf: [LongKey]` branch that a flat `p.schema.*` read would miss) so
+ * {@link buildViolations} itself (via `resolveParamViolationSchema`, which
+ * merges the `allOf` chain — Camunda key types carry pattern/maxLength inside
+ * an `allOf: [LongKey]` branch that a flat `p.schema.*` read would miss — and
+ * keeps from a `oneOf`/`anyOf` only what every branch agrees on, so no
+ * invalid value is one another branch accepts) so
  * the coverage script's applicability analysis can never drift from what
  * this generator actually produces: a bare `pattern` on a parameter isn't
  * enough on its own, since `buildViolations` only counts it once
@@ -110,7 +112,7 @@ export function isParamConstraintEligible(
 ): boolean {
   return op.parameters.some((p) => {
     if (p.in !== 'path' && p.in !== 'query') return false;
-    const r = resolveParamSchema(p);
+    const r = resolveParamViolationSchema(p);
     if (!r) return false;
     return eligibleViolations(p, r, capabilityGates).length > 0;
   });
@@ -142,7 +144,7 @@ export function generateParamConstraintViolations(
     let produced = 0;
     for (const p of op.parameters) {
       if (p.in !== 'path' && p.in !== 'query') continue; // focus path+query first
-      const resolved = resolveParamSchema(p);
+      const resolved = resolveParamViolationSchema(p);
       if (!resolved) continue;
       const violations = eligibleViolations(p, resolved, opts.capabilityGates);
       if (!violations.length) continue;

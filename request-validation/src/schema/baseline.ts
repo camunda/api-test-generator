@@ -1,4 +1,13 @@
 import type { OperationModel } from '../model/types.js';
+import {
+  buildValidValue,
+  findValidNumber,
+  findValidValue,
+  orderedDateValuesFor,
+  type ResolvedParamSchema,
+  resolveFieldSchema,
+  validValues,
+} from '../util/paramSchema.js';
 import { buildWalk, type SchemaFragment, type WalkNode } from './walker.js';
 
 export type BaselineValue =
@@ -10,67 +19,156 @@ export type BaselineValue =
   | null
   | undefined;
 
+export interface BaselineOpts {
+  /**
+   * Capability-gated field names (`capabilityGate` in global-context-seeds.json, #404), e.g.
+   * `tenantId` while multi-tenancy is off. The server rejects any non-blank value for an optional
+   * gated field, so sending one makes it answer for the gate instead of the field under test. An
+   * optional occurrence is left out of the baseline unless it is on `keep`.
+   */
+  gates?: ReadonlyMap<string, unknown>;
+  /**
+   * Path of the field a scenario will change (`['filter', 'tenantId']`, array items as `'0'`).
+   * Fields on this path are never left out for being gated or for having no valid value, so the
+   * scenario still finds its target. It does not add fields the baseline would not otherwise have.
+   */
+  keep?: readonly string[];
+}
+
 function isSchemaFragment(v: unknown): v is SchemaFragment {
   return !!v && typeof v === 'object' && !Array.isArray(v);
 }
 
-export function buildBaselineBody(op: OperationModel): BaselineValue {
+/** Set when a field has no value that satisfies its schema. */
+const NO_VALID_VALUE = Symbol('no valid value');
+
+/**
+ * A request body that satisfies the operation's schema, for a scenario to change one field of.
+ * Every value in it is valid for its own schema: a field the scenario does not target must not make
+ * the server reject the request for the wrong reason (`scopeKey: "x"` for a numeric key). An optional
+ * field no value can satisfy is left out, and so is an optional gated field (see `opts.gates`).
+ */
+export function buildBaselineBody(op: OperationModel, opts: BaselineOpts = {}): BaselineValue {
   const walk = buildWalk(op);
   if (!walk?.root) return undefined;
-  function synth(node: WalkNode): BaselineValue {
+  const keep = opts.keep ?? [];
+
+  function resolved(node: WalkNode): ResolvedParamSchema {
+    const source = isSchemaFragment(node.source) ? node.source : node.raw;
+    const r = resolveFieldSchema(source ?? {});
+    if (r.type === undefined) r.type = node.type;
+    if (node.enum?.length && !r.enumValues) r.enumValues = node.enum.slice();
+    return r;
+  }
+
+  /** A value for a field that cannot be left out although no value meets its schema. */
+  function placeholder(node: WalkNode): unknown {
+    const t = Array.isArray(node.type) ? node.type[0] : node.type;
+    // Keep the declared type: a number field that gets a string fails for its type, not its range.
+    if (t === 'integer' || t === 'number') return 1;
+    if (t === 'array') return node.items ? [placeholder(node.items)] : [];
+    if (t === 'object') return {};
+    return buildValidValue(resolved(node));
+  }
+
+  function synth(node: WalkNode, depth: number, onKeep: boolean): unknown {
     const t = Array.isArray(node.type) ? node.type[0] : node.type;
     switch (t) {
       case 'object': {
         const obj: Record<string, unknown> = {};
-        // Always include required
-        if (node.required && node.properties) {
-          for (const r of node.required) {
-            const child = node.properties[r];
-            if (child) obj[r] = synth(child);
-          }
-        }
-        // Include "interesting" optional properties (constraints, enum, format, nested additionalProperties=false)
-        if (node.properties) {
-          for (const [k, child] of Object.entries(node.properties)) {
-            if (node.required?.includes(k)) continue;
-            const raw = isSchemaFragment(child.raw) ? child.raw : undefined;
-            if (raw) {
-              const interesting = !!(
-                (Array.isArray(raw.enum) && raw.enum.length) ||
-                raw.format ||
-                raw.pattern ||
-                raw.minimum !== undefined ||
-                raw.maximum !== undefined ||
-                raw.multipleOf !== undefined ||
-                raw.minLength !== undefined ||
-                raw.maxLength !== undefined ||
-                raw.uniqueItems ||
-                raw.additionalProperties === false
-              );
-              if (interesting) {
-                obj[k] = synth(child);
-              }
-            }
+        if (!node.properties) return obj;
+        const included = Object.entries(node.properties).filter(([k, child]) => {
+          if (node.required?.includes(k)) return true;
+          // Include "interesting" optional properties (constraints, enum, format, nested
+          // additionalProperties=false), unless gated.
+          const raw = isSchemaFragment(child.raw) ? child.raw : undefined;
+          if (!raw || !isInteresting(raw)) return false;
+          const kept = onKeep && keep[depth] === k;
+          return kept || !opts.gates?.has(k);
+        });
+        const dates = orderedDateValuesFor(
+          included.map(([k, child]) => ({ name: k, resolved: resolved(child) })),
+        );
+        for (const [k, child] of included) {
+          const kept = onKeep && keep[depth] === k;
+          const required = node.required?.includes(k) ?? false;
+          const date = dates.get(k);
+          const value = date ?? synth(child, depth + 1, kept);
+          if (value !== NO_VALID_VALUE) {
+            obj[k] = value;
+          } else if (required || kept) {
+            // Cannot be omitted (required) or is the field under test: send a placeholder.
+            obj[k] = placeholder(child);
           }
         }
         return obj;
       }
       case 'array': {
-        if (node.items) return [synth(node.items)];
-        return [];
+        if (!node.items) return [];
+        const items = node.items;
+        const c = node.constraints ?? {};
+        const maxItems = typeof c.maxItems === 'number' ? c.maxItems : Number.POSITIVE_INFINITY;
+        if (maxItems <= 0) return [];
+        // At least one item (the target may sit inside it), at least `minItems`, at most `maxItems`.
+        const count = Math.min(
+          Math.max(1, typeof c.minItems === 'number' ? c.minItems : 0),
+          maxItems,
+        );
+        const first = synth(items, depth + 1, onKeep && keep[depth] === '0');
+        // An item no value satisfies still gets a placeholder, so a required array keeps its shape.
+        if (first === NO_VALID_VALUE)
+          return Array.from({ length: count }, () => placeholder(items));
+        if (count === 1) return [first];
+        if (c.uniqueItems !== true)
+          return Array.from({ length: count }, () => structuredClone(first));
+        // `uniqueItems`: the items must differ. Only strings have a list of distinct valid values;
+        // too few of them (or any other item type) means no array fits.
+        const t = Array.isArray(items.type) ? items.type[0] : items.type;
+        const distinct =
+          t === 'string'
+            ? items.enum?.length
+              ? [...new Set(items.enum.filter((v): v is string => typeof v === 'string'))]
+              : validValues(resolved(items))
+            : [];
+        return distinct.length >= count ? distinct.slice(0, count) : NO_VALID_VALUE;
       }
       case 'integer':
       case 'number':
-        return 1;
+        return findValidNumber(resolved(node), t === 'integer') ?? NO_VALID_VALUE;
       case 'boolean':
         return true;
       case 'string': {
         const first = node.enum?.[0];
-        return typeof first === 'string' ? first : 'x';
+        if (typeof first === 'string') return first;
+        return findValidValue(resolved(node)) ?? NO_VALID_VALUE;
       }
       default:
         return null;
     }
   }
-  return synth(walk.root);
+  const body = synth(walk.root, 0, true);
+  return body === NO_VALID_VALUE ? undefined : toBaseline(body);
+}
+
+function isInteresting(raw: SchemaFragment): boolean {
+  return !!(
+    (Array.isArray(raw.enum) && raw.enum.length) ||
+    raw.format ||
+    raw.pattern ||
+    raw.minimum !== undefined ||
+    raw.maximum !== undefined ||
+    raw.multipleOf !== undefined ||
+    raw.minLength !== undefined ||
+    raw.maxLength !== undefined ||
+    raw.uniqueItems ||
+    raw.additionalProperties === false
+  );
+}
+
+function toBaseline(v: unknown): BaselineValue {
+  if (v === null || v === undefined) return v;
+  if (Array.isArray(v)) return v;
+  if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') return v;
+  if (isSchemaFragment(v)) return v;
+  return undefined;
 }

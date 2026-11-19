@@ -6,6 +6,8 @@ import { findLimitOnlyBranch, findPaginationPage, isRecord } from './paginationS
 interface Opts {
   onlyOperations?: Set<string>;
   capPerOperation?: number;
+  /** Capability-gated field names (#404): an optional gated field is left out of the baseline body. */
+  capabilityGates?: ReadonlyMap<string, unknown>;
 }
 
 interface PaginationLimitField {
@@ -53,7 +55,7 @@ export function generatePaginationLimitInvalid(
     if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId)) continue;
     const field = findPaginationLimitField(op);
     if (!field) continue;
-    const baseline = buildBaselineBody(op);
+    const baseline = buildBaselineBody(op, { gates: opts.capabilityGates });
     if (!isRecord(baseline)) continue;
     const mutations = planLimitMutations(field.minimum, field.maximum);
     let produced = 0;

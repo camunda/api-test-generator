@@ -4,6 +4,8 @@ import { makeId } from './common.js';
 
 interface Opts {
   onlyOperations?: Set<string>;
+  /** Capability-gated field names (#404): an optional gated field is left out of the baseline body. */
+  capabilityGates?: ReadonlyMap<string, unknown>;
 }
 
 // Always attempt one additional field injection per body-bearing operation.
@@ -16,7 +18,7 @@ export function generateUniversalAdditionalProp(
     if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId)) continue;
     const schema = op.requestBodySchema;
     if (!schema || schema.type !== 'object') continue;
-    const baseline = buildBaselineBody(op);
+    const baseline = buildBaselineBody(op, { gates: opts.capabilityGates });
     if (!baseline || typeof baseline !== 'object' || Array.isArray(baseline)) continue;
     const body = structuredClone(baseline);
     if (body.__extraField === undefined) {

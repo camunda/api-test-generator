@@ -26,6 +26,11 @@ interface Opts {
    * and no fixtures are provisioned. Default `false` preserves the OCA slice.
    */
   allSecured?: boolean;
+  /**
+   * Capability-gated field names (#404): an optional gated field is left out of the baseline body,
+   * or the server answers for the gate (400) before the authority check.
+   */
+  capabilityGates?: ReadonlyMap<string, unknown>;
 }
 
 /**
@@ -108,7 +113,7 @@ export function isAuthDenyEligible(op: OperationModel, opts: Opts): boolean {
     if (op.parameters.some((p) => p.in === 'path' && !fixtures.has(p.name))) return false;
     if (op.bodyRequired === true) {
       if (!op.requestBodySchema || isMultipartOnly(op)) return false;
-      if (buildableBody(op) === undefined) return false;
+      if (buildableBody(op, opts.capabilityGates) === undefined) return false;
     }
     return true;
   }
@@ -172,7 +177,9 @@ function generateAuthDenyAllSecured(ops: OperationModel[], opts: Opts): Validati
       for (const p of op.parameters) if (p.in === 'path') pathParams[p.name] = 'x';
     }
     const requestBody =
-      opts.fixtureNames && op.bodyRequired === true ? buildableBody(op) : undefined;
+      opts.fixtureNames && op.bodyRequired === true
+        ? buildableBody(op, opts.capabilityGates)
+        : undefined;
     out.push({
       id: makeId([op.operationId, 'auth-deny']),
       operationId: op.operationId,

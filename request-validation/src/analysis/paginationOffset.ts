@@ -5,6 +5,8 @@ import { findOffsetBranch, findPaginationPage, isRecord } from './paginationShap
 
 interface Opts {
   onlyOperations?: Set<string>;
+  /** Capability-gated field names (#404): an optional gated field is left out of the baseline body. */
+  capabilityGates?: ReadonlyMap<string, unknown>;
 }
 
 /**
@@ -37,7 +39,7 @@ export function generatePaginationOffsetPastTotal(
     if (!page) continue;
     const branch = findOffsetBranch(page.branches);
     if (!branch) continue;
-    const baseline = buildBaselineBody(op);
+    const baseline = buildBaselineBody(op, { gates: opts.capabilityGates });
     if (!isRecord(baseline)) continue;
     const body = structuredClone(baseline);
     body[page.pageProp] = { from: PAST_TOTAL_FROM };

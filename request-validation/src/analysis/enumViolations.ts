@@ -13,6 +13,8 @@ interface Opts {
    * (`${value}_INVALID`) and totally unrelated values are still emitted.
    */
   enumCaseInsensitive?: boolean;
+  /** Capability-gated field names (#404): an optional gated field is left out of the baseline body. */
+  capabilityGates?: ReadonlyMap<string, unknown>;
 }
 
 /**
@@ -51,7 +53,8 @@ export function generateEnumViolations(ops: OperationModel[], opts: Opts): Valid
     const root = walk?.root;
     let produced = 0;
     if (root) {
-      const baseline = buildBaselineBody(op);
+      const gates = opts.capabilityGates;
+      const baseline = buildBaselineBody(op, { gates });
       let enumNodes = 0;
       if (baseline) {
         for (const node of walk.byPointer.values()) {
@@ -69,7 +72,7 @@ export function generateEnumViolations(ops: OperationModel[], opts: Opts): Valid
             // `${first}_INVALID`), skip it — emitting it would be a false 400.
             if (node.enum.includes(inv)) continue;
             if (opts.enumCaseInsensitive && isCaseOnlyMutation(inv, node.enum)) continue;
-            const body = structuredClone(baseline);
+            const body = structuredClone(buildBaselineBody(op, { gates, keep: path }));
             if (!setAtPath(body, path, inv)) continue;
             out.push(makeScenario(op, path.join('.'), body, produced));
             produced++;

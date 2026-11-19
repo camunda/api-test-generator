@@ -23,6 +23,11 @@ export interface WalkNode {
   items?: WalkNode;
   constraints?: Record<string, unknown>;
   raw?: SchemaFragment; // original raw schema node for advanced constraints
+  // The schema exactly as declared, before any allOf flattening. `raw` for an
+  // allOf-wrapped primitive is the merged fragment, which drops `oneOf`
+  // branches (e.g. `ScopeKey`'s key types); a consumer that must satisfy
+  // every constraint resolves from this instead.
+  source?: SchemaFragment;
   // Was this node's own `key` listed in its PARENT's `required` array? (Not
   // to be confused with `required` above, which is this node's OWN
   // children's required-name list.) Undefined at the root, which has no
@@ -129,6 +134,7 @@ export function buildWalk(op: OperationModel): SchemaWalkResult | undefined {
       enum: Array.isArray(effective.enum) ? effective.enum.slice() : undefined,
       constraints: extractConstraints(effective),
       raw,
+      source: schema,
       requiredByParent,
     };
     byPointer.set(pointer, node);

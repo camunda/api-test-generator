@@ -408,15 +408,15 @@ async function main() {
       }),
     );
     if (opts.deep) {
-      // #404 — deliberately NOT passed `capabilityGates`. A wrong-TYPE
-      // mutation (a number/boolean/object in place of a declared string)
-      // fails JSON deserialization before any field-level or capability
-      // check runs, regardless of whether the field is flat or nested
-      // (e.g. filter.tenantId) — confirmed live, this generator's
-      // scenarios are unaffected by multi-tenancy being disabled either
-      // way, so there is nothing to gate here.
+      // #404 — a wrong-TYPE mutation (a number/boolean/object in place of a
+      // declared string) fails JSON deserialization before any field-level
+      // or capability check runs, regardless of whether the field is flat or
+      // nested (e.g. filter.tenantId) — confirmed live, so a gated TARGET
+      // keeps its 400 expectation. `capabilityGates` only leaves the gated
+      // field out of the baseline when it is not the target.
       scenarios.push(
         ...generateBodyTypeMismatch(model.operations, {
+          capabilityGates,
           capPerOperation: opts.maxTypeMismatch,
           onlyOperations: opts.onlyOperations,
           maxPerField: 2,
@@ -472,6 +472,7 @@ async function main() {
         onlyOperations: opts.onlyOperations,
         allSecured: rvConfig.authDenyMode !== 'slice',
         fixtureNames: denyFixtureNames(rvConfig),
+        capabilityGates,
       }),
     );
   }
@@ -483,6 +484,7 @@ async function main() {
       ...generateNotFoundFakeId(model.operations, {
         onlyOperations: opts.onlyOperations,
         declared: rvConfig.notFoundMode === 'declared',
+        capabilityGates,
       }),
     );
   }
@@ -502,6 +504,7 @@ async function main() {
     if (wantKind('pagination-limit-invalid')) {
       scenarios.push(
         ...generatePaginationLimitInvalid(model.operations, {
+          capabilityGates,
           capPerOperation: undefined,
           onlyOperations: opts.onlyOperations,
         }),
@@ -514,6 +517,7 @@ async function main() {
     if (wantKind('pagination-offset-past-total')) {
       scenarios.push(
         ...generatePaginationOffsetPastTotal(model.operations, {
+          capabilityGates,
           onlyOperations: opts.onlyOperations,
         }),
       );
@@ -523,6 +527,7 @@ async function main() {
     if (wantKind('pagination-cursor-invalid')) {
       scenarios.push(
         ...generatePaginationCursorInvalid(model.operations, {
+          capabilityGates,
           onlyOperations: opts.onlyOperations,
         }),
       );
@@ -530,6 +535,7 @@ async function main() {
     if (wantKind('enum-violation')) {
       scenarios.push(
         ...generateEnumViolations(model.operations, {
+          capabilityGates,
           capPerOperation: undefined,
           onlyOperations: opts.onlyOperations,
           enumCaseInsensitive: rvConfig.enumCaseInsensitive,
@@ -539,6 +545,7 @@ async function main() {
     if (wantKind('additional-prop')) {
       scenarios.push(
         ...generateAdditionalPropsViolations(model.operations, {
+          capabilityGates,
           onlyOperations: opts.onlyOperations,
         }),
       );
@@ -631,6 +638,7 @@ async function main() {
     if (wantKind('nested-additional-prop')) {
       scenarios.push(
         ...generateNestedAdditionalProps(model.operations, {
+          capabilityGates,
           capPerOperation: 5,
           onlyOperations: opts.onlyOperations,
         }),
@@ -639,6 +647,7 @@ async function main() {
     if (wantKind('unique-items-violation')) {
       scenarios.push(
         ...generateUniqueItemsViolations(model.operations, {
+          capabilityGates,
           capPerOperation: 10,
           onlyOperations: opts.onlyOperations,
         }),
@@ -647,6 +656,7 @@ async function main() {
     if (wantKind('multiple-of-violation')) {
       scenarios.push(
         ...generateMultipleOfViolations(model.operations, {
+          capabilityGates,
           capPerOperation: 10,
           onlyOperations: opts.onlyOperations,
         }),
@@ -655,6 +665,7 @@ async function main() {
     if (wantKind('format-invalid')) {
       scenarios.push(
         ...generateFormatInvalid(model.operations, {
+          capabilityGates,
           capPerOperation: 20,
           onlyOperations: opts.onlyOperations,
           unenforcedStringFormats: rvConfig.unenforcedStringFormats,
@@ -664,6 +675,7 @@ async function main() {
     if (wantKind('additional-prop-general')) {
       scenarios.push(
         ...generateUniversalAdditionalProp(model.operations, {
+          capabilityGates,
           onlyOperations: opts.onlyOperations,
         }),
       );
@@ -694,6 +706,7 @@ async function main() {
     if (wantKind('allof-missing-required')) {
       scenarios.push(
         ...generateAllOfMissingRequired(model.operations, {
+          capabilityGates,
           onlyOperations: opts.onlyOperations,
           capPerOperation: 50,
         }),
@@ -702,6 +715,7 @@ async function main() {
     if (wantKind('allof-conflict')) {
       scenarios.push(
         ...generateAllOfConflicts(model.operations, {
+          capabilityGates,
           onlyOperations: opts.onlyOperations,
           capPerOperation: 50,
         }),
@@ -1396,7 +1410,12 @@ async function main() {
       }
       // not-found-fake-id (#381) — reuses the exact eligibility check
       // notFoundFakeId.ts's own generator calls.
-      if (isNotFoundEligible(op, { declared: rvConfig.notFoundMode === 'declared' })) {
+      if (
+        isNotFoundEligible(op, {
+          declared: rvConfig.notFoundMode === 'declared',
+          capabilityGates,
+        })
+      ) {
         applicable.add('not-found-fake-id');
       }
       // Pagination kinds (#501) — reuse the same shape-detection helpers their
@@ -1495,6 +1514,7 @@ async function main() {
       isAuthDenyEligible(op, {
         allSecured: rvConfig.authDenyMode !== 'slice',
         fixtureNames: denyFixtureNames(rvConfig),
+        capabilityGates,
       })
     ) {
       applicable.add('auth-deny');

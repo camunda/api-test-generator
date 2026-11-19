@@ -305,6 +305,25 @@ describe('request-validation: auth-deny fixtures mode', () => {
     }
   });
 
+  it('leaves an optional capability-gated field out of the baseline body', () => {
+    // With multi-tenancy off, tenantId in the body makes the server answer 400 before the 403 check.
+    const gates = new Map([['tenantId', { disabledDetailContains: 'multi-tenancy is disabled' }]]);
+    const [s] = generateAuthDeny(
+      [
+        keyed({
+          bodyRequired: true,
+          requestBodySchema: {
+            type: 'object',
+            required: ['name'],
+            properties: { name: { type: 'string' }, tenantId: { type: 'string', maxLength: 31 } },
+          },
+        }),
+      ],
+      { allSecured: true, fixtureNames, capabilityGates: gates },
+    );
+    expect(s?.requestBody).toEqual({ name: 'x' });
+  });
+
   it('without fixture names behaves as before (keyless, no required body)', () => {
     expect(generateAuthDeny([keyed({})], { allSecured: true })).toHaveLength(0);
   });
