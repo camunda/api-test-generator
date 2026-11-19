@@ -500,6 +500,13 @@ jobs:
           N_ADDED: ${{ steps.opdiff.outputs.n_added }}
           N_REMOVED: ${{ steps.opdiff.outputs.n_removed }}
           UNMAPPED: ${{ steps.unmapped.outputs.unmapped }}
+          # Routing signals (the same inputs that choose bump-PR vs tracking-issue
+          # above) — used below to page hub-medic only when the auto-bump is blocked.
+          GEN_OUTCOME: ${{ steps.generate.outcome }}
+          INV_OUTCOME: ${{ steps.invariants.outcome }}
+          HAS_UNMAPPED: ${{ steps.unmapped.outputs.has_unmapped }}
+          HAS_NEWLY_REQUIRED: ${{ steps.fielddiff.outputs.has_newly_required }}
+          APP_TOKEN_EMPTY: ${{ steps.app-token.outputs.token == '' }}
           COOKBOOK_URL: ${{ github.server_url }}/${{ github.repository }}/blob/main/docs/hub-nightly-cookbook.md
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
@@ -529,46 +536,22 @@ jobs:
             if [ "${2:-0}" -gt 30 ]; then out="${out}, … (+$(( $2 - 30 )) more)"; fi
             printf '%s' "$out"
           }
-          # Assemble the full message and JSON-encode it with Node's JSON.stringify
-          # (Node is already set up) — guarantees valid JSON escaping for ANY input
-          # (quotes, backslashes, control chars), so an odd upstream operationId
-          # can't break the payload. The output is the fully-quoted JSON string,
-          # interpolated raw into the payload below as `"text": <value>`.
-          # shellcheck disable=SC2016  # single quotes intentional: ${e.*} are JS
-          # template refs read from process.env, not shell expansions.
+          # Build + JSON-encode the message with the committed builder. It decides
+          # the hub-medic page from the routing signals in this step's env
+          # (GEN_OUTCOME, INV_OUTCOME, HAS_UNMAPPED, HAS_NEWLY_REQUIRED,
+          # APP_TOKEN_EMPTY) — the exact negation of the "Open/update the auto-bump
+          # PR" condition — so a BLOCKED drift pages even when the issue-link lookup
+          # above races GitHub's search index. A CLEAN bump pages nobody (its PR
+          # requests @camunda/hub review). Extracted from an inline `node -e` so the
+          # clean-vs-blocked decision is unit-tested across every blocking input
+          # (tests/triage/spec-bump-pings.test.ts). ADDED_CSV/REMOVED_CSV/
+          # UNMAPPED_LIST/LINK are passed here; the routing signals and
+          # PINNED/LATEST/N_*/RUN_URL/COOKBOOK_URL come from this step's env.
           ADDED_CSV="$(csv "${ADDED:-}" "${N_ADDED:-0}")" \
           REMOVED_CSV="$(csv "${REMOVED:-}" "${N_REMOVED:-0}")" \
           UNMAPPED_LIST="${UNMAPPED:-}" \
           LINK="$link" \
-          COOKBOOK_URL="$COOKBOOK_URL" \
-          RUN_URL="$RUN_URL" \
-          node -e '
-            const e = process.env;
-            // UNMAPPED is already ", "-joined by the python step that produces it
-            // (a single line, not newline-separated like ADDED/REMOVED) — used
-            // directly, not through the csv() helper above (which expects
-            // newline-separated input and would double the comma-spacing).
-            const unmappedLine = e.UNMAPPED_LIST
-              ? `\n🚫 *missing coverage* (blocks auto-adopt): ${e.UNMAPPED_LIST}`
-              : "";
-            // Only claim "op-surface drift" when there is actual operationId
-            // churn, and only claim "coverage regression" when there is a
-            // real unmapped-operations hit — this now fires on ANY content
-            // drift, including neither (a field-level-only change), which
-            // gets its own honest, non-misleading headline instead of being
-            // silently dropped or mislabeled as a regression.
-            const hasChurn = e.N_ADDED !== "0" || e.N_REMOVED !== "0";
-            const hasUnmapped = !!e.UNMAPPED_LIST;
-            const headline = hasChurn
-              ? `:alert2: *camunda-hub upstream op-surface drift* vs the pin (\`${e.PINNED}\` → latest \`${e.LATEST}\`):\n` +
-                `🆕 added (${e.N_ADDED}): ${e.ADDED_CSV}\n` +
-                `🗑️ removed (${e.N_REMOVED}): ${e.REMOVED_CSV}`
-              : hasUnmapped
-              ? `:alert2: *camunda-hub coverage regression* vs latest \`${e.LATEST}\` (no operationId churn):`
-              : `:alert2: *camunda-hub spec pin is behind* latest \`${e.LATEST}\` (no operationId churn, no coverage regression):`;
-            const text = headline + unmappedLine + `\n${e.LINK}\n<${e.RUN_URL}|📊 View run> · <${e.COOKBOOK_URL}|📖 What this alert means>`;
-            require("fs").appendFileSync(process.env.GITHUB_OUTPUT, `text_json=${JSON.stringify(text)}\n`);
-          '
+          node scripts/triage/spec-bump-drift-slack.ts
 
       - name: Notify Slack (hub spec drift)
         id: slack-drift

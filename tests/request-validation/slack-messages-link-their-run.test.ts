@@ -14,7 +14,10 @@ describe('Slack messages link their workflow run', () => {
     expect(wf).toContain(
       `RUN_URL: \${{ github.server_url }}/\${{ github.repository }}/actions/runs/\${{ github.run_id }}`,
     );
-    expect(wf).toContain(`<\${e.RUN_URL}|📊 View run>`);
+    // The message is built by the extracted builder; it links RUN_URL there.
+    const builder = read('scripts/triage/spec-bump-drift-slack.ts');
+    expect(builder).toContain('📊 View run');
+    expect(builder).toContain('e.RUN_URL');
   });
 
   it('the gap digest and the missing-post alert read the run URL from the Actions environment', () => {
