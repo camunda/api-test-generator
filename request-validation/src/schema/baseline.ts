@@ -6,6 +6,7 @@ import {
   orderedDateValuesFor,
   type ResolvedParamSchema,
   resolveFieldSchema,
+  validValues,
 } from '../util/paramSchema.js';
 import { buildWalk, type SchemaFragment, type WalkNode } from './walker.js';
 
@@ -65,6 +66,8 @@ export function buildBaselineBody(op: OperationModel, opts: BaselineOpts = {}): 
     const t = Array.isArray(node.type) ? node.type[0] : node.type;
     // Keep the declared type: a number field that gets a string fails for its type, not its range.
     if (t === 'integer' || t === 'number') return 1;
+    if (t === 'array') return node.items ? [placeholder(node.items)] : [];
+    if (t === 'object') return {};
     return buildValidValue(resolved(node));
   }
 
@@ -102,9 +105,27 @@ export function buildBaselineBody(op: OperationModel, opts: BaselineOpts = {}): 
       }
       case 'array': {
         if (!node.items) return [];
-        const item = synth(node.items, depth + 1, onKeep && keep[depth] === '0');
-        // An item no value satisfies still gets a placeholder: an empty array can break `minItems`.
-        return [item === NO_VALID_VALUE ? placeholder(node.items) : item];
+        const items = node.items;
+        const c = node.constraints ?? {};
+        const maxItems = typeof c.maxItems === 'number' ? c.maxItems : Number.POSITIVE_INFINITY;
+        if (maxItems <= 0) return [];
+        // At least one item (the target may sit inside it), at least `minItems`, at most `maxItems`.
+        const count = Math.min(Math.max(1, typeof c.minItems === 'number' ? c.minItems : 0), maxItems);
+        const first = synth(items, depth + 1, onKeep && keep[depth] === '0');
+        // An item no value satisfies still gets a placeholder, so a required array keeps its shape.
+        if (first === NO_VALID_VALUE) return Array.from({ length: count }, () => placeholder(items));
+        if (count === 1) return [first];
+        if (c.uniqueItems !== true) return Array.from({ length: count }, () => structuredClone(first));
+        // `uniqueItems`: the items must differ. Only strings have a list of distinct valid values;
+        // too few of them (or any other item type) means no array fits.
+        const t = Array.isArray(items.type) ? items.type[0] : items.type;
+        const distinct =
+          t === 'string'
+            ? items.enum?.length
+              ? [...new Set(items.enum.filter((v): v is string => typeof v === 'string'))]
+              : validValues(resolved(items))
+            : [];
+        return distinct.length >= count ? distinct.slice(0, count) : NO_VALID_VALUE;
       }
       case 'integer':
       case 'number':

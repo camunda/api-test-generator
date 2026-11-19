@@ -26,7 +26,9 @@ export interface SchemaFragment {
 
 export interface ResolvedParamSchema {
   schema: SchemaFragment;
+  /** The first pattern found. `patterns` holds all of them: every `allOf` part's pattern applies. */
   pattern?: string;
+  patterns?: string[];
   minLength?: number;
   maxLength?: number;
   format?: string;
@@ -69,23 +71,30 @@ export function resolveParamSchema(p: ParameterModel): ResolvedParamSchema | und
 export function resolveFieldSchema(schema: SchemaFragment): ResolvedParamSchema {
   const out: ResolvedParamSchema = { schema };
   const seen = new Set<SchemaFragment>();
+  // Every part applies (the schema itself, each allOf part, the chosen union branch), so the result is
+  // their intersection: the tightest length and numeric bounds, every pattern, the enum values all
+  // parts allow. A looser bound in one part must not hide a tighter one in another (PR #802 review).
   function merge(s: unknown): void {
     if (!isSchemaFragment(s) || seen.has(s)) return;
     seen.add(s);
-    if (typeof s.pattern === 'string' && out.pattern === undefined) out.pattern = s.pattern;
-    if (typeof s.minLength === 'number' && out.minLength === undefined) out.minLength = s.minLength;
-    if (typeof s.maxLength === 'number' && out.maxLength === undefined) out.maxLength = s.maxLength;
-    if (typeof s.format === 'string' && out.format === undefined) out.format = s.format;
-    if (Array.isArray(s.enum) && !out.enumValues) out.enumValues = s.enum.slice();
-    if (s.type !== undefined && out.type === undefined) out.type = s.type;
-    if (typeof s.minimum === 'number' && out.minimum === undefined) out.minimum = s.minimum;
-    if (typeof s.maximum === 'number' && out.maximum === undefined) out.maximum = s.maximum;
-    if (isBound(s.exclusiveMinimum) && out.exclusiveMinimum === undefined)
-      out.exclusiveMinimum = s.exclusiveMinimum;
-    if (isBound(s.exclusiveMaximum) && out.exclusiveMaximum === undefined)
-      out.exclusiveMaximum = s.exclusiveMaximum;
-    if (typeof s.multipleOf === 'number' && s.multipleOf > 0 && out.multipleOf === undefined)
-      out.multipleOf = s.multipleOf;
+    if (typeof s.pattern === 'string') {
+      out.pattern ??= s.pattern;
+      out.patterns = [...new Set([...(out.patterns ?? []), s.pattern])];
+    }
+    if (typeof s.minLength === 'number')
+      out.minLength = Math.max(out.minLength ?? s.minLength, s.minLength);
+    if (typeof s.maxLength === 'number')
+      out.maxLength = Math.min(out.maxLength ?? s.maxLength, s.maxLength);
+    if (typeof s.format === 'string') out.format ??= s.format;
+    if (Array.isArray(s.enum)) {
+      const allowed = s.enum;
+      out.enumValues = out.enumValues
+        ? out.enumValues.filter((v) => allowed.includes(v))
+        : allowed.slice();
+    }
+    if (s.type !== undefined) out.type ??= s.type;
+    if (typeof s.multipleOf === 'number' && s.multipleOf > 0) out.multipleOf ??= s.multipleOf;
+    tightenBounds(out, numericInterval({ schema: s, ...numericFields(s) }));
     if (Array.isArray(s.allOf)) for (const part of s.allOf) merge(part);
     for (const branches of [s.oneOf, s.anyOf]) {
       if (Array.isArray(branches) && branches.length) merge(branches[0]);
@@ -93,6 +102,37 @@ export function resolveFieldSchema(schema: SchemaFragment): ResolvedParamSchema 
   }
   merge(schema);
   return out;
+}
+
+function numericFields(s: SchemaFragment): Partial<ResolvedParamSchema> {
+  return {
+    minimum: typeof s.minimum === 'number' ? s.minimum : undefined,
+    maximum: typeof s.maximum === 'number' ? s.maximum : undefined,
+    exclusiveMinimum: isBound(s.exclusiveMinimum) ? s.exclusiveMinimum : undefined,
+    exclusiveMaximum: isBound(s.exclusiveMaximum) ? s.exclusiveMaximum : undefined,
+  };
+}
+
+/**
+ * Narrow `out`'s numeric bounds to `part` where `part` is tighter. A bound is stored back in the
+ * OpenAPI 3.1 form (an exclusive bound as a number), which {@link numericInterval} reads.
+ */
+function tightenBounds(out: ResolvedParamSchema, part: NumericInterval): void {
+  const cur = numericInterval(out);
+  if (
+    part.lo !== undefined &&
+    (cur.lo === undefined || part.lo > cur.lo || (part.lo === cur.lo && part.loOpen))
+  ) {
+    out.minimum = part.loOpen ? undefined : part.lo;
+    out.exclusiveMinimum = part.loOpen ? part.lo : undefined;
+  }
+  if (
+    part.hi !== undefined &&
+    (cur.hi === undefined || part.hi < cur.hi || (part.hi === cur.hi && part.hiOpen))
+  ) {
+    out.maximum = part.hiOpen ? undefined : part.hi;
+    out.exclusiveMaximum = part.hiOpen ? part.hi : undefined;
+  }
 }
 
 function isBound(v: unknown): v is number | boolean {
@@ -280,29 +320,37 @@ function fallbackValue(r: ResolvedParamSchema): string {
  * that can leave the param out (an optional sibling) should do that instead of sending it invalid.
  */
 export function findValidValue(r: ResolvedParamSchema): string | undefined {
-  // Every candidate goes through the same check (enum, length, pattern), so a shortcut value such as
-  // '1' for a numeric key or the sample uuid for a format can't skip a limit it breaks (PR #802 review).
+  return validValues(r)[0];
+}
+
+/**
+ * Distinct string values the schema accepts, best first; {@link findValidValue} takes the first. Every
+ * candidate goes through the same check (enum, length, every pattern), so a shortcut value such as '1'
+ * for a numeric key or the sample uuid for a format can't skip a limit it breaks (PR #802 review).
+ * Used on its own where several different values are needed (`uniqueItems` arrays).
+ */
+export function validValues(r: ResolvedParamSchema): string[] {
   const ok = (c: string): boolean => satisfiesAll(c, r);
-  if (r.enumValues?.length) return r.enumValues.map(String).find(ok);
+  const distinct = (cs: string[]): string[] => [...new Set(cs.filter(ok))];
+  if (r.enumValues?.length) return distinct(r.enumValues.map(String));
   const t = Array.isArray(r.type) ? r.type[0] : r.type;
   if (t === 'integer' || t === 'number') {
     const n = findValidNumber(r, t === 'integer');
-    return n !== undefined && ok(String(n)) ? String(n) : undefined;
+    return n === undefined ? [] : distinct([String(n)]);
   }
+  const out: string[] = [];
   const numericKey =
     r.pattern !== undefined && (/^\^-?\[0-9]\+\$$/.test(r.pattern) || r.pattern === '^-?[0-9]+$');
   if (numericKey) {
-    // A numeric key is a string: only its length bounds limit it, so try '1' and digit strings sized
-    // to them.
-    const digits = ['1'];
-    if (r.minLength) digits.push('1'.padEnd(r.minLength, '0'));
+    // A numeric key is a string: only its length bounds limit it, so try digit strings sized to them.
+    const digits = ['1', '2'];
+    if (r.minLength) digits.push('1'.padEnd(r.minLength, '0'), '2'.padEnd(r.minLength, '0'));
     if (r.maxLength) digits.push('1'.padEnd(Math.min(r.maxLength, 18), '0'));
-    const found = digits.find(ok);
-    if (found !== undefined) return found;
+    out.push(...distinct(digits));
   }
-  if (t === 'boolean') return ['true', 'false'].find(ok);
+  if (t === 'boolean') return distinct([...out, 'true', 'false']);
   const byFormat = r.format !== undefined ? VALID_BY_FORMAT[r.format] : undefined;
-  if (byFormat !== undefined) return ok(byFormat) ? byFormat : undefined;
+  if (byFormat !== undefined) return distinct([...out, byFormat]);
   // Cover the pattern shapes in the bundled specs: lowercase, uppercase, digits, `1-1` keys and
   // `1*` prefix wildcards.
   const candidates = [
@@ -321,7 +369,7 @@ export function findValidValue(r: ResolvedParamSchema): string | undefined {
     '*',
     '1*',
   ];
-  return candidates.find(ok);
+  return distinct([...out, ...candidates]);
 }
 
 /** Does `c` meet the schema's enum, length bounds and pattern? */
@@ -329,8 +377,11 @@ function satisfiesAll(c: string, r: ResolvedParamSchema): boolean {
   if (r.enumValues?.length && !r.enumValues.map(String).includes(c)) return false;
   if (r.minLength !== undefined && c.length < r.minLength) return false;
   if (r.maxLength !== undefined && c.length > r.maxLength) return false;
-  const re = r.pattern ? compilePattern(r.pattern) : undefined;
-  return re === undefined || re.test(c);
+  const patterns = r.patterns ?? (r.pattern ? [r.pattern] : []);
+  return patterns.every((p) => {
+    const re = compilePattern(p);
+    return re === undefined || re.test(c);
+  });
 }
 
 const END_NAME = /^(end|to|until|before)/i;

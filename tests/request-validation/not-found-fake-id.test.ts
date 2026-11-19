@@ -326,7 +326,13 @@ describe("request-validation: 404 fake-ID in notFoundMode 'declared'", () => {
     const unusable: SchemaFragment[] = [
       // No candidate value matches this pattern, so the required field gets a placeholder.
       withProp({ type: 'string', pattern: '^\\d{4}-[a-z]+$' }),
-      withProp({ type: 'array', minItems: 2, items: { type: 'string' } }), // one item
+      // Two different items are needed, but the enum allows only one value.
+      withProp({
+        type: 'array',
+        minItems: 2,
+        uniqueItems: true,
+        items: { type: 'string', enum: ['ONLY'] },
+      }),
     ];
     for (const requestBodySchema of unusable) {
       const o = op({
@@ -348,6 +354,7 @@ describe("request-validation: 404 fake-ID in notFoundMode 'declared'", () => {
       withProp({ type: 'string', pattern: '^[0-9]+$' }),
       withProp({ type: 'string', minLength: 5 }),
       withProp({ type: 'integer', minimum: 10 }),
+      withProp({ type: 'array', minItems: 2, items: { type: 'string' } }), // two items are sent
       withProp({ type: 'integer', format: 'int32' }),
       withProp({ type: 'string', format: 'uuid' }),
       withProp({ type: 'string', format: 'email' }),
@@ -438,5 +445,29 @@ describe('request-validation: notFoundMode config', () => {
     expect(() => loadRequestValidationConfig(tmpRoot, 'probe')).toThrow(
       /notFoundMode.*read-only.*declared/,
     );
+  });
+});
+
+describe('request-validation: 404 body leaves out capability-gated fields', () => {
+  // With multi-tenancy off, any non-blank tenantId is rejected with 400 before the lookup, so the
+  // valid body a declared-mode 404 test sends must not carry the optional gated field.
+  const gates = new Map([['tenantId', { disabledDetailContains: 'multi-tenancy is disabled' }]]);
+  const o = op({
+    operationId: 'updateThing',
+    method: 'PATCH',
+    path: '/things/{thingKey}',
+    parameters: [pathParam('thingKey', longKeySchema)],
+    bodyRequired: true,
+    requestBodySchema: {
+      type: 'object',
+      required: ['name'],
+      properties: { name: { type: 'string' }, tenantId: { type: 'string', maxLength: 31 } },
+    },
+  });
+
+  it('sends the body without tenantId and stays eligible', () => {
+    expect(isNotFoundEligible(o, { declared: true, capabilityGates: gates })).toBe(true);
+    const [s] = generateNotFoundFakeId([o], { declared: true, capabilityGates: gates });
+    expect(s?.requestBody).toEqual({ name: 'x' });
   });
 });

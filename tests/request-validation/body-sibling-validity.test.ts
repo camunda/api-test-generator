@@ -165,6 +165,12 @@ function why(schema: unknown, value: unknown): string | undefined {
       if (reasons.every((r) => r !== undefined)) return `no ${key} branch: ${reasons[0]}`;
     }
   }
+  if (Array.isArray(value)) {
+    if (typeof schema.minItems === 'number' && value.length < schema.minItems) return 'too few items';
+    if (typeof schema.maxItems === 'number' && value.length > schema.maxItems) return 'too many items';
+    if (schema.uniqueItems === true && new Set(value.map((v) => JSON.stringify(v))).size < value.length)
+      return 'duplicate items';
+  }
   if (Array.isArray(schema.enum) && schema.enum.length && !schema.enum.includes(value))
     return 'not in enum';
   if (typeof value === 'string') {
@@ -241,6 +247,8 @@ function invalidLeaves(schema: unknown, value: unknown, path: string[], target: 
   const here = path.join('.');
   if (here && (here === target || here.startsWith(`${target}.`))) return [];
   if (Array.isArray(value)) {
+    const own = why(schema, value);
+    if (own) return [`${here}=${JSON.stringify(value)} (${own})`];
     const items = itemsSchema(schema);
     return value.flatMap((v, i) => invalidLeaves(items, v, [...path, String(i)], target));
   }
@@ -271,6 +279,22 @@ describe('sibling values meet every limit of their schema', () => {
     step5: { type: 'integer', multipleOf: 5 },
     fracMin: { type: 'integer', minimum: 1.5 }, // smallest integer is 2
     fracMax: { type: 'integer', maximum: -1.5 }, // largest integer is -2
+    pairOfIds: { type: 'array', minItems: 2, items: { type: 'string' } },
+    // Two distinct items are needed, but the enum has only one value: no array fits.
+    uniqueOfOne: {
+      type: 'array',
+      minItems: 2,
+      uniqueItems: true,
+      items: { type: 'string', enum: ['ONLY'] },
+    },
+    // Every allOf part applies: the tighter maxLength and both patterns.
+    shortAllOf: {
+      allOf: [
+        { type: 'string', minLength: 1, maxLength: 100 },
+        { minLength: 5, maxLength: 6 },
+      ],
+    },
+    twoPatterns: { allOf: [{ type: 'string', pattern: '^[a-z]+$' }, { pattern: '^.{4,}$' }] },
     noInteger: {
       type: 'integer',
       minimum: 1,
@@ -286,10 +310,10 @@ describe('sibling values meet every limit of their schema', () => {
     tags: [],
     parameters: [],
     bodyRequired: true,
-    requiredProps: ['numericKey', 'above1', 'between', 'step5', 'fracMin', 'fracMax'],
+    requiredProps: ['numericKey', 'above1', 'between', 'step5', 'fracMin', 'fracMax', 'pairOfIds', 'shortAllOf', 'twoPatterns'],
     requestBodySchema: {
       type: 'object',
-      required: ['numericKey', 'above1', 'between', 'step5', 'fracMin', 'fracMax'],
+      required: ['numericKey', 'above1', 'between', 'step5', 'fracMin', 'fracMax', 'pairOfIds', 'shortAllOf', 'twoPatterns'],
       properties: properties,
     },
   };
