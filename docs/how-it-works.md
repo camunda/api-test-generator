@@ -107,8 +107,11 @@ is conditional:
   evidence is posted without a ping; if the same PR fails 3 times in a day, the escalation pings
   `test-automation-medic` alone for presuite, or both groups for other no-evidence failures.
 - **The spec-bump alert** pages `test-automation-medic` **only when the check itself failed** (a broken run —
-  CI machinery). An ordinary spec-drift post (a new or changed upstream operation) **pings nobody**: the bump
-  PR it opens carries an `@camunda/hub` reviewer, and that review is the notification.
+  CI machinery). A **clean** spec-drift post **pings nobody**: the bump PR it opens carries an `@camunda/hub`
+  reviewer, and that review is the notification. A **blocked** drift — one that cannot open a bump PR (broken
+  generate/invariants, an uncovered operation, a newly-required unfixtured field, or no App token) and so files
+  a tracking issue with no reviewer — pages `hub-medic`, because the Hub team owns the camunda-hub config and the
+  issue would otherwise sit unseen.
 - **The missing-post alert** (the nightly or its triage didn't start, hung, or errored) pages
   `test-automation-medic` — a broken scheduled run is CI machinery, not a Hub finding.
 - **The re-enable check** names **the person who landed the Hub fix** — it requests their review on the unskip

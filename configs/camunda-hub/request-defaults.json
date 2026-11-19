@@ -1,0 +1,14 @@
+{
+  "$comment": "Per-operation request-body defaults for camunda-hub, read by path-analyser (getRequestDefaultsForOperation). A default fills a field the planner has no binding for: a required one in place of the generic ${<field>Var} seed, which is always a string, and an optional one that would otherwise be left out. createCredential: credentialTemplateVersion (int64) and sameConfigForAllTargets (boolean) need typed values, and Hub rejects a string for either with 400 'Request body is not readable'. sameConfigForAllTargets: true requires a shared config. credentialTemplateSchema is required for a credential template Hub cannot look up, which is every template this suite sends (Hub looks up only element templates published to the organization and catalog connector templates). The schema marks no property secret: true, so config.region may be plain text. updateCredential sends the same schema, so a variant that changes credentialTemplateId to a template Hub cannot look up still sends one. The credential's name keeps its seed; the nameVar seed rule (materializer/src/playwright/support/seed-rules.json) produces a value that matches Hub's ^[a-z_][a-z0-9_]*$ pattern.",
+  "operations": {
+    "createCredential": {
+      "credentialTemplateVersion": 1,
+      "credentialTemplateSchema": [{ "id": "region", "label": "Region" }],
+      "sameConfigForAllTargets": true,
+      "config": { "region": "eu-west-1" }
+    },
+    "updateCredential": {
+      "credentialTemplateSchema": [{ "id": "region", "label": "Region" }]
+    }
+  }
+}

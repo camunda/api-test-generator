@@ -141,6 +141,7 @@ jobs:
             --out coverage-report \
             --previous previous/summary.json \
             --previous-history previous/history.csv \
+            --previous-endpoint-issues previous/endpoint-issues.json \
             --spec-ref "${{ steps.hub-sha.outputs.sha }}" \
             --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
             --regression-mention '<!subteam^S014VK4482H|hub-medic>'
@@ -196,6 +197,12 @@ jobs:
           REPORT_DIR: coverage-report
           REPO_URL: ${{ github.server_url }}/${{ github.repository }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          # Previous week's reported-vs-closed rows (from the downloaded previous artifact), so this run
+          # appends to them and the page can chart engagement over weeks. Absent on the first run.
+          PREV_PROGRESS_HISTORY: previous/progress-history.csv
+          # Previous run's endpoint→issue map, so "closed this week" counts every endpoint that had an issue
+          # last run and no longer has a gap — even one an owner or an intervening run already closed.
+          PREV_ENDPOINT_ISSUES: previous/endpoint-issues.json
         run: bash .github/scripts/hub-coverage-endpoint-issues.sh
 
       # Same gate as Slack: a dry run or a test trigger never touches issues. An existing open
@@ -210,6 +217,25 @@ jobs:
           REPO_URL: ${{ github.server_url }}/${{ github.repository }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: bash .github/scripts/hub-coverage-summary-issue.sh
+
+      # Re-render slack.txt now that this run's issues are reconciled, so the weekly message's Wins section
+      # can name the gaps closed this week. The audit wrote slack.txt before reconciliation (no closed line);
+      # this reuses the already-written summary.json and adds --gaps-progress. Same gate as the issue steps —
+      # a dry run keeps the audit's base message. The Build-Slack-message step below reads the result.
+      - name: Re-render the Slack message with the closed-gaps win
+        if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && !inputs.dry_run)
+        run: |
+          python3 scripts/e2e/hub_response_coverage.py \
+            --render-slack \
+            --out coverage-report \
+            --previous previous/summary.json \
+            --previous-history previous/history.csv \
+            --previous-endpoint-issues previous/endpoint-issues.json \
+            --spec-ref "${{ steps.hub-sha.outputs.sha }}" \
+            --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+            --regression-mention '<!subteam^S014VK4482H|hub-medic>' \
+            --gaps-progress coverage-report/gaps-progress.json \
+            --endpoint-ages coverage-report/endpoint-ages.json
 
       - name: Render report page
         run: python3 scripts/e2e/hub_coverage_page.py --report coverage-report
@@ -226,6 +252,29 @@ jobs:
         with:
           name: hub-coverage-report
           path: coverage-report/
+          retention-days: 90
+
+      # Also publish the rendered page on its own, named with the report date, so people do not have to
+      # download the 40-file bundle and hunt for page.html — the dated artifact is the one-click report.
+      # The date comes from history.csv's newest row (the row this run just appended), so it matches the
+      # date shown in the page header; today's UTC date is the fallback on a run with no history.
+      - name: Name the report page by its date
+        id: page-date
+        run: |
+          d=$(tail -n1 coverage-report/history.csv 2>/dev/null | cut -d, -f1)
+          case "$d" in [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]) ;; *) d=$(date -u +%F) ;; esac
+          echo "ymd=$d" >> "$GITHUB_OUTPUT"
+          # Give the file itself the dated name too, so unzipping the artifact yields
+          # hub-coverage-page-<date>.html rather than a generic page.html that collides when several
+          # weeks are saved in one folder. A copy (not a move) keeps page.html for the Slack-thread
+          # upload below; this runs after the full-bundle upload, so the bundle is unaffected.
+          cp coverage-report/page.html "coverage-report/hub-coverage-page-$d.html"
+
+      - name: Upload the report page on its own
+        uses: actions/upload-artifact@v7
+        with:
+          name: hub-coverage-page-${{ steps.page-date.outputs.ymd }}
+          path: coverage-report/hub-coverage-page-${{ steps.page-date.outputs.ymd }}.html
           retention-days: 90
 
       - name: Write job summary
@@ -316,6 +365,20 @@ jobs:
               "mrkdwn": true
             }
 
+      # Upload the rendered report page to the channel (a top-level file right after the weekly message, NOT a
+      # thread reply), so the message's ":bar_chart: Full coverage report — open the attached page" line points
+      # straight at it and people open the full report without downloading a CI artifact. Gated on the message
+      # having posted (ts present). Best-effort: the script logs a warning and still exits 0 on any Slack-side
+      # problem (needs the files:write scope), so it never fails the run. (No THREAD_TS — channel-level post.)
+      - name: Upload the report page to the Slack channel
+        id: slack-page
+        if: always() && steps.slack-notify.outputs.ts != '' && steps.slack.outputs.SLACK_BOT_TOKEN != ''
+        continue-on-error: true
+        env:
+          SLACK_BOT_TOKEN: ${{ steps.slack.outputs.SLACK_BOT_TOKEN }}
+          CHANNEL: ${{ steps.slack-notify.outputs.channel_id || steps.slack-notify.outputs.channel }}
+        run: bash .github/scripts/hub-coverage-upload-page.sh coverage-report/page.html
+
       # The coverage-fix agent's run reports in this message's thread. It starts later and elsewhere, so the message
       # id is kept with this run as a small artifact of its own. If it cannot be saved the run fails, like any silent Slack failure here, because the coverage-fix report could then not reply in the thread.
       - name: Save the Slack message id
@@ -343,4 +406,4 @@ jobs:
         if: always()
         uses: ./.github/actions/fail-if-slack-failed
         with:
-          outcomes: "${{ (steps.slack.outcome == 'success' && steps.slack.outputs.SLACK_BOT_TOKEN == '') && 'failure' || steps.slack.outcome }} ${{ steps.message.outcome }} ${{ steps.slack-notify.outcome }} ${{ steps.slack-agent-prs.outcome }} ${{ steps.slack-ts.outcome }} ${{ steps.slack-ts-upload.outcome }}"
+          outcomes: "${{ (steps.slack.outcome == 'success' && steps.slack.outputs.SLACK_BOT_TOKEN == '') && 'failure' || steps.slack.outcome }} ${{ steps.message.outcome }} ${{ steps.slack-notify.outcome }} ${{ steps.slack-agent-prs.outcome }} ${{ steps.slack-page.outcome }} ${{ steps.slack-ts.outcome }} ${{ steps.slack-ts-upload.outcome }}"

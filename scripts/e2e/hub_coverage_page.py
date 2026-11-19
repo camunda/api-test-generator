@@ -9,12 +9,11 @@ Claude page by hand.
   hub_coverage_page.py --report DIR [--out FILE]
 """
 import argparse
+import csv
 import html
 import json
 import os
 
-ISSUES = 'https://github.com/camunda/api-test-generator/issues/'
-EPIC = 618
 BUCKETS = (
     ('2xx', 'Success path'), ('400', 'Validation'), ('401', 'Authentication'),
     ('404', 'Resource not found'), ('403', 'Forbidden'), ('409', 'Conflict'),
@@ -24,19 +23,19 @@ LABEL = {'ok': 'tested', 'gap': 'in the spec, but no test', 'hold': 'known and t
 CSS = """
 :root {
   --ground:#F4F7F8; --panel:#FFFFFF; --ink:#12232B; --muted:#566872; --rule:#D6DFE3; --wash:#EAF0F2;
-  --ok:#0B7A75; --gap:#B83A2B; --hold:#8A5E00; --gap-wash:#FBEDEA; --focus:#1F5FBF;
+  --ok:#0B7A75; --gap:#B83A2B; --hold:#8A5E00; --gap-wash:#FBEDEA; --hold-wash:#FBF3DF; --focus:#1F5FBF;
   --sans:"Avenir Next","Segoe UI",system-ui,-apple-system,"Helvetica Neue",sans-serif;
   --mono:ui-monospace,"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     --ground:#0E181D; --panel:#14232A; --ink:#E3ECEF; --muted:#8FA3AC; --rule:#26383F; --wash:#1A2D35;
-    --ok:#46C2B8; --gap:#F0806F; --hold:#E0B04A; --gap-wash:#2A1D1C; --focus:#7AA8F0;
+    --ok:#46C2B8; --gap:#F0806F; --hold:#E0B04A; --gap-wash:#2A1D1C; --hold-wash:#2A2512; --focus:#7AA8F0;
   }
 }
 :root[data-theme="dark"] {
   --ground:#0E181D; --panel:#14232A; --ink:#E3ECEF; --muted:#8FA3AC; --rule:#26383F; --wash:#1A2D35;
-  --ok:#46C2B8; --gap:#F0806F; --hold:#E0B04A; --gap-wash:#2A1D1C; --focus:#7AA8F0;
+  --ok:#46C2B8; --gap:#F0806F; --hold:#E0B04A; --gap-wash:#2A1D1C; --hold-wash:#2A2512; --focus:#7AA8F0;
 }
 * { box-sizing:border-box; }
 body { margin:0; background:var(--ground); color:var(--ink); font:16px/1.55 var(--sans); }
@@ -48,6 +47,7 @@ h3 { margin:0; font-size:1.02rem; letter-spacing:-.005em; }
 .lede { margin:20px 0 0; max-width:62ch; font-size:1.12rem; color:var(--ink); }
 .lede b { font-weight:650; }
 .meta { margin:14px 0 0; color:var(--muted); font:.8rem var(--mono); display:flex; flex-wrap:wrap; gap:6px 18px; }
+.meta .asof { color:var(--ink); font-weight:650; }
 
 .bars { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:2px; background:var(--panel); border:1px solid var(--rule); }
 .bar { display:grid; grid-template-columns:56px minmax(180px,1.2fr) minmax(120px,2fr) 84px; align-items:center; gap:18px; padding:14px 20px; }
@@ -63,12 +63,30 @@ h3 { margin:0; font-size:1.02rem; letter-spacing:-.005em; }
 .bnum b { color:var(--ink); font-size:1.05rem; }
 @media (max-width:720px) { .bar { grid-template-columns:44px 1fr 70px; } .track { grid-column:1 / -1; order:5; } }
 
-.findings { display:grid; grid-template-columns:repeat(auto-fit,minmax(340px,1fr)); gap:18px; }
-.finding { background:var(--panel); border:1px solid var(--rule); padding:20px 22px; display:flex; flex-direction:column; gap:10px; }
-.finding header { display:flex; justify-content:space-between; align-items:baseline; gap:12px; }
+.findings { display:grid; grid-template-columns:repeat(auto-fit,minmax(320px,1fr)); gap:18px; }
+.finding { background:var(--panel); border:1px solid var(--rule); border-radius:3px; padding:20px 22px; display:flex; flex-direction:column; gap:10px; }
 .finding p { margin:0; color:var(--ink); font-size:.94rem; max-width:62ch; }
 .finding code { background:var(--wash); padding:1px 5px; }
-.tag { font:.7rem var(--mono); letter-spacing:.05em; text-transform:uppercase; color:var(--muted); white-space:nowrap; border:1px solid var(--rule); padding:2px 7px; }
+.finding .age { color:var(--muted); font-size:.85em; white-space:nowrap; }
+.finding.alert { border:1px solid var(--gap); border-left:5px solid var(--gap); background:var(--gap-wash); }
+.finding.alert h3 { color:var(--gap); }
+.finding.alert h3::before { content:"\\26A0  "; }
+.finding.warn { border:1px solid var(--hold); border-left:5px solid var(--hold); background:var(--hold-wash); }
+.finding.warn h3 { color:var(--hold); }
+.finding.warn h3::before { content:"\\25C7  "; }
+.h2link { margin-left:12px; font:400 .72rem var(--mono); text-transform:none; letter-spacing:0; }
+.h2link a { color:var(--focus); }
+.gaps-note { margin:0; color:var(--muted); font-size:.95rem; }
+.plegend { display:flex; gap:20px; font-size:.84rem; color:var(--muted); margin:0 0 8px; }
+.plegend .pk::before { content:''; display:inline-block; width:11px; height:11px; border-radius:2px; margin-right:7px; vertical-align:-1px; }
+.plegend .pk.rep::before { background:var(--hold); } .plegend .pk.clo::before { background:var(--ok); }
+.pchart { width:100%; height:auto; max-width:720px; }
+.pchart .b-rep { fill:var(--hold); } .pchart .b-clo { fill:var(--ok); }
+.pchart .x, .pchart .y { fill:var(--muted); font:400 10px var(--mono); }
+.pchart .x { text-anchor:middle; } .pchart .y { text-anchor:end; }
+.pchart .vlab { fill:var(--ink); font:650 9px var(--mono); text-anchor:middle; }
+.pchart .ax { stroke:var(--rule); stroke-width:1; }
+.vh { position:absolute; width:1px; height:1px; margin:-1px; padding:0; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; border:0; }
 
 .tools { display:flex; flex-wrap:wrap; gap:14px 28px; align-items:center; justify-content:space-between; margin-bottom:14px; }
 .legend { display:flex; flex-wrap:wrap; gap:6px 20px; font-size:.84rem; color:var(--muted); }
@@ -82,22 +100,45 @@ h3 { margin:0; font-size:1.02rem; letter-spacing:-.005em; }
 table { width:100%; border-collapse:collapse; min-width:860px; }
 thead th { position:sticky; top:0; background:var(--panel); z-index:2; font:650 .72rem var(--mono); letter-spacing:.06em; text-transform:uppercase; color:var(--muted); padding:12px 8px; text-align:center; border-bottom:1px solid var(--ink); }
 thead th:first-child { text-align:left; padding-left:20px; }
-tbody th[scope=row] { text-align:left; font-weight:400; padding:9px 12px 9px 20px; }
+tbody th[scope=row] { text-align:left; font-weight:400; padding:13px 12px 13px 20px; }
+tbody tr:hover th[scope=row], tbody tr:hover td.c:not(.gap) { background:var(--wash); }
 .opc { display:flex; flex-wrap:wrap; align-items:baseline; gap:2px 10px; }
 tr { border-top:1px solid var(--rule); }
-.grp td { background:var(--wash); padding:9px 20px; font-size:.82rem; border-top:1px solid var(--rule); }
-.gname { font:650 .88rem var(--mono); margin-right:14px; }
-.gcount { color:var(--muted); }
+.grp td { background:var(--wash); padding:11px 20px; border-top:2px solid var(--ink); }
+.gname { font:700 .92rem var(--mono); color:var(--ink); margin-right:14px; }
+.gcount { color:var(--muted); font-size:.82rem; }
 .m { font:700 .64rem var(--mono); letter-spacing:.04em; color:var(--muted); width:44px; }
-.op { font-weight:600; font-size:.88rem; }
+.op { font-weight:600; font-size:.9rem; }
 .path { font:.74rem var(--mono); color:var(--muted); flex-basis:100%; padding-left:54px; }
 .note { flex-basis:100%; padding-left:54px; font-size:.76rem; color:var(--hold); }
-td.c { text-align:center; width:64px; font:700 1rem var(--mono); }
+td.c { text-align:center; width:64px; font:700 1.1rem var(--mono); padding:13px 8px; }
 td.c.ok { color:var(--ok); } td.c.gap { color:var(--gap); background:var(--gap-wash); } td.c.hold { color:var(--hold); } td.c.na { color:var(--rule); font-weight:400; }
 td.frac span { font:700 .8rem var(--mono); font-variant-numeric:tabular-nums; }
 table.only-gaps tr[data-gap="0"] { display:none; }
+details.matrix > summary { cursor:pointer; list-style:none; display:flex; flex-wrap:wrap; align-items:baseline; gap:6px 14px; padding-bottom:12px; border-bottom:1px solid var(--ink); }
+details.matrix > summary::-webkit-details-marker { display:none; }
+details.matrix > summary::before { content:"\\25B8"; color:var(--muted); font-size:.72rem; margin-right:4px; }
+details.matrix[open] > summary::before { content:"\\25BE"; }
+details.matrix > summary .sumh { font:650 .78rem var(--sans); letter-spacing:.14em; text-transform:uppercase; color:var(--muted); }
+details.matrix > summary:hover .h2link a, details.matrix > summary .h2link { color:var(--focus); }
+details.matrix > .tools { margin-top:22px; }
 .method h2 { margin-bottom:12px; }
 .method ul { margin:0; padding-left:1.1em; display:flex; flex-direction:column; gap:7px; color:var(--muted); font-size:.9rem; max-width:80ch; }
+
+.t-headline { margin:0 0 18px; font-size:1.15rem; color:var(--ink); }
+.t-headline b { font-weight:700; }
+.t-headline .up { color:var(--ok); font-weight:650; }
+.t-headline .down { color:var(--gap); font-weight:650; }
+.t-headline .flat { color:var(--muted); font-weight:650; }
+.activity { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:2px; background:var(--panel); border:1px solid var(--rule); border-radius:3px; }
+.activity li { padding:16px 20px; font-size:1.02rem; border-left:5px solid var(--rule); }
+.activity li + li { border-top:1px solid var(--rule); }
+.activity li b { font-size:1.15rem; }
+.activity code { background:var(--wash); padding:1px 5px; }
+.activity .a-new { border-left-color:var(--focus); }
+.activity .a-closed { border-left-color:var(--ok); }
+.activity .a-stalled { border-left-color:var(--gap); }
+.activity .a-stalled b { color:var(--gap); }
 """
 
 
@@ -105,12 +146,49 @@ def esc(x):
     return html.escape(str(x))
 
 
-def issue(*nums):
-    return ', '.join(f'<a href="{ISSUES}{n}" rel="noopener">#{n}</a>' for n in nums)
+def tracking_ref(s):
+    """Link to the live rolling tracking issue the weekly report maintains — open while any gap
+    exists, closed when none do. main() reads its URL from the report dir's issue-url.txt (written
+    by the workflow's summary-issue step, the same file the Slack link uses) into
+    summary['trackingUrl']. Empty on a local or dry run, where there is no issue to point at. Never
+    a hardcoded number: the old per-category epic issues were a one-time backlog that has since been
+    closed, so linking them pointed every gap card at a dead ticket."""
+    url = s.get('trackingUrl')
+    if not url:
+        return ''
+    num = url.rstrip('/').rsplit('/', 1)[-1]
+    label = f'#{num}' if num.isdigit() else 'tracking issue'
+    return f'<a href="{esc(url)}" rel="noopener">{label}</a>'
 
 
 def names(ops, limit=6):
     shown = ', '.join(f'<code>{esc(o)}</code>' for o in ops[:limit])
+    return shown + (f' and {len(ops) - limit} more' if len(ops) > limit else '')
+
+
+def age_text(days):
+    """'open 6 weeks' / 'open 3 days' / 'new this week' from a day count, or '' when the age is unknown.
+    The manager question is how long a gap has sat unaddressed, so weeks are the unit once it is a week
+    old. `days` is how long the endpoint's tracking issue has been open (0 for one opened this run)."""
+    if days is None:
+        return ''
+    days = int(days)
+    if days >= 14:
+        return f'open {days // 7} weeks'
+    if days >= 7:
+        return 'open 1 week'
+    if days > 0:
+        return f'open {days} day' + ('s' if days != 1 else '')
+    return 'new this week'
+
+
+def names_aged(ops, ages, limit=6):
+    """Like names(), but annotates each endpoint with how long its gap has been open (from `ages`, an
+    operationId -> days-open map), so a stale gap is obvious next to a fresh one."""
+    def one(o):
+        lab = age_text(ages.get(o))
+        return f'<code>{esc(o)}</code>' + (f' <span class="age">({lab})</span>' if lab else '')
+    shown = ', '.join(one(o) for o in ops[:limit])
     return shown + (f' and {len(ops) - limit} more' if len(ops) > limit else '')
 
 
@@ -119,19 +197,19 @@ def cell(kind, tip):
 
 
 def bar_note(b, s):
+    """One line under each status-code bar, naming the endpoints that are missing it (not just a count),
+    so the bar is actionable at a glance. Tracked/suppressed endpoints are named separately."""
     miss, held = s['missing'][b], set(s['heldCells'][b])
     tracked = [o for o in miss if o in held]
     open_ = [o for o in miss if o not in held]
     if not miss:
-        return 'Every response the spec lists is tested.'
-    if b in ('404', '403', '409'):
-        return f'{len(miss)} of {s["codes"][b][1]} endpoints that list a {b} have no test for it.'
+        return 'Every endpoint that can return this is tested.'
     parts = []
     if open_:
-        parts.append('Untested: ' + names(open_, 3) + '.')
+        parts.append('Untested: ' + names(open_))
     if tracked:
-        parts.append('Suppressed or excluded: ' + names(tracked, 3) + '.')
-    return ' '.join(parts)
+        parts.append('Suppressed or excluded: ' + names(tracked))
+    return ' · '.join(parts)
 
 
 def bar(b, label, got, doc, note):
@@ -142,40 +220,163 @@ def bar(b, label, got, doc, note):
             f'<span class="bnum"><b>{got}</b> / {doc}</span></li>')
 
 
-def findings(s):
+def findings(s, ages=None):
+    ages = ages or {}
     m, out = s['missing'], []
     if m['404']:
-        out.append(('Not found (404)', issue(619),
+        out.append(('Not found (404)',
                     f'Of the {s["codes"]["404"][1]} "not found" responses the spec lists, {len(m["404"])} have no test. Test generation '
                     f'only covers "not found" for GET requests. Untested: {names(m["404"])}.'))
     if m['409']:
-        out.append(('Conflict (409)', issue(620, 621),
+        out.append(('Conflict (409)',
                     f'{len(m["409"])} of {s["codes"]["409"][1]} endpoints that list a 409 (conflict) response have no test for it: {names(m["409"])}.'))
     if m['403']:
-        out.append(('Forbidden (403) on writes', issue(622),
+        out.append(('Forbidden (403) on writes',
                     f'A 403 is tested for {s["codes"]["403"][0]} of {s["codes"]["403"][1]} endpoints that list one. '
                     f'Hub checks 400, then 404, then 403, so a forbidden write test needs a real resource and a valid body.'))
     open400 = [o for o in m['400'] if o not in set(s['heldCells']['400'])]
     if open400:
-        out.append(('Bad request (400) with no test', issue(627),
+        out.append(('Bad request (400) with no test',
                     f'{names(open400)} list a 400 response that no test triggers.'))
     o_sent, o_total = s['optionalFields']
     if o_sent < o_total:
         fields = [f'{op}.{f}' for op, fs in sorted(s['optionalMissing'].items()) for f in fs]
-        out.append(('Optional request fields', issue(623, 624, 625),
+        out.append(('Optional request fields',
                     f'Success-path tests send {o_sent} of {o_total} optional body fields. Never sent: {names(fields, 8)}.'))
     if s['shapeUnvalidated']:
-        out.append(('Success response not checked', issue(626),
+        out.append(('Success response not checked',
                     f'{len(s["shapeUnvalidated"])} endpoints check the success status but never check the response body against '
                     f'its schema: {names(s["shapeUnvalidated"])}.'))
+    # The single live tracking issue is linked once on the section heading (see render), not on every
+    # card — one link, not the same number repeated down the page. The "no test at all" card is the most
+    # serious gap, so it carries an alert style instead of blending in with the rest.
+    cards = ''.join(f'<article class="finding"><h3>{esc(t)}</h3><p>{txt}</p></article>'
+                    for t, txt in out)
+    # No test at all, split by severity: an untracked gap is unexplained (red); a known/tracked gap is
+    # expected and parked (amber). Colour carries the distinction so the serious one is obvious.
     if s['zeroTestOperations']:
-        out.append(('Endpoints with no test at all', issue(EPIC),
-                    f'{names([o + (" (known, tracked)" if o in set(s["trackedOperations"]) else "") for o in s["zeroTestOperations"]])}.'))
-    return ''.join(f'<article class="finding"><header><h3>{esc(t)}</h3><span class="tag">{ref}</span></header><p>{txt}</p></article>'
-                   for t, ref, txt in out)
+        # "Tracked" = the gap has an issue tracking it: a per-endpoint coverage issue (the endpoint has an
+        # age, so it has an open issue this run) or a known/suppressed issue (trackedOperations). Only an
+        # endpoint with no issue at all is untracked (red) — otherwise the red "nothing tracks the gap"
+        # would contradict the "open N weeks" age, which comes from that very issue.
+        has_issue = set(s['trackedOperations']) | set(ages)
+        untracked = [o for o in s['zeroTestOperations'] if o not in has_issue]
+        tracked = [o for o in s['zeroTestOperations'] if o in has_issue]
+        if untracked:
+            cards += ('<article class="finding alert"><h3>No test at all, and no tracking issue</h3>'
+                      f'<p>Nothing tests these endpoints and no issue tracks the gap: {names_aged(untracked, ages)}.</p></article>')
+        if tracked:
+            cards += ('<article class="finding warn"><h3>No test at all, but tracked by an issue</h3>'
+                      f'<p>No test yet; the gap has a tracking issue: {names_aged(tracked, ages)}.</p></article>')
+    return cards
 
 
-def render(s, rows):
+STALLED_WEEKS = 4  # a gap open this many weeks or longer is "stalled" — nobody is acting on it
+
+
+def trend_pct(history):
+    """The % of endpoints tested for every status code, per report, skipping a row that never recorded
+    the columns (an older header). Used for the one-line trajectory."""
+    out = []
+    for r in history:
+        fa, ops = r.get('fullyAsserted'), r.get('operations')
+        if fa not in (None, '') and ops not in (None, '') and int(ops):
+            out.append(100 * int(fa) / int(ops))
+    return out
+
+
+def trend_section(history, progress=None, ages=None):
+    """The weekly movement, as three plain lines a manager can read at a glance rather than a chart:
+    new gaps reported this week, gaps closed this week, and gaps that have stalled (open for weeks). Plus
+    a one-line trajectory of the headline % once there are two reports. `progress` is the workflow's
+    gaps-progress.json (newThisWeek, closedThisWeek); `ages` is endpoint-ages.json (operationId -> days
+    open), from which stalled gaps are derived. '' when there is nothing to show (a first local run)."""
+    progress = progress or {}
+    ages = ages or {}
+    pct = trend_pct(history)
+    headline = ''
+    if len(pct) >= 2:
+        d = round(pct[-1] - pct[0])
+        move = (f'<span class="up">&#9650; up {d} pts</span>' if d > 0 else
+                f'<span class="down">&#9660; down {abs(d)} pts</span>' if d < 0 else
+                '<span class="flat">level</span>')
+        headline = (f'<p class="t-headline"><b>{pct[-1]:.0f}%</b> of endpoints are tested for every status '
+                    f'code — {move} over the last {len(pct)} reports.</p>')
+
+    items = []
+    if progress:
+        new = progress.get('newThisWeek') or []
+        closed_ops = progress.get('closedOps') or []
+        closed = progress.get('closedThisWeek', len(closed_ops))
+        items.append(('new', f'<b>{len(new)}</b> new coverage gap' + ('' if len(new) == 1 else 's')
+                      + ' reported this week' + (f': {names(new)}' if new else '')))
+        items.append(('closed', f'<b>{int(closed)}</b> coverage gap' + ('' if closed == 1 else 's')
+                      + ' closed this week' + (f': {names(closed_ops)}' if closed_ops else '')))
+    if ages:
+        stalled = sorted(o for o, dys in ages.items() if int(dys) >= STALLED_WEEKS * 7)
+        items.append(('stalled', f'<b>{len(stalled)}</b> stalled — open {STALLED_WEEKS}+ weeks'
+                      + (f': {names(stalled)}' if stalled else '')))
+    if not headline and not items:
+        return ''
+    lis = ''.join(f'<li class="a-{cls}">{txt}</li>' for cls, txt in items)
+    activity = f'<ul class="activity">{lis}</ul>' if items else ''
+    return ('<section aria-labelledby="trend"><h2 id="trend">This week\'s movement</h2>'
+            f'{headline}{activity}</section>')
+
+
+def progress_chart(rows):
+    """A grouped-bar chart of gaps reported vs. closed per week, so a QA manager can see whether the teams
+    act on what the generator reports: if the green (closed) bars keep pace with the amber (reported) bars
+    the findings are being worked; a widening gap means they pile up. `rows` are the progress-history.csv
+    rows ({date, reported, closed}); '' with fewer than two weeks (nothing to trend yet). A row missing a
+    column is skipped rather than guessed."""
+    pts = []
+    for r in rows:
+        d, rep, clo = r.get('date'), r.get('reported'), r.get('closed')
+        if d and rep not in (None, '') and clo not in (None, ''):
+            pts.append((d, int(rep), int(clo)))
+    if len(pts) < 2:
+        return ''
+    pts = pts[-12:]  # last 12 weeks keeps the bars legible
+    top = max((max(rep, clo) for _, rep, clo in pts), default=0) or 1
+    w, h, pad_l, pad_r, pad_t, pad_b = 720, 240, 34, 12, 18, 38
+    plot_w, plot_h = w - pad_l - pad_r, h - pad_t - pad_b
+    group_w = plot_w / len(pts)
+    bar_w = min(18.0, group_w / 2 - 3)
+    y0 = pad_t + plot_h
+
+    def y(v):
+        return pad_t + plot_h * (1 - v / top)
+
+    parts = [f'<line class="ax" x1="{pad_l}" y1="{y0:.1f}" x2="{w - pad_r}" y2="{y0:.1f}"/>',
+             f'<text class="y" x="{pad_l - 6}" y="{y0 + 3:.1f}">0</text>',
+             f'<text class="y" x="{pad_l - 6}" y="{pad_t + 3:.1f}">{top}</text>']
+    for i, (d, rep, clo) in enumerate(pts):
+        cx = pad_l + group_w * (i + 0.5)
+        for val, cls, bx in ((rep, 'b-rep', cx - bar_w - 1), (clo, 'b-clo', cx + 1)):
+            if val > 0:
+                parts.append(f'<rect class="{cls}" x="{bx:.1f}" y="{y(val):.1f}" width="{bar_w:.1f}" '
+                             f'height="{y0 - y(val):.1f}"><title>{esc(d)}: {val} {cls[2:]}</title></rect>')
+                parts.append(f'<text class="vlab" x="{bx + bar_w / 2:.1f}" y="{y(val) - 3:.1f}">{val}</text>')
+        md = d[5:] if len(d) >= 10 else esc(d)
+        parts.append(f'<text class="x" x="{cx:.1f}" y="{y0 + 14:.1f}">{esc(md)}</text>')
+    # The SVG is decorative for assistive tech (aria-hidden); the data lives in a visually-hidden table
+    # below it, so a screen reader reads every week's reported/closed values, which a role="img" label
+    # cannot convey. Sighted users get the bars (and the per-bar hover titles).
+    svg = (f'<svg viewBox="0 0 {w} {h}" aria-hidden="true" preserveAspectRatio="xMidYMid meet" '
+           f'class="pchart">' + ''.join(parts) + '</svg>')
+    legend = ('<p class="plegend"><span class="pk rep">Reported</span>'
+              '<span class="pk clo">Closed</span></p>')
+    trows = ''.join(f'<tr><th scope="row">{esc(d)}</th><td>{rep}</td><td>{clo}</td></tr>'
+                    for d, rep, clo in pts)
+    table = ('<table class="vh"><caption>Coverage gaps reported vs. closed, by week</caption>'
+             '<thead><tr><th scope="col">Week</th><th scope="col">Reported</th>'
+             f'<th scope="col">Closed</th></tr></thead><tbody>{trows}</tbody></table>')
+    return ('<section aria-labelledby="progress"><h2 id="progress">Gaps reported vs. closed, by week</h2>'
+            f'{legend}{svg}{table}</section>')
+
+
+def render(s, rows, history=(), ages=None, progress=None, progress_history=()):
     groups = {}
     for r in rows:
         groups.setdefault(r['path'].strip('/').split('/')[0], []).append(r)
@@ -203,25 +404,50 @@ def render(s, rows):
     bars = ''.join(bar(b, label, c[b][0], c[b][1], bar_note(b, s)) for b, label in BUCKETS)
     ref = (s.get('specRef') or '')[:7] or s['specHash'].replace('sha256:', '')[:7]
     verdict = 'Every response the spec lists is tested for every endpoint (2xx/400/401/403/404/409; a documented 500 is not checked).' if s['fullyAsserted'] == s['operations'] else 'Not full.'
-    fnd = findings(s)
-    findings_html = f'<section aria-labelledby="gaps"><h2 id="gaps">Where the gaps are</h2><div class="findings">{fnd}</div></section>' if fnd else ''
+    fnd = findings(s, ages)
+    t_ref = tracking_ref(s)
+    # One tracking-issue link for the whole section, on the heading — not the same number on every card.
+    gap_link = f'<span class="h2link">tracked in {t_ref}</span>' if t_ref else ''
+    if fnd:
+        inner = f'<div class="findings">{fnd}</div>'
+    elif t_ref:
+        # An open tracking issue but no cards: findings() renders cards for response-code gaps (404/409/403/
+        # 400), optional fields, response shape and no-test endpoints — not for a missing success (2xx) or
+        # auth (401) test, nor for the per-kind bad-request checks. Any of those can remain here, so keep the
+        # link with neutral wording rather than naming one kind.
+        inner = '<p class="gaps-note">The remaining gaps are listed in the tracking issue.</p>'
+    else:
+        inner = ''
+    # The section is a landmark named by aria-labelledby, so point it at the heading words alone — the
+    # tracking link stays visually inline in the <h2> but out of the region's accessible name, which would
+    # otherwise read "Where the gaps are tracked in #NNN" to a screen reader navigating by region.
+    findings_html = (f'<section aria-labelledby="gaps"><h2><span id="gaps">Where the gaps are</span>'
+                     f'{gap_link}</h2>{inner}</section>') if (fnd or t_ref) else ''
+    # The date of this report run, from the latest history.csv row the workflow just appended; shown in the
+    # header so a saved or shared page says when it was generated. Empty on a local run with no history.
+    report_date = history[-1].get('date', '') if history else ''
+    date_span = f'<span class="asof">as of {esc(report_date)}</span>' if report_date else ''
     return f"""<title>Hub Endpoint Coverage</title>
 <style>{CSS}</style>
 <main>
   <header>
     <h1>Hub endpoint coverage</h1>
     <p class="lede"><b>{verdict}</b> {c['2xx'][0]} of {c['2xx'][1]} endpoints have a success test, but only {s['fullyAsserted']} of {s['operations']} have a test for every response the spec lists (2xx/400/401/403/404/409; a documented 500 is not checked). {s['opsMissingResponseTest']} endpoints are missing a test for a success, 400, 401, 404 or 409 response, and {len(s['missing']['403'])} have an untested 403.</p>
-    <p class="meta"><span>camunda-hub@{esc(ref)}</span><span>{s['operations']} endpoints</span><span>{s['negativeTests']} negative tests</span><span>secured + rbac profiles</span><span>tracked in <a href="{ISSUES}{EPIC}" rel="noopener">#{EPIC}</a></span></p>
+    <p class="meta">{date_span}<span>camunda-hub@{esc(ref)}</span><span>{s['operations']} endpoints</span><span>{s['negativeTests']} negative tests</span><span>secured + rbac profiles</span></p>
   </header>
+  {trend_section(history, progress, ages)}
+  {progress_chart(progress_history)}
   <section aria-labelledby="codes"><h2 id="codes">Responses tested, out of those the spec lists</h2><ol class="bars">{bars}</ol></section>
   {findings_html}
   <section aria-labelledby="matrix">
-    <h2 id="matrix">Every endpoint</h2>
-    <div class="tools">
-      <div class="legend"><span><i class="k ok">●</i> tested</span><span><i class="k gap">×</i> in the spec, but no test</span><span><i class="k hold">◇</i> known and tracked elsewhere</span><span><i class="k na">n/a</i> the spec does not list it for this endpoint</span></div>
-      <label class="toggle"><input type="checkbox" id="onlygaps"> Only endpoints missing a response test (ignoring 403)</label>
-    </div>
-    <div class="scroll"><table id="mx"><thead><tr><th>Operation</th><th title="Success-path test">Success</th><th title="A test checks the success response against its schema">Response checked</th><th title="Optional request fields a success test sends">Optional fields</th><th title="Bad request">400</th><th title="Not authenticated">401</th><th title="Forbidden">403</th><th title="Not found">404</th><th title="Conflict">409</th></tr></thead>{''.join(body)}</table></div>
+    <details class="matrix">
+      <summary><span class="sumh" id="matrix">Every endpoint</span><span class="h2link">show all {s['operations']} endpoints and their per-code status</span></summary>
+      <div class="tools">
+        <div class="legend"><span><i class="k ok">●</i> tested</span><span><i class="k gap">×</i> in the spec, but no test</span><span><i class="k hold">◇</i> known and tracked elsewhere</span><span><i class="k na">n/a</i> the spec does not list it for this endpoint</span></div>
+        <label class="toggle"><input type="checkbox" id="onlygaps"> Only endpoints missing a response test (ignoring 403)</label>
+      </div>
+      <div class="scroll"><table id="mx"><thead><tr><th>Operation</th><th title="Success-path test">Success</th><th title="A test checks the success response against its schema">Response checked</th><th title="Optional request fields a success test sends">Optional fields</th><th title="Bad request">400</th><th title="Not authenticated">401</th><th title="Forbidden">403</th><th title="Not found">404</th><th title="Conflict">409</th></tr></thead>{''.join(body)}</table></div>
+    </details>
   </section>
   <section class="method" aria-labelledby="how">
     <h2 id="how">How this was measured</h2>
@@ -258,8 +484,40 @@ def main():
     a = ap.parse_args()
     s = json.load(open(os.path.join(a.report, 'summary.json')))
     rows = json.load(open(os.path.join(a.report, 'rows.json')))
+    hist_path = os.path.join(a.report, 'history.csv')
+    history = []
+    if os.path.exists(hist_path):
+        with open(hist_path, newline='') as f:
+            history = list(csv.DictReader(f))
+    # The live rolling tracking issue, written by the workflow's summary-issue step into the same
+    # report dir and used for the Slack link too, so the page and Slack point at the same issue.
+    # Absent on a local or dry run (no issue), where the gap cards carry no issue tag.
+    url_path = os.path.join(a.report, 'issue-url.txt')
+    if os.path.exists(url_path):
+        with open(url_path) as f:
+            s['trackingUrl'] = f.read().strip()
+    # How long each endpoint's gap has been open (operationId -> days), written by the workflow's
+    # endpoint-issues step from each tracking issue's creation date. Absent on a local or dry run.
+    ages = {}
+    ages_path = os.path.join(a.report, 'endpoint-ages.json')
+    if os.path.exists(ages_path):
+        with open(ages_path) as f:
+            ages = json.load(f)
+    # This week's movement (new/closed gap counts), written by the workflow's endpoint-issues step.
+    progress = {}
+    prog_path = os.path.join(a.report, 'gaps-progress.json')
+    if os.path.exists(prog_path):
+        with open(prog_path) as f:
+            progress = json.load(f)
+    # Weekly reported-vs-closed rows (previous weeks + this run), written by the workflow's endpoint-issues
+    # step, for the engagement chart. Absent on a local or dry run.
+    progress_history = []
+    ph_path = os.path.join(a.report, 'progress-history.csv')
+    if os.path.exists(ph_path):
+        with open(ph_path, newline='') as f:
+            progress_history = list(csv.DictReader(f))
     out = a.out or os.path.join(a.report, 'page.html')
-    page = render(s, rows)
+    page = render(s, rows, history, ages, progress, progress_history)
     open(out, 'w', encoding='utf-8').write(page if a.fragment else as_document(page))
     print(f'wrote {out}')
 

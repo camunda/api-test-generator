@@ -11,3 +11,7 @@ test-results/
 # (RUNTIME_KEY_CLEANUP_STATE_FILE) — a generated-suite runtime artifact, never
 # meant to land in the template source tree itself.
 runtime-key-fixtures-cleanup.json
+
+# Python bytecode caches (scripts/e2e/*.py are run directly in CI and tests)
+__pycache__/
+*.pyc

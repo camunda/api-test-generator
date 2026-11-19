@@ -1,4 +1,4 @@
-import { bindSemanticInput } from './bindSemanticInput.js';
+import { bindSemanticInput, classifySemantic } from './bindSemanticInput.js';
 import { deterministicSuffix } from './deterministicSuffix.js';
 import { buildBpmnModelSpec, buildModelSpec, findModelSpec } from './modelSpecBuilders.js';
 import { getModelKindForSemantic } from './ontology/artifactModelKinds.js';
@@ -2210,7 +2210,11 @@ export function generateOptionalSubShapeVariants(
       const endpointIsSoleProducer =
         externalCandidates.length === 0 &&
         (authoritative.includes(endpointOpId) || inclusive.includes(endpointOpId));
-      const producerCandidates = endpointIsSoleProducer ? [endpointOpId] : externalCandidates;
+      const endpointIsAuthoritativeProducer = authoritative.includes(endpointOpId);
+      const producerCandidates =
+        endpointIsSoleProducer || endpointIsAuthoritativeProducer
+          ? [endpointOpId]
+          : externalCandidates;
 
       // #162 PR 4 (suite-partition cut): Try to build a producer-chain
       // variant first (the canonical "warm-up + search + final" pattern
@@ -2222,16 +2226,35 @@ export function generateOptionalSubShapeVariants(
       // a bare endpoint scenario plus the populatesSubShape annotation
       // so the materializer still fills the body and the variant suite
       // covers the leaf.
-      const producerChain = producerCandidates.length
-        ? tryProducerChainVariant({
-            graph,
-            endpoint,
-            endpointOpId,
-            opts,
-            leaf,
-            producerCandidates,
-          })
-        : undefined;
+      //
+      // A `clientMintedAttribute` leaf must be MINTED, never sourced from a
+      // producer chain. Such a semantic has no authoritative producer BY
+      // DECLARATION (`kind: 'attribute'` + `clientMinted: true`), so
+      // `producersByType` is empty and `producerCandidates` above falls back
+      // to the INCLUSIVE index — which also lists non-authoritative
+      // `provider: false` response echoes. For `Tag` that index is non-empty
+      // (`createProcessInstance.tags[]`, `searchProcessInstances.items[].tags[]`,
+      // `getUserTask.tags[]`, …), so a chain won and extracted from a response
+      // where the producer never SENT a tag: the extract yielded nothing, the
+      // binding stayed `__PENDING__`, and the emitter sent `null` — broker 400
+      // "The provided tag 'null' is not valid". Routing the leaf to the
+      // bare-endpoint fallback below re-uses the `bindSemanticInput`
+      // chokepoint the ontology `$comment` already names as the value's
+      // source. Class-scoped by construction: it covers every
+      // clientMintedAttribute semantic (Tag, BusinessId, HistoryItemId,
+      // LoopIterationId) and any future one, not just `Tag`.
+      const leafIsClientMinted = classifySemantic(leaf.semantic, graph) === 'clientMintedAttribute';
+      const producerChain =
+        producerCandidates.length && !leafIsClientMinted
+          ? tryProducerChainVariant({
+              graph,
+              endpoint,
+              endpointOpId,
+              opts,
+              leaf,
+              producerCandidates,
+            })
+          : undefined;
 
       let scenario: EndpointScenario | undefined;
       if (producerChain) {
@@ -2361,8 +2384,11 @@ function tryProducerChainVariant(args: {
   const { graph, endpoint, endpointOpId, opts, leaf, producerCandidates } = args;
   const buildAdditional = (candidate: OperationNode): Set<string> => {
     const additional = new Set<string>();
-    for (const opt of candidate.requires.optional) {
-      if (endpoint.produces.includes(opt)) additional.add(opt);
+    // A self warm-up call needs none of the endpoint's own optional inputs.
+    if (candidate.operationId !== endpoint.operationId) {
+      for (const opt of candidate.requires.optional) {
+        if (endpoint.produces.includes(opt)) additional.add(opt);
+      }
     }
     for (const req of candidate.requires.required) additional.add(req);
     additional.add(leaf.semantic);
@@ -2392,6 +2418,35 @@ function tryProducerChainVariant(args: {
   const { additional } = chosenProducer;
 
   const chosenId = chosenProducer.node.operationId;
+  // Never hand BFS a need the chosen producer satisfies from its OWN
+  // response. `buildAdditional` collects every optional input of the producer
+  // that the endpoint also produces, which for a paginated search is exactly
+  // the standard `page` envelope's cursors: such an op authoritatively RETURNS
+  // `page.startCursor` / `page.endCursor` (`provider: true`) and optionally
+  // ACCEPTS `page.before` / `page.after`. Passing those on as
+  // `additionalNeeded` asks BFS to schedule an EARLIER producer for a value the
+  // chain already yields one step later. BFS then picks the first cursor
+  // producer in spec-path order — `searchAgentDefinitions`, the
+  // alphabetically-first paginated resource and the one with no create
+  // operation, so its page can never become non-empty and the emitted
+  // `await_eventually` wait for items never resolves (9 of P3's 10 pass→fail
+  // regressions).
+  //
+  // This is scoped to what BFS is asked to satisfy, NOT to producer selection:
+  // `additional` still drives the Pass-1 overlap decision above, so the chosen
+  // producer is unchanged. `leaf.semantic` is exempt because the producer must
+  // be scheduled for the variant leaf even when it already produces it — that
+  // is the load-bearing case (`searchAgentInstances` filtering by
+  // `agentDefinitionKey`, where `searchAgentDefinitions` IS the leaf's real
+  // producer and must stay in the chain).
+  //
+  // Config-agnostic by construction: no semantic name is special-cased. The
+  // rule is "a producer's own authoritative output is not a need", which holds
+  // for any self-produced optional semantic, not just cursors.
+  const selfProduced = new Set(chosenProducer.node.produces);
+  const additionalNeeded = [...additional].filter(
+    (semantic) => semantic === leaf.semantic || !selfProduced.has(semantic),
+  );
   const variantProducersByType: Record<string, string[]> = { ...graph.producersByType };
   variantProducersByType[leaf.semantic] = [chosenId];
   const variantOperations: Record<string, OperationNode> = { ...graph.operations };
@@ -2414,7 +2469,7 @@ function tryProducerChainVariant(args: {
   const planned = generateScenariosForEndpoint(variantGraph, endpointOpId, {
     ...opts,
     allowEndpointAsProducer: true,
-    additionalNeeded: [...additional],
+    additionalNeeded,
     // #292: NOT a budget — see the matching note at the bare-endpoint
     // fallback above. One producer chain per variant leaf is the
     // strategy, not a tunable cap.

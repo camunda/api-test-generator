@@ -1336,6 +1336,23 @@ describe('emitter: initSpecSalt emission (#175)', () => {
     expect(src2).not.toContain('initSpecSalt("createRole");');
   });
 
+  test('a variant file salts differently from the feature file of the same operation (#757)', () => {
+    // Same salt = same seed sequence: both files' create steps would send the same
+    // client-minted name, and a second Hub credential with that name answers 400.
+    const feature = renderPlaywrightSuite(COLLECTION, {
+      suiteName: 'updateCredential',
+      mode: 'feature',
+      recordResponses: false,
+    });
+    const variant = renderPlaywrightSuite(COLLECTION, {
+      suiteName: 'updateCredential',
+      mode: 'variant',
+      recordResponses: false,
+    });
+    expect(feature).toContain('initSpecSalt("updateCredential");');
+    expect(variant).toContain('initSpecSalt("updateCredential.variant");');
+  });
+
   test('initSpecSalt call appears before test.describe', () => {
     const src = renderPlaywrightSuite(COLLECTION, {
       suiteName: 'createWidget',
