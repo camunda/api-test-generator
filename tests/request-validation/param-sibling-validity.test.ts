@@ -294,3 +294,31 @@ describe('param siblings meet every limit of their schema', () => {
     });
   }
 });
+
+describe('a required numeric param no value fits keeps a numeric placeholder', () => {
+  // No integer lies strictly between 1 and 2. The param cannot be left out, so it gets a placeholder,
+  // which must still be a number: 'x' would make the server reject it as not a number first.
+  const o: OperationModel = {
+    operationId: 'getRange',
+    method: 'GET',
+    path: '/range',
+    tags: [],
+    parameters: [
+      param('target', true, { type: 'string', maxLength: 3 }),
+      param('n', true, {
+        type: 'integer',
+        minimum: 1,
+        maximum: 2,
+        exclusiveMinimum: true,
+        exclusiveMaximum: true,
+      }),
+    ],
+  };
+
+  it('sends n as 1, not a letter', () => {
+    const [s] = generateParamConstraintViolations([o], {}).filter(
+      (x) => x.target === 'query.target',
+    );
+    expect(s?.params?.n).toBe('1');
+  });
+});

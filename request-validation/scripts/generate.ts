@@ -467,6 +467,7 @@ async function main() {
         onlyOperations: opts.onlyOperations,
         allSecured: rvConfig.authDenyMode !== 'slice',
         fixtureNames: denyFixtureNames(rvConfig),
+        capabilityGates,
       }),
     );
   }
@@ -478,6 +479,7 @@ async function main() {
       ...generateNotFoundFakeId(model.operations, {
         onlyOperations: opts.onlyOperations,
         declared: rvConfig.notFoundMode === 'declared',
+        capabilityGates,
       }),
     );
   }
@@ -1403,7 +1405,12 @@ async function main() {
       }
       // not-found-fake-id (#381) — reuses the exact eligibility check
       // notFoundFakeId.ts's own generator calls.
-      if (isNotFoundEligible(op, { declared: rvConfig.notFoundMode === 'declared' })) {
+      if (
+        isNotFoundEligible(op, {
+          declared: rvConfig.notFoundMode === 'declared',
+          capabilityGates,
+        })
+      ) {
         applicable.add('not-found-fake-id');
       }
       // Pagination kinds (#501) — reuse the same shape-detection helpers their
@@ -1493,6 +1500,7 @@ async function main() {
       isAuthDenyEligible(op, {
         allSecured: rvConfig.authDenyMode !== 'slice',
         fixtureNames: denyFixtureNames(rvConfig),
+        capabilityGates,
       })
     ) {
       applicable.add('auth-deny');

@@ -19,6 +19,11 @@ interface Opts {
   onlyOperations?: Set<string>;
   /** `notFoundMode: 'declared'` — trust the contract's 404 for any method and response shape (see config.ts). */
   declared?: boolean;
+  /**
+   * Capability-gated field names (#404): an optional gated field is left out of the body sent, or
+   * the server answers for the gate (400) before the lookup.
+   */
+  capabilityGates?: ReadonlyMap<string, unknown>;
 }
 
 // A syntactically-valid Camunda key (Java long serialized as string) that is
@@ -174,8 +179,11 @@ function satisfiesSchema(schema: SchemaFragment, body: unknown): boolean {
  * Either way the server would answer 400 instead of exercising the 404, so the operation is
  * not eligible, rather than emitted as a test that fails for the wrong reason.
  */
-export function buildableBody(op: OperationModel): Record<string, unknown> | undefined {
-  const body = buildBaselineBody(op);
+export function buildableBody(
+  op: OperationModel,
+  gates?: ReadonlyMap<string, unknown>,
+): Record<string, unknown> | undefined {
+  const body = buildBaselineBody(op, { gates });
   if (typeof body !== 'object' || body === null || Array.isArray(body)) return undefined;
   if (!op.requestBodySchema || !satisfiesSchema(op.requestBodySchema, body)) return undefined;
   return body;
@@ -198,7 +206,10 @@ export function buildableBody(op: OperationModel): Record<string, unknown> | und
  *   - the operation does not require a request body — v1 sends no body, so a
  *     required-body op would 400 on the missing body before the lookup runs.
  */
-export function isNotFoundEligible(op: OperationModel, opts?: { declared?: boolean }): boolean {
+export function isNotFoundEligible(
+  op: OperationModel,
+  opts?: { declared?: boolean; capabilityGates?: ReadonlyMap<string, unknown> },
+): boolean {
   const declared = opts?.declared === true;
   if (!declared && op.method.toUpperCase() !== 'GET') return false;
   if (!op.parameters.some((p) => p.in === 'path')) return false;
@@ -213,7 +224,7 @@ export function isNotFoundEligible(op: OperationModel, opts?: { declared?: boole
     // counted as applicable always gets its scenario.
     if (!declared) return false;
     if (!op.requestBodySchema || isMultipartOnly(op)) return false;
-    if (buildableBody(op) === undefined) return false;
+    if (buildableBody(op, opts?.capabilityGates) === undefined) return false;
   }
   return true;
 }
@@ -222,10 +233,10 @@ export function generateNotFoundFakeId(ops: OperationModel[], opts: Opts): Valid
   const out: ValidationScenario[] = [];
   for (const op of ops) {
     if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId)) continue;
-    if (!isNotFoundEligible(op, { declared: opts.declared })) continue;
+    if (!isNotFoundEligible(op, opts)) continue;
     // A required JSON body must be valid, or the server answers 400 before it looks the
     // resource up (isNotFoundEligible already ruled out operations with no buildable body).
-    const requestBody = op.bodyRequired ? buildableBody(op) : undefined;
+    const requestBody = op.bodyRequired ? buildableBody(op, opts.capabilityGates) : undefined;
     const pathParams = op.parameters.filter((p) => p.in === 'path');
     const params: Record<string, string> = {};
     let allFaked = true;

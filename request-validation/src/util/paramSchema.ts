@@ -187,29 +187,9 @@ function inInterval(v: number, iv: NumericInterval, integer: boolean): boolean {
  */
 export function findValidNumber(r: ResolvedParamSchema, integer: boolean): number | undefined {
   const iv = numericInterval(r);
-  const step = integer ? 1 : 1e-6;
   const raw: number[] = [1];
-  if (iv.lo !== undefined)
-    // For an integer, round toward the inside of the range: `minimum: 1.5` allows 2, not 1.5.
-    raw.push(
-      integer
-        ? iv.loOpen
-          ? Math.floor(iv.lo) + 1
-          : Math.ceil(iv.lo)
-        : iv.loOpen
-          ? iv.lo + step
-          : iv.lo,
-    );
-  if (iv.hi !== undefined)
-    raw.push(
-      integer
-        ? iv.hiOpen
-          ? Math.ceil(iv.hi) - 1
-          : Math.floor(iv.hi)
-        : iv.hiOpen
-          ? iv.hi - step
-          : iv.hi,
-    );
+  if (iv.lo !== undefined) raw.push(inward(iv.lo, iv.loOpen, integer, 1));
+  if (iv.hi !== undefined) raw.push(inward(iv.hi, iv.hiOpen, integer, -1));
   if (iv.lo !== undefined && iv.hi !== undefined) {
     const mid = (iv.lo + iv.hi) / 2;
     raw.push(integer ? Math.round(mid) : mid);
@@ -221,6 +201,17 @@ export function findValidNumber(r: ResolvedParamSchema, integer: boolean): numbe
       candidates.push(Math.ceil(c / m) * m, Math.floor(c / m) * m, Math.ceil(c / m + 1) * m);
   }
   return candidates.find((c) => inInterval(c, iv, integer));
+}
+
+/**
+ * The allowed value closest to `bound` on the inside of the range (`dir` 1 for a lower bound, -1 for
+ * an upper one): the bound itself when inclusive, else one step in. For an integer the step is 1 and
+ * a fractional bound rounds inward too (`minimum: 1.5` gives 2).
+ */
+function inward(bound: number, open: boolean, integer: boolean, dir: 1 | -1): number {
+  if (!integer) return open ? bound + dir * 1e-6 : bound;
+  const nearest = dir === 1 ? Math.ceil(bound) : Math.floor(bound);
+  return open && nearest === bound ? bound + dir : nearest;
 }
 
 /** {@link resolveViolationSchema} for a parameter. */
@@ -307,7 +298,10 @@ function commonToAll(views: Constraints[]): Constraints {
  * sibling params with non-violating placeholders).
  */
 export function buildValidValue(r: ResolvedParamSchema): string {
-  return findValidValue(r) ?? fallbackValue(r);
+  const t = Array.isArray(r.type) ? r.type[0] : r.type;
+  // A number param keeps a number: a letter would be rejected as not a number, before its range.
+  const fallback = t === 'integer' || t === 'number' ? '1' : fallbackValue(r);
+  return findValidValue(r) ?? fallback;
 }
 
 function fallbackValue(r: ResolvedParamSchema): string {

@@ -166,9 +166,14 @@ function why(schema: unknown, value: unknown): string | undefined {
     }
   }
   if (Array.isArray(value)) {
-    if (typeof schema.minItems === 'number' && value.length < schema.minItems) return 'too few items';
-    if (typeof schema.maxItems === 'number' && value.length > schema.maxItems) return 'too many items';
-    if (schema.uniqueItems === true && new Set(value.map((v) => JSON.stringify(v))).size < value.length)
+    if (typeof schema.minItems === 'number' && value.length < schema.minItems)
+      return 'too few items';
+    if (typeof schema.maxItems === 'number' && value.length > schema.maxItems)
+      return 'too many items';
+    if (
+      schema.uniqueItems === true &&
+      new Set(value.map((v) => JSON.stringify(v))).size < value.length
+    )
       return 'duplicate items';
   }
   if (Array.isArray(schema.enum) && schema.enum.length && !schema.enum.includes(value))
@@ -310,10 +315,30 @@ describe('sibling values meet every limit of their schema', () => {
     tags: [],
     parameters: [],
     bodyRequired: true,
-    requiredProps: ['numericKey', 'above1', 'between', 'step5', 'fracMin', 'fracMax', 'pairOfIds', 'shortAllOf', 'twoPatterns'],
+    requiredProps: [
+      'numericKey',
+      'above1',
+      'between',
+      'step5',
+      'fracMin',
+      'fracMax',
+      'pairOfIds',
+      'shortAllOf',
+      'twoPatterns',
+    ],
     requestBodySchema: {
       type: 'object',
-      required: ['numericKey', 'above1', 'between', 'step5', 'fracMin', 'fracMax', 'pairOfIds', 'shortAllOf', 'twoPatterns'],
+      required: [
+        'numericKey',
+        'above1',
+        'between',
+        'step5',
+        'fracMin',
+        'fracMax',
+        'pairOfIds',
+        'shortAllOf',
+        'twoPatterns',
+      ],
       properties: properties,
     },
   };
