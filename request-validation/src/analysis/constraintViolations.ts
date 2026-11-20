@@ -3,6 +3,7 @@ import { buildBaselineBody } from '../schema/baseline.js';
 import { synthesizeValid, validItems } from '../schema/validValue.js';
 import { buildWalk, type WalkNode } from '../schema/walker.js';
 import { type CapabilityGateInfo, isBlankValue } from '../util/capabilityGate.js';
+import { shouldSkipForMultipart } from '../util/multipartSkip.js';
 import { buildGuaranteedPatternMismatch } from '../util/patternMismatch.js';
 import { makeId } from './common.js';
 
@@ -32,6 +33,8 @@ interface Opts {
    * 200 with empty results.
    */
   capabilityGates?: ReadonlyMap<string, CapabilityGateInfo>;
+  /** Keep only scenarios this accepts; `capPerOperation` counts kept ones only. */
+  accept?: (s: ValidationScenario) => boolean;
 }
 
 function isObject(v: unknown): v is Record<string, unknown> {
@@ -115,6 +118,7 @@ export function generateConstraintViolations(
           scenario.expectDetailContains = gate.disabledDetailContains;
           scenario.description = `${target} is rejected because the capability is disabled, not for its ${mut.kind} violation (#404)`;
         }
+        if (opts.accept && !opts.accept(scenario)) continue;
         out.push(scenario);
         produced++;
       }
@@ -134,7 +138,14 @@ export function isConstraintViolationEligible(
   op: OperationModel,
   opts: Pick<Opts, 'capabilityGates'>,
 ): boolean {
-  return generateConstraintViolations([op], { ...opts, capPerOperation: 1 }).length > 0;
+  // generate.ts drops what the multipart skip rejects, so only a scenario that survives it counts.
+  return (
+    generateConstraintViolations([op], {
+      ...opts,
+      capPerOperation: 1,
+      accept: (s) => !shouldSkipForMultipart(s, op),
+    }).length > 0
+  );
 }
 
 function planConstraintMutations(
@@ -230,6 +241,9 @@ function applyAtPath(obj: unknown, root: WalkNode, path: string[], value: unknow
     const last = i === path.length - 1;
     if (Array.isArray(target)) {
       if (seg !== '0' || !node.items) return false;
+      // An array that cannot hold an item would be rejected for its length, not for the target inside it.
+      const maxItems = node.constraints?.maxItems;
+      if (typeof maxItems === 'number' && maxItems < 1) return false;
       if (last) {
         target[0] = value;
         return true;
