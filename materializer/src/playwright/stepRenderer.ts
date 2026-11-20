@@ -101,6 +101,7 @@ export function escapeQuotes(s: string): string {
  * rendering `extractInto(ctx, '<bind>', json<...accessor>)`.
  */
 export function toOptionalAccessor(fieldPath: string): string {
+  if (!fieldPath) return '';
   const parts = fieldPath.split('.');
   return parts
     .map((p) => {

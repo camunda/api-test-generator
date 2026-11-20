@@ -1,7 +1,13 @@
 import { existsSync, promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
+import {
+  JS_SDK_FIXTURES_DIR_NAME,
+  loadJsProjectScaffoldingFiles,
+  materializeSdkFixtures,
+} from '../../materializer/src/js-sdk/materialize-support.ts';
 import {
   FIXTURES_DIR_NAME,
   loadProjectScaffoldingFiles,
@@ -222,6 +228,127 @@ describe('materializeFixtures', () => {
     const candidate = path.resolve(supportDir, '..', 'fixtures', 'bpmn/service-task.bpmn');
     const buf = await fs.readFile(candidate);
     expect(buf.length).toBeGreaterThan(0);
+  });
+});
+
+describe('materializeSdkFixtures', () => {
+  let tmp: string;
+
+  beforeEach(async () => {
+    tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'mat-js-sdk-fixtures-'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmp, { recursive: true, force: true });
+  });
+
+  test('copies fixture files into the JS SDK output directory', async () => {
+    const source = await fs.mkdtemp(path.join(os.tmpdir(), 'mat-js-sdk-source-'));
+    try {
+      await fs.mkdir(path.join(source, 'bpmn'), { recursive: true });
+      await fs.writeFile(path.join(source, 'bpmn', 'service-task.bpmn'), 'fixture-bytes', 'utf8');
+
+      const destination = await materializeSdkFixtures(tmp, source);
+
+      expect(destination).toBe(path.join(tmp, JS_SDK_FIXTURES_DIR_NAME));
+      await expect(
+        fs.readFile(path.join(destination, 'bpmn', 'service-task.bpmn'), 'utf8'),
+      ).resolves.toBe('fixture-bytes');
+    } finally {
+      await fs.rm(source, { recursive: true, force: true });
+    }
+  });
+
+  test('replaces stale fixture files on repeated materialization', async () => {
+    const source = await fs.mkdtemp(path.join(os.tmpdir(), 'mat-js-sdk-source-'));
+    try {
+      await fs.writeFile(path.join(source, 'old.bpmn'), 'old', 'utf8');
+      await materializeSdkFixtures(tmp, source);
+      await fs.rm(path.join(source, 'old.bpmn'));
+      await fs.writeFile(path.join(source, 'new.bpmn'), 'new', 'utf8');
+
+      await materializeSdkFixtures(tmp, source);
+
+      await expect(fs.access(path.join(tmp, 'fixtures', 'old.bpmn'))).rejects.toThrow();
+      await expect(fs.readFile(path.join(tmp, 'fixtures', 'new.bpmn'), 'utf8')).resolves.toBe(
+        'new',
+      );
+    } finally {
+      await fs.rm(source, { recursive: true, force: true });
+    }
+  });
+});
+
+type SdkAwaitEventually = (
+  fetch: () => Promise<unknown>,
+  predicate: (body: unknown) => boolean,
+  options: { operationId: string; waitUpToMs?: number; pollIntervalMs?: number },
+) => Promise<unknown>;
+
+describe('JS SDK support/await-eventually.ts retry policy', () => {
+  let tmp: string;
+  let awaitEventually: SdkAwaitEventually;
+  const options = { operationId: 'getThing', waitUpToMs: 2_000, pollIntervalMs: 10 };
+
+  function sdkError(status: number | undefined, name = 'Error'): Error {
+    return Object.assign(new Error(`SDK failure ${status ?? 'statusless'}`), { status, name });
+  }
+
+  beforeEach(async () => {
+    tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'js-sdk-await-eventually-'));
+    const file = loadJsProjectScaffoldingFiles().find(
+      (f) => f.relativePath === 'support/await-eventually.ts',
+    );
+    if (!file) throw new Error('support/await-eventually.ts is not emitted');
+    const target = path.join(tmp, 'await-eventually.ts');
+    await fs.writeFile(target, file.content, 'utf8');
+    // biome-ignore lint/plugin: runtime contract boundary for a dynamically imported generated module
+    const mod = (await import(pathToFileURL(target).href)) as {
+      awaitEventually: SdkAwaitEventually;
+    };
+    awaitEventually = mod.awaitEventually;
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmp, { recursive: true, force: true });
+  });
+
+  test.each([400, 401, 403, 409, 500])('fails fast on non-retryable HTTP %i', async (status) => {
+    const error = sdkError(status);
+    let calls = 0;
+    const fetch = async (): Promise<unknown> => {
+      calls++;
+      throw error;
+    };
+    await expect(awaitEventually(fetch, () => true, options)).rejects.toBe(error);
+    expect(calls).toBe(1);
+  });
+
+  test('fails fast on a client-side CamundaValidationError (no HTTP status)', async () => {
+    const error = sdkError(undefined, 'CamundaValidationError');
+    let calls = 0;
+    const fetch = async (): Promise<unknown> => {
+      calls++;
+      throw error;
+    };
+    await expect(awaitEventually(fetch, () => true, options)).rejects.toBe(error);
+    expect(calls).toBe(1);
+  });
+
+  test.each([
+    ['HTTP 404', sdkError(404)],
+    ['HTTP 429', sdkError(429)],
+    ['HTTP 503', sdkError(503)],
+    ['SDK EventualConsistencyTimeoutError', sdkError(undefined, 'EventualConsistencyTimeoutError')],
+  ])('retries transient %s until the predicate passes', async (_label, error) => {
+    let calls = 0;
+    const fetch = async (): Promise<unknown> => {
+      calls++;
+      if (calls < 3) throw error;
+      return { ok: true };
+    };
+    await expect(awaitEventually(fetch, () => true, options)).resolves.toEqual({ ok: true });
+    expect(calls).toBe(3);
   });
 });
 
