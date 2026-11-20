@@ -223,6 +223,11 @@ export function validNumbers(r: ResolvedParamSchema, integer: boolean, count: nu
   return out;
 }
 
+/** Does the number `v` meet the schema's range and `multipleOf` (and integrality, when `integer`)? */
+export function acceptsNumber(v: number, r: ResolvedParamSchema, integer: boolean): boolean {
+  return inInterval(v, numericInterval(r), integer);
+}
+
 /**
  * The allowed value closest to `bound` on the inside of the range (`dir` 1 for a lower bound, -1 for
  * an upper one): the bound itself when inclusive, else one step in. For an integer the step is 1 and

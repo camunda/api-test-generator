@@ -209,6 +209,44 @@ describe('values built to reach the target satisfy their own constraints', () =>
     });
     expect([...byKind(objects).keys()].filter((k) => k.startsWith('ids.0.'))).toEqual([]);
   });
+
+  it('fills an oversized array with enum values that meet the other item constraints', () => {
+    const strings = arrayOf({
+      type: 'array',
+      maxItems: 1,
+      items: { type: 'string', enum: ['a', 'bb', 'ccc'], minLength: 2 },
+    });
+    expect(byKind(strings).get('ids:aboveMaxItems')).toEqual({ ids: ['bb', 'bb'] });
+    const numbers = arrayOf({
+      type: 'array',
+      maxItems: 1,
+      uniqueItems: true,
+      items: { type: 'integer', enum: [1, 5, 10], minimum: 4 },
+    });
+    expect(byKind(numbers).get('ids:aboveMaxItems')).toEqual({ ids: [5, 10] });
+  });
+
+  it('fills an oversized array of an untyped union with values of its first branch', () => {
+    const o = arrayOf({
+      type: 'array',
+      maxItems: 1,
+      items: { oneOf: [{ type: 'string', pattern: '^[0-9]+$' }, { type: 'integer' }] },
+    });
+    const ids = itemsOf(byKind(o).get('ids:aboveMaxItems'));
+    expect(ids).toHaveLength(2);
+    expect(ids.every((v) => typeof v === 'string' && /^[0-9]+$/.test(v))).toBe(true);
+  });
+
+  it('skips an oversized array whose items are an untyped union of objects', () => {
+    const o = arrayOf({
+      type: 'array',
+      maxItems: 1,
+      items: {
+        oneOf: [{ type: 'object', required: ['name'], properties: { name: { type: 'string' } } }],
+      },
+    });
+    expect(byKind(o).has('ids:aboveMaxItems')).toBe(false);
+  });
 });
 
 describe('constraint-violation applicability on multipart-only operations', () => {
