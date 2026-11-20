@@ -1,5 +1,6 @@
 import { VALID_BY_FORMAT } from '../util/formatValues.js';
 import {
+  acceptsNumber,
   type ResolvedParamSchema,
   resolveFieldSchema,
   satisfiesAll,
@@ -15,11 +16,15 @@ import type { WalkNode } from './walker.js';
  * that needs one only to reach another field can skip the case instead of sending a second, unrelated error.
  */
 export function synthesizeValid(node: WalkNode, variant = 0): unknown {
-  const t = Array.isArray(node.type) ? node.type[0] : node.type;
-  const r = t === 'object' || t === 'array' ? undefined : resolved(node);
+  const declared = Array.isArray(node.type) ? node.type[0] : node.type;
+  const r = declared === 'object' || declared === 'array' ? undefined : resolved(node);
+  // An untyped union takes its first branch's type. An object or array branch was not walked, so
+  // its properties and items are unknown here and no valid value can be built for it.
+  const t = declared ?? (Array.isArray(r?.type) ? r.type[0] : r?.type);
+  if (declared === undefined && (t === 'object' || t === 'array')) return undefined;
   const enumValues = r?.enumValues ?? node.enum;
   if (Array.isArray(enumValues) && enumValues.length) {
-    return variant < enumValues.length ? enumValues[variant] : undefined;
+    return enumValues.filter((v) => r === undefined || enumValueValid(v, r, t))[variant];
   }
   const c = node.constraints ?? {};
   switch (t) {
@@ -52,8 +57,17 @@ export function synthesizeValid(node: WalkNode, variant = 0): unknown {
     case 'string':
       return r ? validString(r, variant) : undefined;
     default:
-      return variant > 0 ? undefined : null;
+      // No type at all: null only when the schema says nothing else (e.g. `{}`), since a
+      // constrained but untyped schema cannot be satisfied with a guess.
+      return variant === 0 && r !== undefined && unconstrained(r) ? null : undefined;
   }
+}
+
+/** Does an enum value also meet the field's other constraints (length, pattern, range)? */
+function enumValueValid(v: unknown, r: ResolvedParamSchema, t: string | undefined): boolean {
+  if (typeof v === 'string') return satisfiesAll(v, r);
+  if (typeof v === 'number') return acceptsNumber(v, r, t === 'integer');
+  return true;
 }
 
 /** `length` valid items for an array node, distinct when it has `uniqueItems`; undefined when that is not possible. */
@@ -79,6 +93,13 @@ function resolved(node: WalkNode): ResolvedParamSchema {
   if (r.type === undefined) r.type = node.type;
   if (node.enum?.length && !r.enumValues) r.enumValues = node.enum.slice();
   return r;
+}
+
+function unconstrained(r: ResolvedParamSchema): boolean {
+  const s = r.schema;
+  return !['oneOf', 'anyOf', 'allOf', 'not', 'const', 'enum', 'format', 'pattern'].some(
+    (k) => k in s,
+  );
 }
 
 const LETTERS = 'abcdefghijklmnopqrstuvwxyz';
