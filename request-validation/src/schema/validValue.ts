@@ -1,4 +1,11 @@
 import { VALID_BY_FORMAT } from '../util/formatValues.js';
+import {
+  type ResolvedParamSchema,
+  resolveFieldSchema,
+  satisfiesAll,
+  validNumbers,
+  validValues,
+} from '../util/paramSchema.js';
 import type { WalkNode } from './walker.js';
 
 /**
@@ -8,21 +15,23 @@ import type { WalkNode } from './walker.js';
  * that needs one only to reach another field can skip the case instead of sending a second, unrelated error.
  */
 export function synthesizeValid(node: WalkNode, variant = 0): unknown {
-  if (Array.isArray(node.enum) && node.enum.length) {
-    return variant < node.enum.length ? node.enum[variant] : undefined;
+  const t = Array.isArray(node.type) ? node.type[0] : node.type;
+  const r = t === 'object' || t === 'array' ? undefined : resolved(node);
+  const enumValues = r?.enumValues ?? node.enum;
+  if (Array.isArray(enumValues) && enumValues.length) {
+    return variant < enumValues.length ? enumValues[variant] : undefined;
   }
   const c = node.constraints ?? {};
-  const t = Array.isArray(node.type) ? node.type[0] : node.type;
   switch (t) {
     case 'object': {
       if (variant > 0) return undefined;
       const obj: Record<string, unknown> = {};
-      for (const r of node.required ?? []) {
-        const child = node.properties?.[r];
+      for (const key of node.required ?? []) {
+        const child = node.properties?.[key];
         if (!child) continue;
         const v = synthesizeValid(child);
         if (v === undefined) return undefined;
-        obj[r] = v;
+        obj[key] = v;
       }
       return obj;
     }
@@ -37,11 +46,11 @@ export function synthesizeValid(node: WalkNode, variant = 0): unknown {
     }
     case 'integer':
     case 'number':
-      return validNumber(c, variant);
+      return r ? validNumbers(r, t === 'integer', variant + 1)[variant] : undefined;
     case 'boolean':
       return variant < 2 ? variant === 0 : undefined;
     case 'string':
-      return validString(node, c, variant);
+      return r ? validString(r, variant) : undefined;
     default:
       return variant > 0 ? undefined : null;
   }
@@ -64,62 +73,27 @@ export function validItems(node: WalkNode, length: number): unknown[] | undefine
   return out;
 }
 
-function validNumber(c: Record<string, unknown>, variant: number): number | undefined {
-  let low = 1;
-  if (typeof c.minimum === 'number') low = c.minimum;
-  else if (typeof c.exclusiveMinimum === 'number') low = Math.floor(c.exclusiveMinimum) + 1;
-  else if (typeof c.maximum === 'number' && c.maximum < 1) low = Math.floor(c.maximum);
-  else if (typeof c.exclusiveMaximum === 'number' && c.exclusiveMaximum <= 1)
-    low = Math.ceil(c.exclusiveMaximum) - 1;
-  const v = Math.ceil(low) + variant;
-  if (typeof c.maximum === 'number' && v > c.maximum) return undefined;
-  if (typeof c.exclusiveMaximum === 'number' && v >= c.exclusiveMaximum) return undefined;
-  if (typeof c.minimum === 'number' && v < c.minimum) return undefined;
-  if (typeof c.exclusiveMinimum === 'number' && v <= c.exclusiveMinimum) return undefined;
-  return v;
+/** The node's declared schema with every `allOf` part merged (patterns, bounds, `multipleOf`, both exclusive forms). */
+function resolved(node: WalkNode): ResolvedParamSchema {
+  const r = resolveFieldSchema(node.source ?? node.raw ?? {});
+  if (r.type === undefined) r.type = node.type;
+  if (node.enum?.length && !r.enumValues) r.enumValues = node.enum.slice();
+  return r;
 }
 
 const LETTERS = 'abcdefghijklmnopqrstuvwxyz';
 
-function validString(
-  node: WalkNode,
-  c: Record<string, unknown>,
-  variant: number,
-): string | undefined {
-  const format = typeof node.raw?.format === 'string' ? node.raw.format : undefined;
-  const byFormat = format !== undefined ? VALID_BY_FORMAT[format] : undefined;
-  const minLength = typeof c.minLength === 'number' ? c.minLength : undefined;
-  const maxLength = typeof c.maxLength === 'number' ? c.maxLength : undefined;
-  let re: RegExp | undefined;
-  if (typeof c.pattern === 'string') {
-    try {
-      re = new RegExp(c.pattern);
-    } catch {
-      // A pattern JavaScript cannot compile (e.g. a Java-only flag) cannot be checked here.
-      re = undefined;
-    }
-  }
-  const width = Math.max(minLength ?? 1, 1);
-  const candidates =
-    byFormat !== undefined
-      ? [byFormat]
-      : [
-          minLength !== undefined && minLength > 1 ? 'a'.repeat(minLength) : 'x',
-          ...['x', 'a', '1', 'a_1', 'A', 'AA', 'A1', 'test', '0', 'a-b', '1-1', '*', '1*'],
-          ...Array.from(LETTERS, (ch) => ch.repeat(width)),
-          ...Array.from(LETTERS.toUpperCase(), (ch) => ch.repeat(width)),
-          ...Array.from('0123456789', (ch) => ch.repeat(width)),
-          ...Array.from({ length: 50 }, (_, i) => `a${i}`.padStart(width, 'a')),
-        ];
-  const valid = [
-    ...new Set(
-      candidates.filter(
-        (s) =>
-          (minLength === undefined || s.length >= minLength) &&
-          (maxLength === undefined || s.length <= maxLength) &&
-          (re === undefined || re.test(s)),
-      ),
-    ),
-  ];
-  return valid[variant];
+function validString(r: ResolvedParamSchema, variant: number): string | undefined {
+  // A format or enum has its own valid values; otherwise add more shapes than validValues tries, so a
+  // uniqueItems array of a narrow pattern still gets enough distinct items.
+  if (r.enumValues?.length || (r.format !== undefined && VALID_BY_FORMAT[r.format] !== undefined))
+    return validValues(r)[variant];
+  const width = Math.max(r.minLength ?? 1, 1);
+  const extra = [
+    ...Array.from(LETTERS, (ch) => ch.repeat(width)),
+    ...Array.from(LETTERS.toUpperCase(), (ch) => ch.repeat(width)),
+    ...Array.from('0123456789', (ch) => ch.repeat(width)),
+    ...Array.from({ length: 50 }, (_, i) => `a${i}`.padStart(width, 'a')),
+  ].filter((c) => satisfiesAll(c, r));
+  return [...new Set([...validValues(r), ...extra])][variant];
 }
