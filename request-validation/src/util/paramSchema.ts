@@ -204,6 +204,31 @@ export function findValidNumber(r: ResolvedParamSchema, integer: boolean): numbe
 }
 
 /**
+ * Up to `count` distinct numbers the schema accepts, {@link findValidNumber}'s first, then values a
+ * step apart on either side of it (the `multipleOf`, else 1 for an integer, else a fraction of a
+ * bounded range), for the items of a `uniqueItems` array.
+ */
+export function validNumbers(r: ResolvedParamSchema, integer: boolean, count: number): number[] {
+  const first = findValidNumber(r, integer);
+  if (first === undefined) return [];
+  const iv = numericInterval(r);
+  const span = iv.lo !== undefined && iv.hi !== undefined ? iv.hi - iv.lo : undefined;
+  const step = iv.multipleOf ?? (integer || span === undefined ? 1 : span / (2 * count + 2));
+  const out = [first];
+  for (let k = 1; out.length < count && k <= 4 * count; k++) {
+    for (const c of [first + k * step, first - k * step]) {
+      if (out.length < count && inInterval(c, iv, integer) && !out.includes(c)) out.push(c);
+    }
+  }
+  return out;
+}
+
+/** Does the number `v` meet the schema's range and `multipleOf` (and integrality, when `integer`)? */
+export function acceptsNumber(v: number, r: ResolvedParamSchema, integer: boolean): boolean {
+  return inInterval(v, numericInterval(r), integer);
+}
+
+/**
  * The allowed value closest to `bound` on the inside of the range (`dir` 1 for a lower bound, -1 for
  * an upper one): the bound itself when inclusive, else one step in. For an integer the step is 1 and
  * a fractional bound rounds inward too (`minimum: 1.5` gives 2).
@@ -367,7 +392,7 @@ export function validValues(r: ResolvedParamSchema): string[] {
 }
 
 /** Does `c` meet the schema's enum, length bounds and pattern? */
-function satisfiesAll(c: string, r: ResolvedParamSchema): boolean {
+export function satisfiesAll(c: string, r: ResolvedParamSchema): boolean {
   if (r.enumValues?.length && !r.enumValues.map(String).includes(c)) return false;
   if (r.minLength !== undefined && c.length < r.minLength) return false;
   if (r.maxLength !== undefined && c.length > r.maxLength) return false;

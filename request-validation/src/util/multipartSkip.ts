@@ -19,7 +19,10 @@ import type { OperationModel, SchemaFragment, ValidationScenario } from '../mode
  *   3. `constraint-violation` whose target is a top-level multipart
  *      part with `type: array` — array-cardinality / item-shape
  *      mutations don't translate to a multipart `files=...` repetition
- *      pattern; the broker accepts the upload and returns 201.
+ *      pattern; the broker accepts the upload and returns 201. Also one
+ *      whose target is nested inside a part (e.g. `metadata.processDefinitionId`,
+ *      a field of a JSON-encoded form part): never verified live, so it is
+ *      not asserted as a 400.
  *
  *   4. `additional-prop` / `additional-prop-general` (#364) — multipart
  *      endpoints have no `additionalProperties: false` enforcement on
@@ -98,7 +101,7 @@ export function shouldSkipForMultipart(scenario: ValidationScenario, op: Operati
   }
   if (scenario.type === 'constraint-violation') {
     const part = topLevelMultipartPart(op, scenario.target);
-    if (isArrayPart(part)) return true;
+    if (!part || isArrayPart(part)) return true;
   }
   return false;
 }
