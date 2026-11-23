@@ -48,6 +48,12 @@ import { generateMalformedJsonBody } from '../src/analysis/malformedJsonBody.js'
 import { generateMissingRequired } from '../src/analysis/missingRequired.js';
 import { generateMissingRequiredCombos } from '../src/analysis/missingRequiredCombos.js';
 import { generateMultipartMissingRequired } from '../src/analysis/multipartMissingRequired.js';
+import {
+  generateNestedOneOfAmbiguous,
+  generateNestedOneOfNoneMatch,
+  isNestedOneOfAmbiguousEligible,
+  isNestedOneOfNoneMatchEligible,
+} from '../src/analysis/nestedOneOf.js';
 import { generateNotFoundFakeId, isNotFoundEligible } from '../src/analysis/notFoundFakeId.js';
 import {
   generateDiscriminatorStructureMismatch,
@@ -210,6 +216,7 @@ async function main() {
     authDenyMode: 'slice',
     notFoundMode: 'read-only',
     independentAuthGateMode: 'unavailable',
+    nestedOneOf: false,
   };
   let fixturesSourceDir: string | undefined;
   let capabilityGates: Map<string, CapabilityGateInfo> = new Map();
@@ -261,7 +268,7 @@ async function main() {
   }
   console.log(
     `[generate] Active config: ${configName} ` +
-      `(enumCaseInsensitive=${rvConfig.enumCaseInsensitive}, unenforcedStringFormats=[${rvConfig.unenforcedStringFormats.join(',')}], authAbsentMode=${rvConfig.authAbsentMode}, authDenyMode=${rvConfig.authDenyMode}, notFoundMode=${rvConfig.notFoundMode}, independentAuthGateMode=${rvConfig.independentAuthGateMode})`,
+      `(enumCaseInsensitive=${rvConfig.enumCaseInsensitive}, unenforcedStringFormats=[${rvConfig.unenforcedStringFormats.join(',')}], authAbsentMode=${rvConfig.authAbsentMode}, authDenyMode=${rvConfig.authDenyMode}, notFoundMode=${rvConfig.notFoundMode}, independentAuthGateMode=${rvConfig.independentAuthGateMode}, nestedOneOf=${rvConfig.nestedOneOf})`,
   );
   const { specPath, specProvenance, source } = resolveSpecSource();
   console.log(`[generate] Using spec from ${source}: ${specPath}`);
@@ -562,6 +569,25 @@ async function main() {
       scenarios.push(
         ...generateOneOfNoneMatch(model.operations, {
           capPerOperation: 1,
+          onlyOperations: opts.onlyOperations,
+        }),
+      );
+    }
+    // #708: the same two kinds for a oneOf nested inside a body property, where the config opts in.
+    if (rvConfig.nestedOneOf && wantKind('oneof-ambiguous')) {
+      scenarios.push(
+        ...generateNestedOneOfAmbiguous(model.operations, {
+          capPerOperation: 3,
+          capabilityGates,
+          onlyOperations: opts.onlyOperations,
+        }),
+      );
+    }
+    if (rvConfig.nestedOneOf && wantKind('oneof-none-match')) {
+      scenarios.push(
+        ...generateNestedOneOfNoneMatch(model.operations, {
+          capPerOperation: 3,
+          capabilityGates,
           onlyOperations: opts.onlyOperations,
         }),
       );
@@ -1479,6 +1505,10 @@ async function main() {
         if (isUnionEligible(op)) applicable.add('union');
         if (isOneOfAmbiguousEligible(op)) applicable.add('oneof-ambiguous');
         if (isOneOfNoneMatchEligible(op)) applicable.add('oneof-none-match');
+        if (rvConfig.nestedOneOf && isNestedOneOfAmbiguousEligible(op, capabilityGates))
+          applicable.add('oneof-ambiguous');
+        if (rvConfig.nestedOneOf && isNestedOneOfNoneMatchEligible(op, capabilityGates))
+          applicable.add('oneof-none-match');
         if (isOneOfMultiAmbiguousEligible(op)) applicable.add('oneof-multi-ambiguous');
         if (isOneOfCrossBleedEligible(op)) applicable.add('oneof-cross-bleed');
         if (f.hasDiscriminator) {
