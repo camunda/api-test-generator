@@ -98,5 +98,9 @@ describe('request-validation: binary multipart parts are sent as files', () => {
       `formData.append("resources", new File(["x"], "resources.bin", { type: 'application/octet-stream' }))`,
     );
     expect(rendered).not.toMatch(/const multipartFields[^;]*resources/);
+    // Evidence keeps the file part apart from the text fields, for replays.
+    expect(rendered).toContain(
+      'multipartFiles: {"resources":{"filename":"resources.bin","content":"x","type":"application/octet-stream"}}',
+    );
   });
 });

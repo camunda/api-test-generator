@@ -247,7 +247,10 @@ def main():
 
         body_json = json.dumps(req["body"]) if req.get("body") is not None else None
         multipart = req.get("multipart")
-        code, curl_body = run_curl(method, url, headers, body_json, multipart)
+        # File parts (binary multipart parts) are recorded apart from the text
+        # fields; replay them as files, as the suite sent them.
+        files = req.get("multipartFiles")
+        code, curl_body = run_curl(method, url, headers, body_json, multipart, files)
         if code is None:
             results[key] = {"confirmed": None, "error": f"curl could not reach the server: {curl_body}"}
             continue

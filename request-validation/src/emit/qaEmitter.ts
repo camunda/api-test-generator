@@ -553,15 +553,18 @@ function renderScenario(
       `url`,
     ];
     if (s.bodyEncoding === 'multipart' && s.multipartForm) {
-      // Evidence shows each file part as a placeholder next to the text fields.
-      const fileEvidence = Object.keys(s.multipartFiles ?? {}).map(
-        (name) => `${JSON.stringify(name)}: ${JSON.stringify(`<file ${name}.bin>`)}`,
-      );
-      ctxParts.push(
-        fileEvidence.length > 0
-          ? `multipart: { ...multipartFields, ${fileEvidence.join(', ')} }`
-          : `multipart: multipartFields`,
-      );
+      ctxParts.push(`multipart: multipartFields`);
+      // File parts go to the evidence separately (request.json), so a replay
+      // sends them as files rather than as text fields.
+      if (s.multipartFiles && Object.keys(s.multipartFiles).length > 0) {
+        const files = Object.fromEntries(
+          Object.entries(s.multipartFiles).map(([name, content]) => [
+            name,
+            { filename: `${name}.bin`, content, type: 'application/octet-stream' },
+          ]),
+        );
+        ctxParts.push(`multipartFiles: ${JSON.stringify(files)}`);
+      }
     } else if (s.requestBody) {
       ctxParts.push(`body: requestBody`);
     }
