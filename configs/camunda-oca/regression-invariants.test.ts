@@ -11591,7 +11591,9 @@ describeForThisConfig('bundled-spec invariants: multipart binary parts are sent 
           const fields = /const multipartFields: Record<string, string> = \{([^}]*)\}/.exec(block);
           if (!fields) continue;
           checked++;
-          for (const m of fields[1].matchAll(/^\s*(?:'([^']+)'|"([^"]+)"|([A-Za-z_$][\w$]*))\s*:/gm)) {
+          for (const m of fields[1].matchAll(
+            /^\s*(?:'([^']+)'|"([^"]+)"|([A-Za-z_$][\w$]*))\s*:/gm,
+          )) {
             const key = m[1] ?? m[2] ?? m[3];
             if (parts.has(key)) offenders.push(`${profile}/${file} ${opId}: '${key}' sent as text`);
           }
