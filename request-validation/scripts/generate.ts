@@ -104,6 +104,7 @@ import { RUNTIME_KEY_FIXTURE_NAMES } from '../src/runtimeKeyFixtureNames.js';
 import { loadSpec } from '../src/spec/loader.js';
 import { resolveSpecSource } from '../src/spec/source.js';
 import { type CapabilityGateInfo, loadCapabilityGates } from '../src/util/capabilityGate.js';
+import { splitMultipartFileParts } from '../src/util/multipartFiles.js';
 import { isMultipartOnly, shouldSkipForMultipart } from '../src/util/multipartSkip.js';
 
 interface CliOptions {
@@ -1018,6 +1019,20 @@ async function main() {
       console.log(`[generate] Structural additional-prop dedupe removed ${removed} scenarios`);
     deduped.length = 0;
     deduped.push(...filtered);
+  }
+
+  // ---- Multipart File Parts ----
+  // Every multipart scenario (adapted JSON bodies, multipart missing-required,
+  // param-only) sends the operation's `format: binary` parts as files, not as
+  // text fields. A text field `resources=["x"]` is not a file part, so the server
+  // answers "Required part 'resources' is not present." before it reaches the
+  // check the scenario targets (e.g. createDeployment's tenantId constraint).
+  {
+    const opsById = new Map(model.operations.map((o) => [o.operationId, o]));
+    for (let i = 0; i < deduped.length; i++) {
+      const op = opsById.get(deduped[i].operationId);
+      if (op) deduped[i] = splitMultipartFileParts(deduped[i], op);
+    }
   }
 
   // ---- Structural Multipart Param/Body Type-Mismatch Dedupe ----
