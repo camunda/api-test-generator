@@ -117,6 +117,11 @@
       "$comment": "Server-minted reference to the entity an audit-log entry was emitted for. Same lifecycle as AuditLogKey \u2014 emerges from audited writes, never directly minted via a client API. See #162 PR 5."
     },
     {
+      "name": "VariableHistoryItemKey",
+      "kind": "serverEmergent",
+      "$comment": "Server-minted key of a variable-history item. Emerges as a side-effect of variable writes; no direct create API. Search-filter input only; planner mints a deterministic placeholder."
+    },
+    {
       "name": "DeploymentKey",
       "kind": "serverEmergent",
       "$comment": "Temporary classification pending upstream spec fix camunda/camunda#52926. createDeployment returns deploymentKey in its 200 response but the response field is currently flagged provider:false in the bundled spec, so the planner cannot bind it as a producerBound semantic. Once upstream marks deploymentKey as provider:true, this entry should be removed and DeploymentKey will classify as producerBound automatically. See #162 PR 5."
