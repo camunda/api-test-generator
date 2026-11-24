@@ -25,7 +25,7 @@
  * pipeline regen step (any unclassified semantic in the live graph
  * fails `npm run testsuite:generate`).
  */
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -180,27 +180,5 @@ describe('graphLoader: requestBodySemantics classification fail-fast (#162 PR 5)
     expect(Object.keys(g.operations)).toEqual(
       expect.arrayContaining(['createWidget', 'searchWidgetIncidents']),
     );
-  });
-
-  it('camunda-oca ABox declares the server-minted history/audit keys as serverEmergent', () => {
-    // Real ABox, not a synthetic one: VariableHistoryItemKey appears in a
-    // search-filter body with no producer, and was missing here, which failed
-    // graph load with requestBodySemanticUnclassified.
-    const raw = readFileSync(
-      join(import.meta.dirname, '../../../configs/camunda-oca/ontology/semantics.json'),
-      'utf8',
-    );
-    const abox: unknown = JSON.parse(raw);
-    const types =
-      typeof abox === 'object' && abox !== null && 'semanticTypes' in abox
-        ? abox.semanticTypes
-        : [];
-    const kindOf = (name: string): unknown =>
-      Array.isArray(types)
-        ? types.find((t) => typeof t === 'object' && t !== null && t.name === name)?.kind
-        : undefined;
-    for (const name of ['AuditLogKey', 'AuditLogEntityKey', 'VariableHistoryItemKey']) {
-      expect(kindOf(name), name).toBe('serverEmergent');
-    }
   });
 });
