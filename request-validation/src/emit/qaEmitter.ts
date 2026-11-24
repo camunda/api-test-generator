@@ -471,6 +471,15 @@ function renderScenario(
     lines.push(`    const formData = new FormData();`);
     lines.push(`    const multipartFields: Record<string,string> = ${formLit};`);
     lines.push(`    for (const [k,v] of Object.entries(multipartFields)) formData.append(k, v);`);
+    if (s.multipartFiles && Object.keys(s.multipartFiles).length > 0) {
+      // Binary parts go as file parts: a text field is not a file part, and the
+      // server rejects it as a missing required part (see ValidationScenario.multipartFiles).
+      for (const [name, content] of Object.entries(s.multipartFiles)) {
+        lines.push(
+          `    formData.append(${JSON.stringify(name)}, new File([${JSON.stringify(content)}], ${JSON.stringify(`${name}.bin`)}, { type: 'application/octet-stream' }));`,
+        );
+      }
+    }
   } else if (s.requestBody) {
     // #352: substitute real-resource env lookups for fixture body fields (e.g.
     // createFile.projectKey) whose value is a filler placeholder (`'x'` or `'1'`),
@@ -545,6 +554,17 @@ function renderScenario(
     ];
     if (s.bodyEncoding === 'multipart' && s.multipartForm) {
       ctxParts.push(`multipart: multipartFields`);
+      // File parts go to the evidence separately (request.json), so a replay
+      // sends them as files rather than as text fields.
+      if (s.multipartFiles && Object.keys(s.multipartFiles).length > 0) {
+        const files = Object.fromEntries(
+          Object.entries(s.multipartFiles).map(([name, content]) => [
+            name,
+            { filename: `${name}.bin`, content, type: 'application/octet-stream' },
+          ]),
+        );
+        ctxParts.push(`multipartFiles: ${JSON.stringify(files)}`);
+      }
     } else if (s.requestBody) {
       ctxParts.push(`body: requestBody`);
     }

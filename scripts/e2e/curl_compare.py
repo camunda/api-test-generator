@@ -24,8 +24,10 @@ import base64
 import html
 import json
 import re
+import os
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 TEST_RE = re.compile(r"test\(\s*(['\"])(?P<title>.*?)\1\s*,", re.S)
@@ -111,6 +113,35 @@ def split_tests(src: str):
         yield title, src[pos:end]
 
 
+# Evaluates the emitted `formData.append(<name>, new File([...], <filename>, {type}))`
+# arguments with a stand-in File that records what Playwright would upload.
+FILE_PART_JS = r"""
+function File(parts, filename, opts) {
+  return { filename, content: parts.join(""), type: (opts && opts.type) || "application/octet-stream" };
+}
+const out = {};
+for (const [name, file] of [__PARTS__]) if (file && typeof file === "object") out[name] = file;
+process.stdout.write(JSON.stringify(out));
+"""
+
+
+def parse_file_parts(block: str):
+    """File parts the emitted test appends to its FormData (binary multipart
+    parts such as createDeployment's `resources`); {} when there are none."""
+    parts = []
+    for m in re.finditer(r"formData\.append\(", block):
+        args = extract_balanced(block, m.end() - 1, "(", ")")
+        if "new File(" in args:
+            parts.append("[" + args + "]")
+    if not parts:
+        return {}
+    out = node(FILE_PART_JS.replace("__PARTS__", ", ".join(parts)))
+    try:
+        return json.loads(out) if out is not None else None
+    except Exception:
+        return None
+
+
 def parse_block(block: str, base: str, api_version: str):
     # --- URL: run the suite's real buildUrl with the emitted args ---
     bidx = block.find("buildUrl(")
@@ -128,12 +159,14 @@ def parse_block(block: str, base: str, api_version: str):
     headers_kind = hm.group(1).strip() if hm else "{}"
     # --- multipart vs json body ---
     multipart = None
+    files = None
     body_json = None
     if "multipart: formData" in block:
         fm = re.search(r"multipartFields[^=]*=\s*", block)
         if fm:
             obj = extract_balanced(block, block.index("{", fm.end()), "{", "}")
             multipart = node_json("{" + obj + "}")
+        files = parse_file_parts(block)
     else:
         # Capture the whole literal up to the statement terminator (`;` before the
         # next `const`). Anchoring on `;` — not "next { or [" — keeps PRIMITIVE
@@ -160,7 +193,7 @@ def parse_block(block: str, base: str, api_version: str):
     kind = re.search(r"scenarioKind:\s*['\"]([^'\"]+)['\"]", block)
     return {
         "url": url, "method": method, "headers_kind": headers_kind,
-        "multipart": multipart, "body_json": body_json, "expected": expected,
+        "multipart": multipart, "files": files, "body_json": body_json, "expected": expected,
         "operationId": op.group(1) if op else "", "kind": kind.group(1) if kind else "",
     }
 
@@ -199,20 +232,58 @@ def curl_headers(kind, admin_header, deny_header, cluster_admin_header):
     return []  # {} → no auth
 
 
-def run_curl(method, url, headers, body_json, multipart):
+def curl_args(method, url, headers, body_json, multipart, files=None):
+    """curl argv for one request, plus the temp files it reads (see cleanup()).
+
+    Text parts use --form-string so a value starting with `@` or `<` is sent
+    literally (curl -F would read it from a file). File parts are written to a
+    temp file and sent with their filename and content type, as Playwright does.
+    """
     # -sS: quiet progress but still emit connection/TLS/DNS errors on stderr.
     cmd = ["curl", "-sS", "-o", "-", "-w", "\n__HTTP__%{http_code}", "-X", method, url]
+    tmp = []
     for h in headers:
         cmd += ["-H", h]
-    if multipart is not None:
-        for k, v in multipart.items():
-            cmd += ["-F", f"{k}={v}"]
+    if multipart is not None and not multipart and not files:
+        # An empty FormData: Playwright still sends a multipart body (only the
+        # closing boundary). curl with no -F would send no body and no multipart
+        # Content-Type, and get 415 instead of the server's 400.
+        cmd += [
+            "-H", "Content-Type: multipart/form-data; boundary=curlcompare",
+            "--data-binary", "--curlcompare--\r\n",
+        ]
+    elif multipart is not None or files:
+        for k, v in (multipart or {}).items():
+            cmd += ["--form-string", f"{k}={v}"]
+        for name, f in (files or {}).items():
+            fd, path = tempfile.mkstemp(prefix="curl-part-")
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                fh.write(str(f.get("content", "")))
+            tmp.append(path)
+            filename = f.get("filename") or name
+            ctype = f.get("type") or "application/octet-stream"
+            cmd += ["-F", f"{name}=@{path};filename={filename};type={ctype}"]
     elif body_json is not None:
         cmd += ["--data-binary", body_json]
+    return cmd, tmp
+
+
+def cleanup(paths):
+    for p in paths:
+        try:
+            os.unlink(p)
+        except OSError:
+            pass
+
+
+def run_curl(method, url, headers, body_json, multipart, files=None):
+    cmd, tmp = curl_args(method, url, headers, body_json, multipart, files)
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
     except Exception as e:
         return None, f"<curl error: {e}>"
+    finally:
+        cleanup(tmp)
     out, err = proc.stdout, (proc.stderr or "").strip()
     marker = out.rfind("__HTTP__")
     if marker == -1:
@@ -350,7 +421,9 @@ def main():
             headers = curl_headers(
                 d["headers_kind"], args.admin_header, args.deny_header, args.cluster_admin_header
             )
-            code, body = run_curl(d["method"], d["url"], headers, d["body_json"], d["multipart"])
+            code, body = run_curl(
+                d["method"], d["url"], headers, d["body_json"], d["multipart"], d["files"]
+            )
             pw_rec = pw.get(title, {})
             pw_status = ("pass" if pw_rec.get("ok") else f"FAIL({pw_rec.get('received')})") if pw_rec else "—"
             rows.append({

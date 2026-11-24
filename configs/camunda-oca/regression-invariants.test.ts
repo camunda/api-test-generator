@@ -11526,3 +11526,81 @@ describeForThisConfig('bundled-spec invariants: capability-gated fields (#404)',
     }
   });
 });
+
+describeForThisConfig('bundled-spec invariants: multipart binary parts are sent as files', () => {
+  it('no generated request-validation test sends a binary multipart part as a text field', () => {
+    // A `format: binary` part (or an array of them, e.g. createDeployment's
+    // `resources`) sent as a plain text field is not a file part: the server
+    // answers 400 "Required part 'resources' is not present." before it reaches
+    // the check the scenario targets (nightly: createDeployment's tenantId
+    // constraint violations expected "multi-tenancy is disabled"). Class-scoped:
+    // every multipart operation in the spec, every emitted profile.
+    function isObject(v: unknown): v is Record<string, unknown> {
+      return typeof v === 'object' && v !== null && !Array.isArray(v);
+    }
+    function isBinary(s: unknown): boolean {
+      return isObject(s) && s.type === 'string' && s.format === 'binary';
+    }
+    const bundlePath = join(getSpecBundleDir(REPO_ROOT), 'rest-api.bundle.json');
+    const rawSpec: unknown = JSON.parse(readFileSync(bundlePath, 'utf8'));
+    if (!isObject(rawSpec) || !isObject(rawSpec.paths)) {
+      throw new Error(`Bundled spec at ${bundlePath} has no paths object.`);
+    }
+    // operationId -> names of its binary multipart parts
+    const binaryParts = new Map<string, Set<string>>();
+    for (const pathItem of Object.values(rawSpec.paths)) {
+      if (!isObject(pathItem)) continue;
+      for (const op of Object.values(pathItem)) {
+        if (!isObject(op) || typeof op.operationId !== 'string') continue;
+        const rb = op.requestBody;
+        const content = isObject(rb) ? rb.content : undefined;
+        const mp = isObject(content) ? content['multipart/form-data'] : undefined;
+        const schema = isObject(mp) ? mp.schema : undefined;
+        const props = isObject(schema) ? schema.properties : undefined;
+        if (!isObject(props)) continue;
+        const names = new Set<string>();
+        for (const [name, part] of Object.entries(props)) {
+          if (isBinary(part) || (isObject(part) && part.type === 'array' && isBinary(part.items))) {
+            names.add(name);
+          }
+        }
+        if (names.size) binaryParts.set(op.operationId, names);
+      }
+    }
+    expect(binaryParts.size).toBeGreaterThan(0);
+
+    const rvRoot = join(REPO_ROOT, 'generated', CONFIG_NAME, 'request-validation');
+    if (!existsSync(rvRoot)) {
+      throw new Error(
+        `Generated request-validation directory not found at ${rvRoot}. ` +
+          `Run 'npm run generate:request-validation' (or 'npm run pipeline') first.`,
+      );
+    }
+    const offenders: string[] = [];
+    let checked = 0;
+    for (const entry of readdirSync(rvRoot, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      const profile = entry.name;
+      const dir = join(rvRoot, profile);
+      for (const file of readdirSync(dir).filter((f) => f.endsWith('.spec.ts'))) {
+        const src = readFileSync(join(dir, file), 'utf8');
+        for (const block of src.split(/\n\s*test\(/).slice(1)) {
+          const opId = /operationId: '([^']+)'/.exec(block)?.[1];
+          const parts = opId ? binaryParts.get(opId) : undefined;
+          if (!opId || !parts) continue;
+          const fields = /const multipartFields: Record<string, string> = \{([^}]*)\}/.exec(block);
+          if (!fields) continue;
+          checked++;
+          for (const m of fields[1].matchAll(
+            /^\s*(?:'([^']+)'|"([^"]+)"|([A-Za-z_$][\w$]*))\s*:/gm,
+          )) {
+            const key = m[1] ?? m[2] ?? m[3];
+            if (parts.has(key)) offenders.push(`${profile}/${file} ${opId}: '${key}' sent as text`);
+          }
+        }
+      }
+    }
+    expect(checked).toBeGreaterThan(0);
+    expect(offenders).toEqual([]);
+  });
+});

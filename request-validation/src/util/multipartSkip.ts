@@ -70,7 +70,7 @@ function topLevelMultipartPart(
   return part && typeof part === 'object' ? part : undefined;
 }
 
-function isBinaryPart(schema: SchemaFragment | undefined): boolean {
+export function isBinaryPart(schema: SchemaFragment | undefined): boolean {
   if (!schema) return false;
   const t = Array.isArray(schema.type) ? schema.type[0] : schema.type;
   return t === 'string' && schema.format === 'binary';

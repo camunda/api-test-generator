@@ -226,6 +226,15 @@ export interface ValidationScenario {
   /** Multipart form fields (used when bodyEncoding === 'multipart') */
   multipartForm?: Record<string, unknown>;
   /**
+   * Multipart parts sent as files rather than text fields: part name -> file
+   * content. Holds the operation's `format: binary` parts (or arrays of them,
+   * e.g. createDeployment's `resources`). A binary part sent as a text field
+   * is not a file part, so the server rejects the request with "Required part
+   * ... is not present" before the check the scenario targets. Split out of
+   * `multipartForm` by `splitMultipartFileParts`.
+   */
+  multipartFiles?: Record<string, string>;
+  /**
    * The mutation subtype, for scenario kinds whose target alone doesn't
    * distinguish every generated case (e.g. pagination-limit-invalid's four
    * mutations all share one target, `page.limit`). Each generator that sets

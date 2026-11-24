@@ -78,6 +78,12 @@ export interface RequestContext {
   body?: unknown;
   /** Multipart form fields if `bodyEncoding === 'multipart'`. */
   multipart?: Record<string, string>;
+  /**
+   * Multipart file parts (binary parts such as createDeployment's `resources`),
+   * kept apart from the text fields so a replay (verify-negative-failures.py)
+   * sends them as files.
+   */
+  multipartFiles?: Record<string, { filename: string; content: string; type: string }>;
 }
 
 /**
@@ -298,6 +304,7 @@ export async function assertResponseStatus(
       expectedStatus: expected,
       body: ctx.body,
       multipart: ctx.multipart,
+      multipartFiles: ctx.multipartFiles,
     },
     null,
     2,
@@ -350,9 +357,12 @@ export async function assertResponseStatus(
 
 function formatRequestPayload(ctx: RequestContext): string {
   if (ctx.multipart) {
-    const fields = Object.keys(ctx.multipart);
-    if (fields.length === 0) return '(multipart, no fields)';
-    return `(multipart) ${truncate(JSON.stringify(ctx.multipart), 500)}`;
+    const files = Object.fromEntries(
+      Object.entries(ctx.multipartFiles ?? {}).map(([name, f]) => [name, `<file ${f.filename}>`]),
+    );
+    const shown = { ...ctx.multipart, ...files };
+    if (Object.keys(shown).length === 0) return '(multipart, no fields)';
+    return `(multipart) ${truncate(JSON.stringify(shown), 500)}`;
   }
   if (ctx.body === undefined) return '(none)';
   // `null` is a legitimate JSON body and should be shown as-is.
