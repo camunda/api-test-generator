@@ -144,6 +144,13 @@ export interface RequestValidationConfig {
    */
   independentAuthGateMode: 'unavailable' | 'available';
   /**
+   * Whether the `oneof-none-match` and `oneof-ambiguous` kinds are also built for a `oneOf` nested inside a body
+   * property (a search filter property that is an exact value or an advanced filter object, for example), and not
+   * only for a body whose root is a `oneOf`. Default `false`: switch it on for an API once a live run shows that its
+   * server answers a nested none-match or ambiguous value with 400. See `analysis/nestedOneOf.ts` and #708.
+   */
+  nestedOneOf: boolean;
+  /**
    * Maps resource-key names (path params AND body fields, e.g. `fileKey`,
    * `projectKey`, `workspaceKey`) to the env var holding a REAL key created by
    * the runner before tests run. Wherever the generator would otherwise emit a
@@ -294,6 +301,7 @@ const DEFAULTS: RequestValidationConfig = {
   authDenyMode: 'slice',
   notFoundMode: 'read-only',
   independentAuthGateMode: 'unavailable',
+  nestedOneOf: false,
 };
 
 function isPlainObject(v: unknown): v is Record<string, unknown> {
@@ -486,6 +494,15 @@ export function loadRequestValidationConfig(
       );
     }
     merged.independentAuthGateMode = v;
+  }
+  if ('nestedOneOf' in parsed) {
+    const v = parsed.nestedOneOf;
+    if (typeof v !== 'boolean') {
+      throw new Error(
+        `Invalid ${configPath}: "nestedOneOf" must be true or false, got ${JSON.stringify(v)}.`,
+      );
+    }
+    merged.nestedOneOf = v;
   }
   if ('resourceFixtures' in parsed) {
     const v = parsed.resourceFixtures;
