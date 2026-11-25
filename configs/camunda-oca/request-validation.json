@@ -1338,6 +1338,25 @@
         "type-mismatch"
       ],
       "reason": "Documented in the spec as available only when secondary storage is Elasticsearch or OpenSearch (declared 403 otherwise). This config's standard/CI run uses RDBMS (docker/docker-compose.yml: CAMUNDA_DATA_SECONDARY_STORAGE_TYPE=rdbms), so every request to deleteHistoryBackup 403s before reaching body/param validation for these scenario kinds. auth-absent/auth-invalid are deliberately NOT excluded: Spring Security's auth filter enforces authentication before this operation's business logic (including the RDBMS/ES-OS backend check) ever runs, so those two kinds still correctly assert 401 and are unaffected by this gap (confirmed: they pass in a live run). Not a product bug: revisit only if this suite is run against an ES/OS backend, or once a backend-conditional generation mechanism exists (tracked separately, api-test-generator#605)."
+    },
+    {
+      "operationId": "getUsageMetrics",
+      "scenarioKinds": [
+        {
+          "kind": "param-constraint-violation",
+          "targets": [
+            "query.tenantId"
+          ],
+          "constraintKinds": [
+            "length-max"
+          ]
+        }
+      ],
+      "reason": "there is a reported issue, no tenantId queryParam maxLength validation",
+      "knownIssue": {
+        "summary": "tenantId query param maxLength is not validated, returns 200 instead of 400",
+        "url": "https://github.com/camunda/camunda/issues/59378"
+      }
     }
   ]
 }
