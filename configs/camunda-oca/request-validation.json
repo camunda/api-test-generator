@@ -9,6 +9,18 @@
   },
   "excludeOperations": [
     {
+      "operationId": "createProbe",
+      "reason": "Probe API (alpha) is work in progress and under active development; tests are skipped until it stabilises."
+    },
+    {
+      "operationId": "activateProbes",
+      "reason": "Probe API (alpha) is work in progress and under active development; tests are skipped until it stabilises."
+    },
+    {
+      "operationId": "answerProbe",
+      "reason": "Probe API (alpha) is work in progress and under active development; tests are skipped until it stabilises."
+    },
+    {
       "operationId": "searchAgentDefinitions",
       "scenarioKinds": [
         {

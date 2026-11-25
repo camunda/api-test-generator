@@ -1,0 +1,17 @@
+{
+  "$comment": "Per-config positive-suite suppression list for camunda-oca. Each entry removes an operation's feature/variant spec from the generated positive suite. Use it sparingly, always with a documented reason. Entries without knownIssue are suppressed by choice (out of scope for now), not because of a bug.",
+  "suppress": [
+    {
+      "operationId": "createProbe",
+      "reason": "Probe API (alpha) is work in progress and under active development; tests are skipped until it stabilises."
+    },
+    {
+      "operationId": "activateProbes",
+      "reason": "Probe API (alpha) is work in progress and under active development; tests are skipped until it stabilises."
+    },
+    {
+      "operationId": "answerProbe",
+      "reason": "Probe API (alpha) is work in progress and under active development; tests are skipped until it stabilises."
+    }
+  ]
+}
