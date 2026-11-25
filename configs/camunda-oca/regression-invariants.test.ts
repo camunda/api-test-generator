@@ -84,6 +84,28 @@ function loadSuppressedOpIds(): Set<string> {
   return _suppressedOpIdsCache;
 }
 
+// Operations listed in `configs/camunda-oca/positive-suppress.json` (explicit,
+// by-choice suppression, e.g. the Probe API while it is in development). The
+// planner still emits their scenario JSON, but the materializer writes neither
+// a feature nor a variant spec for them, so invariants that expect an emitted
+// spec — or a runtime producer for a value the suppressed suite never sends —
+// must skip them. Read from the coverage artefact, like `loadSuppressedOpIds`.
+let _explicitSuppressedOpIdsCache: Set<string> | undefined;
+function loadExplicitlySuppressedOpIds(): Set<string> {
+  if (_explicitSuppressedOpIdsCache) return _explicitSuppressedOpIdsCache;
+  const coveragePath = join(GENERATED_TESTS_DIR, 'coverage.json');
+  if (!existsSync(coveragePath)) {
+    _explicitSuppressedOpIdsCache = new Set();
+    return _explicitSuppressedOpIdsCache;
+  }
+  // biome-ignore lint/plugin: runtime contract boundary — materializer-emitted coverage artefact; only `explicitlySuppressedOpIds: string[]` is read.
+  const parsed = JSON.parse(readFileSync(coveragePath, 'utf8')) as {
+    explicitlySuppressedOpIds?: string[];
+  };
+  _explicitSuppressedOpIdsCache = new Set(parsed.explicitlySuppressedOpIds ?? []);
+  return _explicitSuppressedOpIdsCache;
+}
+
 // ---------------------------------------------------------------------------
 // Bundled-spec helpers (shared between #326 and #247 invariants).
 //
@@ -1143,6 +1165,8 @@ describeForThisConfig('bundled-spec invariants: planner output', () => {
       if (!f.endsWith('-scenarios.json')) continue;
       // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
       const file = JSON.parse(readFileSync(join(SCENARIOS_DIR, f), 'utf8')) as ScenarioFile;
+      // Explicitly suppressed ops (positive-suppress.json) have no emitted suite.
+      if (loadExplicitlySuppressedOpIds().has(file.endpoint?.operationId)) continue;
       for (const sc of file.scenarios) {
         if (sc.id === 'unsatisfied') continue; // explicitly flagged unreachable
         const produced = new Set<string>(externals);
@@ -1914,6 +1938,8 @@ describeForThisConfig('bundled-spec invariants: planner variant output (#37)', (
       const file = JSON.parse(
         readFileSync(join(VARIANT_SCENARIOS_DIR, f), 'utf8'),
       ) as VariantScenarioFile;
+      // Explicitly suppressed ops (positive-suppress.json) have no emitted suite.
+      if (loadExplicitlySuppressedOpIds().has(file.endpoint?.operationId)) continue;
       for (const sc of file.scenarios) {
         const produced = new Set<string>(externals);
         for (const ref of sc.operations) {
@@ -2698,6 +2724,8 @@ describeForThisConfig('bundled-spec invariants: emitted Playwright variant suite
         readFileSync(join(VARIANT_SCENARIOS_DIR, f), 'utf8'),
       ) as VariantScenarioFile;
       if (!coll.scenarios?.length) continue;
+      // Explicit positive-suppress removes the op's variant spec too.
+      if (loadExplicitlySuppressedOpIds().has(coll.endpoint.operationId)) continue;
       variantFilesSeen++;
       const specName = `${coll.endpoint.operationId}.variant.spec.ts`;
       if (!existsSync(join(GENERATED_TESTS_DIR, specName))) {
@@ -4898,24 +4926,27 @@ describeForThisConfig(
           //     fails the run if one reappears.
         });
 
-        it(`${semantic} :: ${op.operationId}: emitted variant spec references ctx.${varName} (#162 PR 4)`, () => {
-          const spec = join(GENERATED_TESTS_DIR, `${op.operationId}.variant.spec.ts`);
-          if (!existsSync(spec)) {
-            throw new Error(
-              `expected emitted spec not found: ${op.operationId}.variant.spec.ts — run 'npm run testsuite:generate'`,
-            );
-          }
-          const src = readFileSync(spec, 'utf8');
-          // Variant specs use `variant-N` titles (no semantic-named
-          // marker), and an endpoint's variant file contains only its
-          // variant scenarios — so a file-wide `ctx.<sem>Var` reference
-          // is sufficient and unambiguous evidence that the scenario
-          // body wires the binding.
-          expect(
-            src.includes(`ctx.${varName}`),
-            `${op.operationId} variant spec: body must reference ctx.${varName}`,
-          ).toBe(true);
-        });
+        it.runIf(!loadExplicitlySuppressedOpIds().has(op.operationId))(
+          `${semantic} :: ${op.operationId}: emitted variant spec references ctx.${varName} (#162 PR 4)`,
+          () => {
+            const spec = join(GENERATED_TESTS_DIR, `${op.operationId}.variant.spec.ts`);
+            if (!existsSync(spec)) {
+              throw new Error(
+                `expected emitted spec not found: ${op.operationId}.variant.spec.ts — run 'npm run testsuite:generate'`,
+              );
+            }
+            const src = readFileSync(spec, 'utf8');
+            // Variant specs use `variant-N` titles (no semantic-named
+            // marker), and an endpoint's variant file contains only its
+            // variant scenarios — so a file-wide `ctx.<sem>Var` reference
+            // is sufficient and unambiguous evidence that the scenario
+            // body wires the binding.
+            expect(
+              src.includes(`ctx.${varName}`),
+              `${op.operationId} variant spec: body must reference ctx.${varName}`,
+            ).toBe(true);
+          },
+        );
       }
 
       // Required setter leaves — owned by the FEATURE (base) suite. See
@@ -4949,19 +4980,22 @@ describeForThisConfig(
           // couple this invariant to that override.
         });
 
-        it(`${semantic} :: ${op.operationId}: emitted feature spec references ctx.${varName} (#162 PR 2)`, () => {
-          const spec = join(GENERATED_TESTS_DIR, `${op.operationId}.feature.spec.ts`);
-          if (!existsSync(spec)) {
-            throw new Error(
-              `expected emitted spec not found: ${op.operationId}.feature.spec.ts — run 'npm run testsuite:generate'`,
-            );
-          }
-          const src = readFileSync(spec, 'utf8');
-          expect(
-            src.includes(`ctx.${varName}`),
-            `${op.operationId} feature spec: body must reference ctx.${varName}`,
-          ).toBe(true);
-        });
+        it.runIf(!loadExplicitlySuppressedOpIds().has(op.operationId))(
+          `${semantic} :: ${op.operationId}: emitted feature spec references ctx.${varName} (#162 PR 2)`,
+          () => {
+            const spec = join(GENERATED_TESTS_DIR, `${op.operationId}.feature.spec.ts`);
+            if (!existsSync(spec)) {
+              throw new Error(
+                `expected emitted spec not found: ${op.operationId}.feature.spec.ts — run 'npm run testsuite:generate'`,
+              );
+            }
+            const src = readFileSync(spec, 'utf8');
+            expect(
+              src.includes(`ctx.${varName}`),
+              `${op.operationId} feature spec: body must reference ctx.${varName}`,
+            ).toBe(true);
+          },
+        );
       }
     }
   },
@@ -5386,6 +5420,7 @@ describeForThisConfig('bundled-spec invariants: suite-partition cut (#162 PR 4)'
       const opId = parsed.endpoint?.operationId;
       if (!opId) continue;
       if (suppressed.has(opId)) continue;
+      if (loadExplicitlySuppressedOpIds().has(opId)) continue;
       const expectedSpec = `${opId}.feature.spec.ts`;
       const specPath = join(GENERATED_TESTS_DIR, expectedSpec);
       if (!existsSync(specPath)) {
