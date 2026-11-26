@@ -9,7 +9,8 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '../..');
 const ACTION = './.github/actions/fail-if-slack-failed';
 const WORKFLOWS = [
   'nightly-camunda-hub',
-  'triage-camunda-hub-nightly',
+  // The triage job's steps live in the reusable workflow its caller (triage-camunda-hub-nightly) runs.
+  '_triage-camunda-hub-nightly-agent',
   'spec-bump-check',
   'hub-known-issue-reenable-check',
   'hub-response-coverage',

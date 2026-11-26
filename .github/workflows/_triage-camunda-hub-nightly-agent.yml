@@ -1,0 +1,769 @@
+# description: The triage agent job of triage-camunda-hub-nightly.yml (its `triage` job), called from there. It lives
+#              in its own workflow so the Vault wrapping tokens from the `triage-secrets` job arrive as secrets,
+#              which GitHub masks in this job's log; plain job outputs would be printed in clear text
+#              (camunda/infra-global-github-actions#925). The `github` context is the caller's.
+# type: CI
+# owner: @camunda/test-automation-team
+---
+name: _triage-camunda-hub-nightly-agent
+
+on:
+  workflow_call:
+    inputs:
+      slack-channel:
+        description: Slack channel to post to (name or ID).
+        type: string
+        required: true
+      reports-dir:
+        description: Where the downloaded nightly reports land (exported to the agent as $REPORTS_DIR).
+        type: string
+        required: true
+    secrets:
+      VAULT_ADDR:
+        required: true
+      WRAP_TOKEN:
+        description: The wrap-token output of the caller's triage-secrets job. Empty when wrapping failed (best effort).
+        required: false
+      SLACK_WRAP_TOKEN:
+        description: The slack-wrap-token output of the caller's triage-secrets job. Empty when wrapping failed (best effort).
+        required: false
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  SLACK_CHANNEL: ${{ inputs.slack-channel }}
+  REPORTS_DIR: ${{ inputs.reports-dir }}
+
+jobs:
+  triage:
+    name: Triage agent
+    runs-on: ubuntu-latest
+    # 30 -> 45: #482's live curl-replay verification adds a full Hub pull +
+    # boot (up to 10 min per wait-for-hub's own default timeout) on any
+    # night with negative-suite failures, on top of everything this job
+    # already does.
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+    steps:
+      # First steps: the secrets come from the triage-secrets job, so this job needs no Vault login.
+      # Best effort, like the wrap steps there: a failure leaves the outputs empty and the steps that
+      # need a value fail or degrade on their own (see their comments).
+      - name: Unwrap secrets from Vault
+        id: vault
+        continue-on-error: true
+        uses: camunda/infra-global-github-actions/vault-wrapped-secrets/unwrap@20cb58c9ce170db539d649284bae2c35440ababd # vault-wrapped-secrets-1.0.2
+        with:
+          vault-url: ${{ secrets.VAULT_ADDR }}
+          wrap-token: ${{ secrets.WRAP_TOKEN }}
+
+      - name: Unwrap Slack bot token from Vault
+        id: slack
+        continue-on-error: true
+        uses: camunda/infra-global-github-actions/vault-wrapped-secrets/unwrap@20cb58c9ce170db539d649284bae2c35440ababd # vault-wrapped-secrets-1.0.2
+        with:
+          vault-url: ${{ secrets.VAULT_ADDR }}
+          wrap-token: ${{ secrets.SLACK_WRAP_TOKEN }}
+
+      - name: Checkout api-test-generator
+        uses: actions/checkout@v6
+        with:
+          # Short-lived GITHUB_TOKEN must not linger in .git/config — the private
+          # camunda-hub clone uses the Vault-issued App token configured below.
+          persist-credentials: false
+
+      # --- Resolve which nightly run to triage --------------------------------
+      # workflow_run → the run that triggered us; workflow_dispatch → the input.
+      - name: Resolve nightly run id
+        id: nightly
+        env:
+          EVENT_RUN_ID: ${{ github.event.workflow_run.id }}
+          INPUT_RUN_ID: ${{ github.event.inputs.nightly_run_id }}
+        run: |
+          set -euo pipefail
+          run_id="${INPUT_RUN_ID:-$EVENT_RUN_ID}"
+          if [ -z "$run_id" ]; then
+            echo "::error::No nightly run id (neither workflow_run event nor input)."; exit 1
+          fi
+          echo "run_id=${run_id}" >> "$GITHUB_OUTPUT"
+          echo "run_url=${{ github.server_url }}/${{ github.repository }}/actions/runs/${run_id}" >> "$GITHUB_OUTPUT"
+          echo "Triaging nightly run ${run_id}"
+
+      # --- Download the nightly reports artifact ------------------------------
+      # The artifact lives on the triggering run in THIS repo, so github.token
+      # (actions: read) suffices. Contains pw-{positive,secured,rbac}.{json,junit.xml}
+      # plus the HTML report dirs with traces/screenshots (failures only).
+      # continue-on-error: a missing artifact (nightly crashed before its always()
+      # upload) must NOT hard-fail the job — we detect it below and report it as
+      # inconclusive rather than dying silently or implying a green night.
+      - name: Download camunda-hub-nightly-reports
+        id: download
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: camunda-hub-nightly-reports
+          path: ${{ env.REPORTS_DIR }}
+          run-id: ${{ steps.nightly.outputs.run_id }}
+          github-token: ${{ github.token }}
+
+      # No-false-all-clear: a triage with no report data must announce itself as
+      # inconclusive, never post a green digest. has_reports gates the agent step.
+      - name: Check reports present
+        id: reports
+        run: |
+          set -euo pipefail
+          echo "REPORTS_DIR=${REPORTS_DIR}"
+          # download-artifact may not create this directory at all if the
+          # artifact was totally missing (continue-on-error just swallows that
+          # failure) — mkdir -p first so `find` below has something to search
+          # instead of erroring out and killing this step under pipefail.
+          mkdir -p "${REPORTS_DIR}"
+          find "${REPORTS_DIR}" -maxdepth 2 -type f 2>/dev/null | head -50 || true
+          # Neutralize find's own exit code INSIDE the subshell, at the
+          # source, rather than a trailing `|| echo 0` on the whole
+          # substitution: if find fails after already emitting some paths
+          # (e.g. a permission error partway through), pipefail would still
+          # make the outer pipe's status non-zero even though wc/tr both
+          # succeeded — and `|| echo 0` would then APPEND "0" after the
+          # count wc already produced, making $count a two-line, non-numeric
+          # value that breaks the -gt comparison below.
+          # Either report format is sufficient signal to triage — a partial
+          # reporter write (e.g. JSON write interrupted, JUnit already
+          # flushed) shouldn't be treated as "nothing to triage" when real
+          # data exists in the other format.
+          count=$( (find "${REPORTS_DIR}" -maxdepth 2 \( -name 'pw-*.json' -o -name 'pw-*.junit.xml' \) 2>/dev/null || true) | wc -l | tr -d ' ')
+          if [ "${count}" -gt 0 ]; then
+            echo "has_reports=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_reports=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::No pw-*.json or pw-*.junit.xml reports found (download outcome: ${{ steps.download.outcome }}). Reporting as inconclusive."
+          fi
+
+      # --- #482: live curl-replay verification of negative-suite failures ----
+      # Before the agent ever classifies a failure as a genuine product bug,
+      # give it one more piece of evidence: does the exact same request still
+      # get the same (wrong) response RIGHT NOW, against a fresh Hub — or has
+      # it since been fixed / was it flaky? Runs for EVERY negative-suite
+      # failure (not just eventual "looks like a product bug" candidates —
+      # nothing here knows which ones look like bugs yet, that's the agent's
+      # job), against ONE freshly-started Hub, so the live-Hub cost is
+      # bounded to once per night regardless of how many candidates appear.
+      #
+      # Positive-suite failures aren't covered — materializer/templates has
+      # no evidence-capture mechanism at all (unlike request-validation's
+      # request.json/response.json testInfo.attach()ments), so there is
+      # nothing to reconstruct a request from there yet. Tracked as a
+      # follow-up once that instrumentation exists.
+      - name: Check for negative-suite failures worth verifying
+        id: neg-failures
+        if: ${{ steps.reports.outputs.has_reports == 'true' }}
+        run: |
+          set -euo pipefail
+          count=0
+          for f in "${REPORTS_DIR}/pw-secured.json" "${REPORTS_DIR}/pw-rbac.json"; do
+            [ -f "$f" ] || continue
+            n=$(jq -r '.stats.unexpected // 0' "$f" 2>/dev/null || echo 0)
+            count=$((count + n))
+          done
+          echo "Negative-suite unexpected-result count: ${count}"
+          if [ "$count" -gt 0 ]; then
+            echo "has_negative_failures=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_negative_failures=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # No camunda-hub clone needed here: HUB_MODE=prebuilt (the "Start Hub"
+      # step below) runs a published DOCKER IMAGE, not a source build —
+      # docker/start-hub.sh's own source-build path is the only one that
+      # touches the ../camunda-hub sibling (for `make`/a JDK/the local-bundle
+      # spec source), and that path is never taken here. continue-on-error
+      # on every step below: a failure anywhere in this verification chain
+      # must degrade to "no verification data" (handled by the guidance doc
+      # below), never fail the whole triage run.
+      - name: Setup Python (for live verification)
+        if: ${{ steps.reports.outputs.has_reports == 'true' && steps.neg-failures.outputs.has_negative_failures == 'true' }}
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.x'
+
+      # Public image, no registry login needed (unlike hub-pr-check.yml's
+      # private pr-<sha> image) — same defaults hub-ondemand-test.yml uses.
+      - name: Start Hub (prebuilt image, for live verification)
+        id: verify-hub-start
+        if: ${{ steps.reports.outputs.has_reports == 'true' && steps.neg-failures.outputs.has_negative_failures == 'true' }}
+        continue-on-error: true
+        env:
+          HUB_MODE: prebuilt
+          HUB_IMAGE: camunda/hub:SNAPSHOT
+        run: ./docker/start-hub.sh start
+
+      - name: Wait for Hub to be ready (live verification)
+        if: ${{ steps.reports.outputs.has_reports == 'true' && steps.neg-failures.outputs.has_negative_failures == 'true' && steps.verify-hub-start.outcome == 'success' }}
+        continue-on-error: true
+        uses: ./.github/actions/wait-for-hub
+        with:
+          url: http://localhost:8088/api/v2/
+
+      - name: Run curl-replay verification
+        if: ${{ steps.reports.outputs.has_reports == 'true' && steps.neg-failures.outputs.has_negative_failures == 'true' }}
+        continue-on-error: true
+        run: |
+          python3 scripts/e2e/verify-negative-failures.py \
+            --reports-dir "${REPORTS_DIR}" \
+            --base-url http://localhost:8088/api \
+            --kc-url http://localhost:18080/auth/realms/camunda-platform/protocol/openid-connect/token \
+            --out "${GITHUB_WORKSPACE}/curl-verification.json"
+
+      # Runs regardless of which prior step failed/was skipped — the agent's
+      # guidance treats a missing/empty file as "verification unavailable,"
+      # so this just guarantees the path always exists to read.
+      - name: Ensure curl-verification.json exists
+        if: always()
+        run: |
+          f="${GITHUB_WORKSPACE}/curl-verification.json"
+          [ -s "$f" ] || echo '{}' > "$f"
+
+      - name: Stop Hub (live verification)
+        if: ${{ always() && steps.verify-hub-start.outcome == 'success' }}
+        run: ./docker/start-hub.sh stop || true
+
+      # Best-effort label pre-creation, deterministic bash (not left to the
+      # agent's own retry-on-error, which is fuzzier). kind/bug already exists
+      # on camunda-hub; nightly-detected and nightly-api-fix don't yet.
+      - name: Ensure labels exist (camunda-hub)
+        if: ${{ fromJSON(steps.vault.outputs.secrets || '{}').GH_TOKEN_HUB != '' }}
+        env:
+          GH_TOKEN: ${{ fromJSON(steps.vault.outputs.secrets || '{}').GH_TOKEN_HUB }}
+        run: |
+          gh label create kind/bug --repo camunda/camunda-hub --color d73a4a --description "A confirmed defect" 2>/dev/null || true
+          gh label create nightly-detected --repo camunda/camunda-hub --color 5319e7 --description "Filed by the camunda-hub nightly API triage agent" 2>/dev/null || true
+          # A dedicated, agent-only marker for dashboards: "this product bug was caught by the
+          # api-test-generator pipeline". Kept separate from nightly-detected, which humans also apply
+          # to their own nightly write-ups, so it cannot give a clean count. Only the agent sets this.
+          gh label create qa/api-test-generator --repo camunda/camunda-hub --color 0e8a16 --description "Product bug caught by the api-test-generator pipeline (for metrics)" 2>/dev/null || true
+          # The agent never opens a PR here (issues only), but a human fixing a
+          # filed issue is asked to carry this label — pre-create it so the
+          # close-stale-nightly-api-fix-prs janitor's camunda-hub leg (and the
+          # human) find it ready.
+          gh label create nightly-api-fix --repo camunda/camunda-hub --color FF4444 --description "Human fix PR for a nightly-detected camunda-hub issue" 2>/dev/null || true
+
+      - name: Ensure labels exist (api-test-generator)
+        if: ${{ fromJSON(steps.vault.outputs.secrets || '{}').GH_TOKEN_GENERATOR != '' }}
+        env:
+          GH_TOKEN: ${{ fromJSON(steps.vault.outputs.secrets || '{}').GH_TOKEN_GENERATOR }}
+        run: |
+          gh label create nightly-api-fix --repo camunda/api-test-generator --color FF4444 --description "Bot-opened fix PR for a nightly triage finding (test-generation bug or coverage gap)" 2>/dev/null || true
+          gh label create auto-generated --repo camunda/api-test-generator --color ededed --description "Opened by automation, not a human" 2>/dev/null || true
+
+      # --- Toolchain ----------------------------------------------------------
+      # 'stable' (not a pinned major) — the exact Go version isn't part of this
+      # workflow's deterministic behavior (workspace-cli itself is already
+      # pinned to a commit SHA below), so tracking stable avoids running an
+      # EOL, security-fix-less toolchain that a hardcoded version would drift
+      # into over time.
+      # Only needed to build the agent's workspace, which only happens when
+      # has_reports is true — gated the same as the token/credential steps
+      # above, so a no-reports night can't hard-fail here either.
+      - name: Setup Go (for workspace-cli)
+        if: ${{ steps.reports.outputs.has_reports == 'true' }}
+        uses: actions/setup-go@v5
+        with:
+          go-version: 'stable'
+
+      - name: Setup Node.js 22 (for Claude Code CLI)
+        if: ${{ steps.reports.outputs.has_reports == 'true' }}
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      # Pinned to a commit SHA (workspace-cli has no tagged releases) rather
+      # than @latest, so an upstream breaking change can't silently start
+      # failing nightly triage — bump intentionally. SHA = camunda/
+      # workspace-cli main HEAD @ 2026-07-15.
+      #
+      # workspace-cli is ITSELF a private repo (a separate concern from "which
+      # repos workspace-cli clones" — the "Configure git credentials for
+      # cloning" step below, for camunda-hub) — go install's checksum lookup
+      # against sum.golang.org 404s for a private module, and it then falls
+      # back to an unauthenticated `git ls-remote`, which fails outright. Two
+      # things fix this, matching the same pattern the c8-orchestration-
+      # cluster-e2e-nightly-fix.yml reference this agent is modeled on
+      # already uses: GOPRIVATE tells Go to skip the public checksum lookup
+      # entirely for camunda/*, and a repo-specific insteadOf authenticates
+      # the actual git fetch with the Vault-issued PAT — the qa-processes App
+      # token can't be used here, it has no grant on this repo.
+      - name: Install workspace-cli
+        if: ${{ steps.reports.outputs.has_reports == 'true' }}
+        env:
+          GOPRIVATE: github.com/camunda/*
+          GH_PAT: ${{ fromJSON(steps.vault.outputs.secrets || '{}').GH_PAT }}
+        run: |
+          set -euo pipefail
+          if [ -z "$GH_PAT" ]; then
+            echo "::error::No GitHub PAT from Vault — cannot authenticate the private workspace-cli module fetch."
+            exit 1
+          fi
+          # Scoped, temporary gitconfig for this credential only — NOT the
+          # persistent $HOME/.gitconfig the later camunda-hub clone rewrite
+          # uses. If `go install` fails (or anything else in this step does),
+          # the trap still removes it: the PAT can never outlive this one
+          # step, regardless of exit status, and never needs the later
+          # "Scrub git credentials" step to find and remove it.
+          GIT_CONFIG_GLOBAL="$(mktemp)"
+          export GIT_CONFIG_GLOBAL
+          trap 'rm -f "$GIT_CONFIG_GLOBAL"' EXIT
+          git config --global url."https://x-access-token:${GH_PAT}@github.com/camunda/workspace-cli".insteadOf "https://github.com/camunda/workspace-cli"
+          go install github.com/camunda/workspace-cli/cmd/workspace@e1b3f19dd244957db5eb3b4ebd5bc71999c3deb0
+          echo "$HOME/go/bin" >> "$GITHUB_PATH"
+
+      # Pinned version (same as the c8-orchestration-cluster-e2e-nightly-fix.yml
+      # reference this agent is modeled on) — bump intentionally.
+      - name: Install Claude Code CLI
+        if: ${{ steps.reports.outputs.has_reports == 'true' }}
+        run: |
+          set -euo pipefail
+          npm install -g @anthropic-ai/claude-code@2.1.156
+          claude --version
+
+      # Only camunda-hub needs a clone rewrite: it's the one private repo, and
+      # the ONLY thing cloning needs. camunda-docs and api-test-generator are
+      # both public — workspace-cli clones them anonymously, no token needed
+      # for that. api-test-generator does NOT get a persisted rewrite here
+      # even though the agent may later push there: the guidance has it set
+      # GH_TOKEN_GENERATOR explicitly on the push URL at push time (see
+      # "Fixing a test-generation / coverage bug"), so a global rewrite would
+      # only add exposure (present in gitconfig during `workspace create`,
+      # before the later scrub step) with no cloning benefit.
+      - name: Configure git credentials for cloning
+        # Only needed to clone camunda-hub for the agent's workspace (has_reports
+        # true). Without this guard, the exit 1 below on an empty HUB_TOKEN
+        # would hard-fail a no-reports night before it ever reaches the
+        # inconclusive-result write — same reasoning as the two steps above.
+        if: ${{ steps.reports.outputs.has_reports == 'true' }}
+        env:
+          HUB_TOKEN: ${{ fromJSON(steps.vault.outputs.secrets || '{}').HUB_CLONE_TOKEN }}
+        run: |
+          set -euo pipefail
+          # hub-token isn't continue-on-error (unlike the two qa-processes
+          # tokens) — camunda-hub is the one repo this workflow cannot function
+          # without. Fail here with a clear reason rather than silently
+          # configuring a rewrite with an empty token and letting `workspace
+          # create` fail later with a much less actionable git/auth error.
+          if [ -z "$HUB_TOKEN" ]; then
+            echo "::error::No camunda-hub clone token — hub-clone-token action returned empty (check Vault OIDC + preview-envs role, and that the App is installed on camunda/camunda-hub with Contents: Read)."
+            exit 1
+          fi
+          git config --global url."https://x-access-token:${HUB_TOKEN}@github.com/camunda/camunda-hub".insteadOf "https://github.com/camunda/camunda-hub"
+
+      # --- Create the 3-repo workspace ----------------------------------------
+      - name: Stage workspace manifest + guidance
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.workspace-templates"
+          src="resources/workspace-templates/camunda-hub-nightlies"
+          cp "$src/camunda-hub-nightlies.guidance.yaml" "$HOME/.workspace-templates/camunda-hub-nightlies.yaml"
+          cp "$src/camunda-hub-nightlies.guidance.md"   "$HOME/.workspace-templates/camunda-hub-nightlies.guidance.md"
+
+      - name: Compute workspace name
+        id: ws
+        run: echo "name=hub-triage-${{ steps.nightly.outputs.run_id }}" >> "$GITHUB_OUTPUT"
+
+      - name: Create workspace
+        if: ${{ steps.reports.outputs.has_reports == 'true' }}
+        run: |
+          set -euo pipefail
+          # --manifest takes a bare NAME (workspace-cli resolves it against
+          # ~/.workspace-templates/<name>.yaml itself, trying .yaml then .yml)
+          # — NOT a path and NOT an extension, despite the staged file above
+          # literally being that path. Passing the full path (as this step
+          # used to) makes workspace-cli try to resolve it AGAIN relative to
+          # its own templates dir, producing a doubled, nonexistent path.
+          # Matches the exact invocation the c8-orchestration-cluster-e2e-
+          # nightly-fix.yml reference this agent is modeled on already uses
+          # (`--manifest camunda-orchestration-cluster-nightly`, no path).
+          workspace create "${{ steps.ws.outputs.name }}" \
+            --manifest camunda-hub-nightlies
+
+      # Cloning is done — scrub the token-bearing url.*.insteadOf rewrites from
+      # global gitconfig BEFORE the agent (running with
+      # --dangerously-skip-permissions, and fed untrusted report content) can
+      # read them. If it needs to push a fix PR, the guidance instructs it to
+      # set the credential explicitly at push time from $GH_TOKEN_GENERATOR —
+      # it never needs the persisted global rewrite for that.
+      - name: Scrub git credentials before running the agent
+        if: ${{ steps.reports.outputs.has_reports == 'true' }}
+        run: |
+          # --unset-all needs the exact key, and the key itself embeds the
+          # token value — enumerate every url.*.insteadof key and unset any
+          # whose key contains the token marker, rather than reconstructing
+          # the token value here.
+          # GitHub Actions runs bash steps with -e/pipefail by default even
+          # without an explicit `set` line — --get-regexp exits 1 when there
+          # are no matches (e.g. a future change removes the earlier rewrite
+          # entirely), which would otherwise abort this step even though
+          # "nothing to scrub" is a perfectly valid, unremarkable state.
+          git config --global --get-regexp '^url\..*\.insteadof$' 2>/dev/null | while read -r key _; do
+            case "$key" in
+              *x-access-token*) git config --global --unset-all "$key" ;;
+            esac
+          done || true
+          grep -qi 'x-access-token' "$HOME/.gitconfig" 2>/dev/null && echo "::warning::token-bearing gitconfig entry survived scrub" || true
+
+      # --- Discover open fix PRs, by actual diff content ------------------------
+      # Mirrors the c8-orchestration-cluster-e2e-nightly-triage.yml reference's
+      # "skip dispatch when an open failing-test-fix PR already exists" dedup —
+      # without this, the same persisting bug could get a duplicate fix PR
+      # opened every night until the first one merges. The reference matches by
+      # FILE PATH (their tests map 1:1 to committed spec files); that doesn't
+      # translate here — our fix PRs touch shared config files
+      # (positive-suppress.json, ontology mappings, generator source) where the
+      # operationId lives IN the content, not the path. So this fetches each
+      # open nightly-api-fix PR's actual diff (ground truth, not a self-reported
+      # tag) and hands the raw list to the agent, which checks whether its
+      # operationId appears anywhere in an open PR's diff before attempting a
+      # new fix. Read-only against this repo — github.token suffices, no
+      # dependency on the (possibly-unavailable) qa-processes token.
+      - name: Discover open fix PRs (for dedup by diff content)
+        id: covered
+        if: ${{ steps.reports.outputs.has_reports == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          out="${GITHUB_WORKSPACE}/open-fix-prs.json"
+          acc="$(mktemp)"
+          diff_file="$(mktemp)"
+          echo '[]' > "$acc"
+          # Capture stderr to a file, NOT via 2>&1 into $nums — 2>&1 would mix
+          # any stderr warning gh/jq emit into the PR-number list even on the
+          # success path, and a non-numeric line later breaks ($n|tonumber)
+          # and aborts this step under pipefail.
+          list_err="$(mktemp)"
+          if ! nums=$(gh pr list --repo camunda/api-test-generator \
+                   --search "label:nightly-api-fix is:open" \
+                   --limit 50 --json number --jq '.[].number' 2>"$list_err"); then
+            echo "::warning::Could not list open nightly-api-fix PRs ($(cat "$list_err")) — dedup coverage for this run will be empty, which could let a duplicate PR get opened for an already-in-flight fix."
+            nums=""
+          fi
+          rm -f "$list_err"
+          if [ -n "$nums" ]; then
+            while IFS= read -r n; do
+              [ -z "$n" ] && continue
+              # Cap each PR's diff: the guardrails require fix PRs to be
+              # minimal/mechanical, so a large diff here is itself a signal
+              # something's off — this just bounds the worst-case file size.
+              # Diff content is passed via --rawfile and the running
+              # accumulator via a temp FILE (never a shell variable) — a diff
+              # containing an embedded newline round-tripped through
+              # `var=$(...)` was observed to produce invalid JSON (a raw
+              # unescaped control character survives into the string) on this
+              # jq/shell combination; file-to-file avoids that class of bug
+              # entirely rather than chasing its root cause.
+              if ! gh pr diff "$n" --repo camunda/api-test-generator 2>/dev/null | head -c 20000 > "$diff_file"; then
+                echo "::warning::Could not fetch diff for open fix PR #${n} — its dedup coverage for this run will be incomplete (empty diff), which could let a duplicate PR get opened for an already-in-flight fix."
+                : > "$diff_file"
+              fi
+              # --slurpfile reads the accumulator straight from the file
+              # (binding $acc to a 1-element array containing it, hence
+              # $acc[0] below) rather than injecting its content as a
+              # command-line argument — with up to 50 PRs x a 20KB diff cap
+              # each, --argjson acc "$(cat "$acc")" could approach/exceed
+              # ARG_MAX after JSON-escaping overhead and fail this step,
+              # silently defeating the dedup guardrail.
+              jq -n --slurpfile acc "$acc" --arg n "$n" \
+                --arg url "https://github.com/camunda/api-test-generator/pull/${n}" \
+                --rawfile diff "$diff_file" \
+                '$acc[0] + [{number: ($n|tonumber), url: $url, diff: $diff}]' > "${acc}.new"
+              mv "${acc}.new" "$acc"
+            done <<< "$nums"
+          fi
+          cp "$acc" "$out"
+          rm -f "$acc" "$diff_file"
+          count=$(jq 'length' "$out")
+          echo "count=${count}" >> "$GITHUB_OUTPUT"
+          echo "Open nightly-api-fix PRs found: ${count}"
+
+      # --- Run the Claude triage agent ----------------------------------------
+      - name: Run Claude triage agent in workspace
+        id: agent
+        if: ${{ steps.reports.outputs.has_reports == 'true' }}
+        env:
+          OPEN_FIX_PRS_FILE: ${{ github.workspace }}/open-fix-prs.json
+          # #482 — always exists (the "Ensure curl-verification.json exists"
+          # step above guarantees it), but may be "{}" if there were no
+          # negative-suite failures, the Hub never came up, or the script
+          # itself errored. Treat a missing key the same as an empty file:
+          # verification unavailable for that test, fall back to
+          # single-observation judgment (see the guidance's own section).
+          CURL_VERIFICATION_FILE: ${{ github.workspace }}/curl-verification.json
+          ANTHROPIC_API_KEY: ${{ fromJSON(steps.vault.outputs.secrets || '{}').ANTHROPIC_API_KEY }}
+          # Two separately-scoped tokens — see "Configure git credentials" above
+          # and the guidance's Role section for which one is valid where.
+          # Empty if the App couldn't be reached → the agent falls back to
+          # report-only for that repo at runtime.
+          GH_TOKEN_HUB: ${{ fromJSON(steps.vault.outputs.secrets || '{}').GH_TOKEN_HUB }}
+          GH_TOKEN_GENERATOR: ${{ fromJSON(steps.vault.outputs.secrets || '{}').GH_TOKEN_GENERATOR }}
+          NIGHTLY_RUN_URL: ${{ steps.nightly.outputs.run_url }}
+          REPORTS_DIR: ${{ env.REPORTS_DIR }}
+          WORKSPACE_NAME: ${{ steps.ws.outputs.name }}
+        run: |
+          set -euo pipefail
+          ws_dir="$HOME/workspaces/${WORKSPACE_NAME}"
+          rm -f /tmp/hub-triage.json
+
+          prompt=$(cat <<EOF
+          You are the camunda-hub nightly API TRIAGE agent, working in the workspace at ${ws_dir}.
+          Read AGENTS.md and the workspace guidance ("camunda-hub Nightly API Triage — Workspace
+          Guidance") FIRST — it defines the two suites, the unmapped-operations coverage check, the
+          debug procedure, the categories, the product-bug commit-dedup rule, the known-issue
+          reconciliation, the test-generation/coverage fix-PR procedure, and the exact output schema.
+          Follow it precisely.
+
+          Your write access is asymmetric — memorize this: camunda-hub gets issues ONLY, never code,
+          never a PR, never a push (use \$GH_TOKEN_HUB for that, nothing else). api-test-generator may
+          get a PR, but ONLY for a confirmed test-generation bug or an unmapped-operation with an
+          obvious, minimal, safe fix — never a direct push to main (use \$GH_TOKEN_GENERATOR for that,
+          and only after you're confident per the guidance's guardrails). camunda-docs is always
+          read-only. When in doubt, report-only — that is always the safe choice.
+
+          Inputs:
+          - The downloaded nightly reports are at: ${REPORTS_DIR}
+            (pw-positive.{json,junit.xml}, pw-secured.*, pw-rbac.*, pw-*/index.html HTML reports, and
+            coverage.json — check its summary.unmappedOperations EVERY run, independent of suite
+            pass/fail, per the guidance). NOTE: there is no Playwright trace (trace capture is off in
+            both suite configs) — the request/response evidence for a negative-suite failure is its
+            request.json/response.json attachment; a positive-suite failure has no such attachment,
+            recover what you can from the HTML report's own error message instead.
+          - OpenAPI spec: ${ws_dir}/camunda-hub/restapi/public-api/src/main/resources/openapi/v2/*.yaml
+          - Suite configs (known issues): ${ws_dir}/api-test-generator/configs/camunda-hub/positive-suppress.json
+            and request-validation.json
+          - Nightly run URL: ${NIGHTLY_RUN_URL}
+          - Open fix PRs already in flight (JSON array of {number, url, diff}, may be []):
+            ${OPEN_FIX_PRS_FILE} — before fixing ANY operationId, check whether it appears
+            anywhere in one of these diffs (a substring match, e.g. as a JSON key in
+            positive-suppress.json or a comment); if so, that operation is already being
+            fixed elsewhere.
+          - Live curl-replay verification results (#482), negative-suite failures only, may be "{}"
+            (no negative-suite failures, or verification itself was unavailable that night):
+            ${CURL_VERIFICATION_FILE} — keyed by "<operationId>::<scenarioKind>::<test title>", each
+            entry \`{ confirmed: true|false|null, curlStatus, expectedStatus, curlBody, error }\`.
+            confirmed:true means the exact same request STILL gets the wrong response right now
+            against a fresh Hub; confirmed:false means it no longer reproduces (treat as unconfirmed/
+            flaky, per the guidance's "when in doubt, report-only" rule — do not file); confirmed:null
+            means it could not be checked (see its error field — e.g. a body-shape-only failure this
+            tool doesn't re-verify, or no deny token available) — fall back to your own single-
+            observation judgment as before. See the guidance's "Filing a product-bug issue" section
+            for exactly where this plugs in.
+          - NOTE: the generated *.spec.ts files are gitignored and NOT present here — recover what
+            each test asserted from the report's request/response attachment + assertion error, not
+            from source.
+
+          Do this:
+          1. Parse both suites' JSON/JUnit and enumerate every failing test (positive + negative).
+          2. Check coverage.json's summary.unmappedOperations regardless of suite results — these
+             never show up as failing tests, so they're easy to miss on an all-green night.
+          3. For each test failure: read its request/response attachment (negative suite) or the HTML
+             report's own error message (positive suite — no attachment exists there) to see the
+             actual request+response+assertion, then resolve the operation in the OpenAPI v2 spec.
+          4. Classify each as product / infrastructure / flakiness with evidence. A "product" bug
+             REQUIRES the response to CONTRADICT the spec (mind the 400→404→403 precedence quirk
+             described in the guidance before calling a status mismatch a product bug); if the
+             response and spec AGREE but the test failed, that is a test-generation bug (subcategory
+             "test-generation") — never a camunda-hub issue.
+          5. Reconcile against the knownIssue entries before calling anything a NEW bug.
+          6. For each PRODUCT bug (response contradicts spec) that is NOT already-known: search recent
+             camunda-hub main commits for a related change. If a related commit explains it → action
+             "skip" (record the commit). If not, and this is a NEGATIVE-suite failure, look up its
+             entry in ${CURL_VERIFICATION_FILE} (#482) BEFORE filing — key
+             "<operationId>::<scenarioKind>::<test title>":
+               - confirmed:true → proceed to file, and include the curl exchange (status + body) from
+                 curlStatus/curlBody as extra evidence in the issue body.
+               - confirmed:false → do NOT file. It no longer reproduces against a fresh Hub right now —
+                 treat as unconfirmed/flaky (category unchanged, action "report-only", note in your
+                 reasoning that a live re-check no longer reproduced it).
+               - confirmed:null, or no entry at all (positive-suite failure, or verification was
+                 unavailable that night) → fall back to filing on your own single-observation judgment
+                 as before, and say so explicitly in the issue/summary (so it's visible that live
+                 re-verification was attempted but inconclusive, not silently skipped).
+             Once past that check: compute the fingerprint, dedup by the
+             \`nightly-api-triage fp=<fp>\` marker (then by symptom), and either link the existing issue
+             or file a new one with \`gh issue create --repo camunda/camunda-hub\` using GH_TOKEN_HUB
+             (labels kind/bug + nightly-detected + qa/api-test-generator, already pre-created; fingerprint marker in the body).
+             If GH_TOKEN_HUB is empty or filing fails, set action "report-only" with file_error.
+          7. For EVERY product bug you just filed OR found already-known (known_issue: true) — not only
+             newly-filed ones — also suppress the affected test in api-test-generator: per the
+             guidance's "Suppressing a confirmed product bug" section, ONLY the exact operationId+suite
+             this failure implicates, never other operations. Check ${OPEN_FIX_PRS_FILE}'s diffs first;
+             if already covered by an open PR, set suppress_pr_url to that PR's url instead of opening a
+             duplicate. Record the result as suppress_pr_url (or leave null + suppress_error, a separate
+             field from file_error, if it couldn't be done) — independent of the issue-filing action
+             above, never fails the run.
+          8. For each test-generation bug or unmapped operation: search ${OPEN_FIX_PRS_FILE}'s diffs
+             for the operationId FIRST. If it appears in any listed PR's diff: do NOT attempt a fix —
+             set action "skip" and fix_pr_url to that PR's url. Otherwise, per the guidance's
+             guardrails, either apply a minimal fix and open an api-test-generator PR using
+             GH_TOKEN_GENERATOR (labels nightly-api-fix, auto-generated and hub, already pre-created), or — if you're not fully
+             confident — action "report-only". Never push directly to main.
+          9. Write the full triage result to /tmp/hub-triage.json in the exact schema from the guidance.
+          EOF
+          )
+
+          set +e
+          claude -p "$prompt" --dangerously-skip-permissions
+          agent_rc=$?
+          set -e
+          echo "claude exit code: ${agent_rc}"
+
+          if [ ! -s /tmp/hub-triage.json ]; then
+            echo "::warning::Agent did not write /tmp/hub-triage.json — writing a crash sentinel."
+            printf '{"run_url":"%s","suites":{},"failures":[],"counts":{},"agent_error":true}\n' \
+              "${NIGHTLY_RUN_URL}" > /tmp/hub-triage.json
+          fi
+          cp /tmp/hub-triage.json "${GITHUB_WORKSPACE}/hub-triage.json"
+
+      # A fix/suppress PR the agent opens against api-test-generator does NOT get the automatic live-Hub check:
+      # hub-pr-live-check.yml skips every PR from the automation account (the agent and the deterministic scripts use the
+      # same token, and the agent picks its own branch name), because that check runs the PR's own code with Hub access
+      # the moment the PR opens, before anyone has read it. A person reads the diff and then runs hub-ondemand-test.yml
+      # on the PR's branch before merging. (An earlier version of this workflow dispatched hub-ondemand-test.yml itself
+      # and commented the run link; that was removed when hub-pr-live-check.yml shipped (#513), and the automatic run
+      # was then limited to PRs from people.)
+
+      # Attribute a nightly finding to the endpoint's author on GitHub (handover
+      # call, 2026-10-28: a generator gap "belongs end-to-end" to whoever added
+      # the operation). A test-generation / unmapped-op FIX PR gets them as
+      # assignee + reviewer; a product-bug SUPPRESS PR gets them as reviewer only
+      # (they sanity-check the suppression); a freshly filed Hub BUG gets them as
+      # the issue's assignee (it is theirs to drive). Best-effort and purely
+      # additive — when no individual author resolves, the step falls back to
+      # @camunda/hub (a team review on a PR; an @camunda/hub mention on the issue,
+      # since a team can't be assigned to an issue), so every finding ends with an
+      # owner; continue-on-error means a miss never fails the run. The nightly
+      # digest does not ping hub-medic for any of these — this assignment is the
+      # notification.
+      - name: Assign nightly agent findings to the endpoint author (best-effort)
+        if: ${{ steps.reports.outputs.has_reports == 'true' && (fromJSON(steps.vault.outputs.secrets || '{}').GH_TOKEN_GENERATOR != '' || fromJSON(steps.vault.outputs.secrets || '{}').GH_TOKEN_HUB != '') }}
+        continue-on-error: true
+        env:
+          WORKSPACE_NAME: ${{ steps.ws.outputs.name }}
+          # PR writes on api-test-generator (assign + request review).
+          GH_TOKEN_GENERATOR: ${{ fromJSON(steps.vault.outputs.secrets || '{}').GH_TOKEN_GENERATOR }}
+          # Issues:write on camunda-hub — assigns / mentions on the fresh-bug issue.
+          GH_TOKEN_HUB: ${{ fromJSON(steps.vault.outputs.secrets || '{}').GH_TOKEN_HUB }}
+          # Contents:Read on camunda-hub — the helper maps a commit SHA -> login.
+          HUB_TOKEN: ${{ fromJSON(steps.vault.outputs.secrets || '{}').HUB_CLONE_TOKEN }}
+          # Findings it could not route to any owner, read by the thread fail-safe below.
+          UNROUTED_FILE: ${{ github.workspace }}/hub-unrouted.txt
+        run: |
+          set -uo pipefail
+          # Orchestration lives in a script so it can be unit-tested
+          # (tests/triage/hub-assign-fix-prs.test.ts) — the filtering, the
+          # suppress-PR exclusion, grouping, assignment and the team fallback.
+          hub_dir="${HOME}/workspaces/${WORKSPACE_NAME}/camunda-hub"
+          bash .github/scripts/hub-assign-fix-prs.sh "${GITHUB_WORKSPACE}/hub-triage.json" "$hub_dir"
+
+      # No reports downloaded → write an inconclusive result so Slack announces it
+      # (never a green digest). Mirrors the c8 "no false all-clear" rule.
+      - name: Write inconclusive result (no reports)
+        if: ${{ steps.reports.outputs.has_reports != 'true' }}
+        env:
+          NIGHTLY_RUN_URL: ${{ steps.nightly.outputs.run_url }}
+        run: |
+          set -euo pipefail
+          printf '{"run_url":"%s","suites":{},"failures":[],"counts":{},"inconclusive":true}\n' \
+            "${NIGHTLY_RUN_URL}" > "${GITHUB_WORKSPACE}/hub-triage.json"
+
+      # --- Post the triaged digest to Slack -----------------------------------
+      - name: Post triage summary to Slack
+        id: slack-summary
+        if: ${{ always() && fromJSON(steps.slack.outputs.secrets || '{}').SLACK_BOT_TOKEN != '' }}
+        # Notification infra must not fail the run — the triage JSON is already
+        # produced and uploaded regardless of whether Slack is reachable.
+        continue-on-error: true
+        env:
+          SLACK_BOT_TOKEN: ${{ fromJSON(steps.slack.outputs.secrets || '{}').SLACK_BOT_TOKEN }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          NIGHTLY_RUN_URL: ${{ steps.nightly.outputs.run_url }}
+          COOKBOOK_URL: ${{ github.server_url }}/${{ github.repository }}/blob/main/docs/hub-nightly-cookbook.md
+        run: |
+          set -euo pipefail
+          f="${GITHUB_WORKSPACE}/hub-triage.json"
+          summary=$(bash scripts/triage/hub-triage-format-slack.sh "$f" summary || true)
+          text=":mag: *camunda-hub API Triage — $(date -u +%Y-%m-%d)*"$'\n'"${summary}"
+          text="${text}"$'\n\n'"<${NIGHTLY_RUN_URL}|📊 nightly run> · <${RUN_URL}|🔎 triage run> · <${COOKBOOK_URL}|📖 Cookbook>"
+
+          payload=$(jq -nc --arg channel "$SLACK_CHANNEL" --arg text "$text" \
+            '{channel: $channel, text: $text, mrkdwn: true}')
+          response=$(curl -sS -X POST https://slack.com/api/chat.postMessage \
+            -H "Authorization: Bearer ${SLACK_BOT_TOKEN}" \
+            -H 'Content-Type: application/json; charset=utf-8' \
+            -d "$payload")
+          echo "$response" | jq '.'
+          ts=$(echo "$response" | jq -r '.ts // ""')
+          channel=$(echo "$response" | jq -r '.channel // ""')
+          echo "ts=${ts}"           >> "$GITHUB_OUTPUT"
+          echo "channel=${channel}" >> "$GITHUB_OUTPUT"
+          [ "$(echo "$response" | jq -r '.ok')" = "true" ] || { echo "::error::Slack summary post failed"; exit 1; }
+
+      - name: Post per-failure detail to Slack thread
+        id: slack-thread
+        if: ${{ always() && fromJSON(steps.slack.outputs.secrets || '{}').SLACK_BOT_TOKEN != '' && steps.slack-summary.outputs.ts != '' }}
+        continue-on-error: true
+        env:
+          SLACK_BOT_TOKEN: ${{ fromJSON(steps.slack.outputs.secrets || '{}').SLACK_BOT_TOKEN }}
+          SLACK_TS: ${{ steps.slack-summary.outputs.ts }}
+          SLACK_CHANNEL_ID: ${{ steps.slack-summary.outputs.channel }}
+        run: |
+          set -euo pipefail
+          f="${GITHUB_WORKSPACE}/hub-triage.json"
+          detail=$(bash scripts/triage/hub-triage-format-slack.sh "$f" thread || true)
+          # Fail-safe: any finding the assign step could not route to an owner
+          # (its assign/review request failed) still pages hub-medic — otherwise it
+          # would sit in the digest owned by no one.
+          unrouted="${GITHUB_WORKSPACE}/hub-unrouted.txt"
+          if [ -s "$unrouted" ]; then
+            urls=$(tr '\n' ' ' < "$unrouted")
+            detail="$(printf '%s\n%s' "$detail" ":rotating_light: <!subteam^S014VK4482H|hub-medic> — could not route to an owner (assign/review request failed), please pick up: ${urls}")"
+          fi
+          # Nothing to say → no thread reply.
+          [ -z "$detail" ] && { echo "No failures — skipping thread reply."; exit 0; }
+          payload=$(jq -nc \
+            --arg channel   "$SLACK_CHANNEL_ID" \
+            --arg thread_ts "$SLACK_TS" \
+            --arg text      "$detail" \
+            '{channel: $channel, thread_ts: $thread_ts, text: $text, mrkdwn: true}')
+          response=$(curl -sS -X POST https://slack.com/api/chat.postMessage \
+            -H "Authorization: Bearer ${SLACK_BOT_TOKEN}" \
+            -H 'Content-Type: application/json; charset=utf-8' \
+            -d "$payload")
+          [ "$(echo "$response" | jq -r '.ok')" = "true" ] || { echo "::error::Slack thread reply failed"; exit 1; }
+
+      # --- Persist the triage result ------------------------------------------
+      - name: Upload triage artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hub-triage-${{ steps.nightly.outputs.run_id }}
+          path: hub-triage.json
+          retention-days: 30
+
+      - name: Write triage to run summary
+        if: always()
+        run: |
+          {
+            echo "## camunda-hub API Triage"
+            echo ""
+            echo '```json'
+            cat "${GITHUB_WORKSPACE}/hub-triage.json" 2>/dev/null || echo "{}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Fail the run if the Slack alert did not go out
+        if: always()
+        uses: ./.github/actions/fail-if-slack-failed
+        with:
+          outcomes: "${{ (steps.slack.outcome == 'success' && fromJSON(steps.slack.outputs.secrets || '{}').SLACK_BOT_TOKEN == '') && 'failure' || steps.slack.outcome }} ${{ steps.slack-summary.outcome }} ${{ steps.slack-thread.outcome }}"
