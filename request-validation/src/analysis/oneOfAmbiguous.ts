@@ -7,10 +7,14 @@ interface Opts {
 }
 
 /**
- * Two object variants that both list `required`, where neither required set contains the other: the pair a merged,
- * ambiguous body can be built from. When one set is a subset of the other, the merge equals the larger variant's
- * required set, so it is a plain valid body for that variant and servers accept it (#838: createProcessInstance
- * ById `[processDefinitionId]` and ByVersionTag `[processDefinitionId, processDefinitionVersionTag]`).
+ * Two object variants that both list `required`, where neither required set is a proper subset of the other: the
+ * pair a merged, ambiguous body can be built from. Equal sets count (they were ambiguous before #838).
+ *
+ * A proper subset is skipped because the merge then equals the larger variant's required set, which servers resolve
+ * to that variant instead of rejecting: createProcessInstance ById `[processDefinitionId]` and ByVersionTag
+ * `[processDefinitionId, processDefinitionVersionTag]` merge to a body the broker accepts (404 for the unknown id,
+ * #838). By JSON Schema alone that body still matches both variants, so this rule rests on observed server behaviour,
+ * not on the schema.
  */
 export function isAmbiguousPair(
   a: SchemaFragment | undefined,

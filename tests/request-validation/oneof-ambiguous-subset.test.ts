@@ -78,6 +78,23 @@ describe('request-validation: oneof-ambiguous skips subset variant pairs (#838)'
     expect(generateNestedOneOfAmbiguous([nested], {})).toEqual([]);
   });
 
+  it('class: every generated body holds the required set of at least two variants', () => {
+    const variants = [
+      obj(['a']),
+      obj(['a', 'b']),
+      obj(['c']),
+      obj(['a', 'c', 'd']),
+      obj(['e', 'f']),
+    ];
+    const scenarios = generateOneOfAmbiguous([op({ oneOf: variants })], {});
+    expect(scenarios.length).toBeGreaterThan(0);
+    for (const s of scenarios) {
+      const keys = new Set(bodyKeys(s.requestBody));
+      const holding = variants.filter((v) => (v.required ?? []).every((r) => keys.has(r)));
+      expect(holding.length, `${s.id} holds ${holding.length} variants`).toBeGreaterThanOrEqual(2);
+    }
+  });
+
   it('class: no generated body is exactly the required set of one variant', () => {
     const variants = [
       obj(['a']),
