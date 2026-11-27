@@ -208,6 +208,12 @@
       "name": "AgentHistoryItemKey",
       "kind": "serverEmergent",
       "$comment": "System-generated key for an agent history item. Managed by the system and not directly minted by the client."
+    },
+    {
+      "name": "ProbeId",
+      "kind": "attribute",
+      "clientMinted": true,
+      "$comment": "Client-supplied opaque routing string for a probe (createProbe.probeId, activateProbes.probeId). The engine matches it exactly and never interprets it, similar to a job type. Camunda convention: <operation>/<template>, e.g. validate-configuration/io.camunda:aws-credential:1. No producer endpoint; the planner mints a deterministic value. Declared only so graph load classifies it while the probe operations are suppressed (the API is work in progress)."
     }
   ],
   "capabilities": [
