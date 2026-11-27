@@ -20,7 +20,7 @@
     "auth-absent": 73,
     "auth-deny": 72,
     "auth-invalid": 73,
-    "constraint-violation": 15,
+    "constraint-violation": 16,
     "enum-violation": 18,
     "explicit-null-required": 14,
     "format-invalid": 1,

@@ -1,4 +1,9 @@
 import { describe, expect, it } from 'vitest';
+import { generateAdditionalPropsViolations } from '../../request-validation/src/analysis/additionalProps.js';
+import {
+  generateUniversalAdditionalProp,
+  isUniversalAdditionalPropEligible,
+} from '../../request-validation/src/analysis/additionalPropUniversal.js';
 import {
   generateAllOfConflicts,
   generateAllOfMissingRequired,
@@ -49,6 +54,7 @@ const KINDS = [
   'oneof-cross-bleed',
   'allof-missing-required',
   'allof-conflict',
+  'additional-prop-general',
 ];
 
 function op(body: SchemaFragment | undefined, over: Partial<OperationModel> = {}): OperationModel {
@@ -83,6 +89,7 @@ function produced(o: OperationModel): Set<string> {
       ...generateOneOfCrossBleed(ops, {}),
       ...generateAllOfMissingRequired(ops, {}),
       ...generateAllOfConflicts(ops, {}),
+      ...generateUniversalAdditionalProp(ops, {}),
     ]
       .map((s) => s.type)
       .filter((t) => KINDS.includes(t)),
@@ -100,6 +107,7 @@ function eligible(o: OperationModel): Set<string> {
   if (isOneOfCrossBleedEligible(o)) out.add('oneof-cross-bleed');
   if (isAllOfMissingRequiredEligible(o)) out.add('allof-missing-required');
   if (isAllOfConflictEligible(o)) out.add('allof-conflict');
+  if (isUniversalAdditionalPropEligible(o)) out.add('additional-prop-general');
   return out;
 }
 
@@ -129,6 +137,10 @@ const CASES: [string, OperationModel][] = [
     op(obj({ name: { type: 'string' } }, ['name']), { requiredProps: ['name'] }),
   ],
   ['no body', op(undefined)],
+  [
+    'a closed object body (additionalProperties: false)',
+    op({ ...obj({ name: { type: 'string' } }), additionalProperties: false }),
+  ],
   ['a root oneOf of two object variants with required', op({ oneOf: [a, b] })],
   ['a root oneOf of three object variants with required', op({ oneOf: [a, b, c] })],
   [
@@ -165,8 +177,21 @@ describe('body kind eligibility matches what the generators build', () => {
   });
 
   it('finds none of the oneOf and allOf kinds for a search body, where they used to read as missing', () => {
-    expect([...eligible(op(searchBody))]).toEqual([]);
-    expect([...produced(op(searchBody))]).toEqual([]);
+    const composite = (s: Set<string>) => [...s].filter((k) => /^(oneof|allof|union)/.test(k));
+    expect(composite(eligible(op(searchBody)))).toEqual([]);
+    expect(composite(produced(op(searchBody)))).toEqual([]);
+  });
+
+  it('leaves a closed body to additional-prop, which sends the same request, so -general never reads as missing', () => {
+    // generate.ts's structural dedupe drops one of two identical extra-property requests; -general used to be the one
+    // dropped, so every closed body (the common case in Hub) showed additional-prop-general as a missing test.
+    const closed = op({ ...obj({ name: { type: 'string' } }), additionalProperties: false });
+    expect(isUniversalAdditionalPropEligible(closed)).toBe(false);
+    expect(generateUniversalAdditionalProp([closed], {})).toEqual([]);
+    expect(generateAdditionalPropsViolations([closed], {}).map((s) => s.type)).toEqual([
+      'additional-prop',
+    ]);
+    expect(isUniversalAdditionalPropEligible(op(obj({ name: { type: 'string' } })))).toBe(true);
   });
 
   it('keeps a buildable root allOf eligible, and its generators build the scenarios', () => {
