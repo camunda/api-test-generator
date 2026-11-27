@@ -18,7 +18,9 @@ import {
 } from '../../path-analyser/src/configResolver.js';
 import { loadGlobalContextSeedsAbox } from '../../path-analyser/src/ontology/loader.js';
 import { PENDING_BINDING } from '../../path-analyser/src/types.js';
+import { generateOneOfAmbiguous } from '../../request-validation/src/analysis/oneOfAmbiguous.js';
 import { loadRequestValidationConfig } from '../../request-validation/src/config.js';
+import { loadSpec } from '../../request-validation/src/spec/loader.js';
 
 /**
  * Bundled-spec invariants — Layer 3 of the layered test strategy (#36).
@@ -3178,6 +3180,50 @@ describeForThisConfig('bundled-spec invariants: query params in param scenarios'
       }
     }
     expect(offenders).toEqual([]);
+  });
+});
+
+describeForThisConfig('bundled-spec invariants: oneof-ambiguous subset pairs (#838)', () => {
+  it("no oneof-ambiguous body is exactly the required set of a variant that contains another variant's required set", async () => {
+    // A merged body equal to the larger variant's required set is a plain valid body for it: the server accepts
+    // it (createProcessInstance ById + ByVersionTag answered 404, not 400). Class-scoped over every operation
+    // with a root oneOf in the bundled spec, using the generator's own model.
+    const model = await loadSpec(BUNDLED_SPEC_PATH);
+    const scenarios = generateOneOfAmbiguous(model.operations, {});
+    expect(scenarios.length).toBeGreaterThan(0);
+    const offenders: string[] = [];
+    for (const s of scenarios) {
+      const op = model.operations.find((o) => o.operationId === s.operationId);
+      const variants = op?.requestBodySchema?.oneOf ?? [];
+      const body =
+        typeof s.requestBody === 'object' && s.requestBody !== null
+          ? new Set(Object.keys(s.requestBody))
+          : new Set<string>();
+      const requiredSets = variants.map((v) => new Set(v.required ?? []));
+      requiredSets.forEach((r, idx) => {
+        const equalsBody = r.size === body.size && [...r].every((k) => body.has(k));
+        const containsSmallerVariant = requiredSets.some(
+          (other, j) => j !== idx && other.size < r.size && [...other].every((k) => r.has(k)),
+        );
+        if (equalsBody && containsSmallerVariant) offenders.push(`${s.id} variant ${idx}`);
+      });
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  it('createProcessInstance builds no oneof-ambiguous body of {processDefinitionId, processDefinitionVersionTag}', async () => {
+    const model = await loadSpec(BUNDLED_SPEC_PATH);
+    const op = model.operations.filter((o) => o.operationId === 'createProcessInstance');
+    expect(op.length).toBe(1);
+    const bodies = generateOneOfAmbiguous(op, {}).map((s) =>
+      typeof s.requestBody === 'object' && s.requestBody !== null
+        ? Object.keys(s.requestBody).sort()
+        : [],
+    );
+    expect(bodies.length).toBeGreaterThan(0);
+    for (const keys of bodies) {
+      expect(keys).toContain('processDefinitionKey');
+    }
   });
 });
 

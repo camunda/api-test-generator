@@ -6,19 +6,36 @@ interface Opts {
   capPerOperation?: number;
 }
 
-/** Two object variants that both list `required`: the pair a merged, ambiguous body can be built from. */
+/**
+ * Two object variants that both list `required`, where neither required set is a proper subset of the other: the
+ * pair a merged, ambiguous body can be built from. Equal sets count (they were ambiguous before #838).
+ *
+ * A proper subset is skipped because the merge then equals the larger variant's required set, which servers resolve
+ * to that variant instead of rejecting: createProcessInstance ById `[processDefinitionId]` and ByVersionTag
+ * `[processDefinitionId, processDefinitionVersionTag]` merge to a body the broker accepts (404 for the unknown id,
+ * #838). By JSON Schema alone that body still matches both variants, so this rule rests on observed server behaviour,
+ * not on the schema.
+ */
 export function isAmbiguousPair(
   a: SchemaFragment | undefined,
   b: SchemaFragment | undefined,
 ): boolean {
-  return (
-    !!a &&
-    !!b &&
-    a.type === 'object' &&
-    b.type === 'object' &&
-    Array.isArray(a.required) &&
-    Array.isArray(b.required)
-  );
+  if (
+    !a ||
+    !b ||
+    a.type !== 'object' ||
+    b.type !== 'object' ||
+    !Array.isArray(a.required) ||
+    !Array.isArray(b.required)
+  ) {
+    return false;
+  }
+  const ra = new Set<string>(a.required);
+  const rb = new Set<string>(b.required);
+  const aInB = [...ra].every((r) => rb.has(r));
+  const bInA = [...rb].every((r) => ra.has(r));
+  // Equal sets (both contain the other) stay ambiguous, as before #838; only a proper subset is skipped.
+  return aInB === bInA;
 }
 
 /**
