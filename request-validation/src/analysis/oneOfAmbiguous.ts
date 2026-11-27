@@ -30,7 +30,8 @@ export function isAmbiguousPair(
   const rb = new Set<string>(b.required);
   const aInB = [...ra].every((r) => rb.has(r));
   const bInA = [...rb].every((r) => ra.has(r));
-  return !aInB && !bInA;
+  // Equal sets (both contain the other) stay ambiguous, as before #838; only a proper subset is skipped.
+  return aInB === bInA;
 }
 
 /**

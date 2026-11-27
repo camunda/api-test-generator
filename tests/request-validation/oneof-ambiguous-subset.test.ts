@@ -46,6 +46,15 @@ describe('request-validation: oneof-ambiguous skips subset variant pairs (#838)'
     expect(isAmbiguousPair(obj(['id', 'x']), obj(['id', 'y']))).toBe(true);
   });
 
+  it('keeps pairs whose required sets are equal, as before #838', () => {
+    expect(isAmbiguousPair(obj(['k', 'x']), obj(['k', 'x']))).toBe(true);
+    const scenarios = generateOneOfAmbiguous(
+      [op({ oneOf: [obj(['k', 'x']), obj(['k', 'x'])] })],
+      {},
+    );
+    expect(scenarios.map((s) => bodyKeys(s.requestBody))).toEqual([['k', 'x']]);
+  });
+
   it('builds no root scenario for the createProcessInstance subset pair, and keeps the disjoint ones', () => {
     const byKey = obj(['processDefinitionKey']);
     const byId = obj(['processDefinitionId']);
