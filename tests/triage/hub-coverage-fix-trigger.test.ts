@@ -13,6 +13,10 @@ const triggers = isRec(doc.on) ? doc.on : isRec(doc.true) ? doc.true : {};
 const jobs = isRec(doc.jobs) ? doc.jobs : {};
 const fix = isRec(jobs.fix) ? jobs.fix : {};
 const env = isRec(doc.env) ? doc.env : {};
+// The fix job's steps live in the reusable workflow it calls.
+const agentWf: unknown = load(readFileSync(join(root, '_hub-coverage-fix-agent.yml'), 'utf8'));
+const agentJobs = isRec(agentWf) && isRec(agentWf.jobs) ? agentWf.jobs : {};
+const agentFix = isRec(agentJobs.fix) ? agentJobs.fix : {};
 
 describe('the coverage-fix trigger after the weekly report', () => {
   it('starts after the weekly report workflow, and still by hand', () => {
@@ -42,7 +46,8 @@ describe('the coverage-fix trigger after the weekly report', () => {
   });
 
   it('reads the report run that started it', () => {
-    const steps = Array.isArray(fix.steps) ? fix.steps.filter(isRec) : [];
+    expect(fix.uses).toBe('./.github/workflows/_hub-coverage-fix-agent.yml');
+    const steps = Array.isArray(agentFix.steps) ? agentFix.steps.filter(isRec) : [];
     const resolve = steps.find((s) => s.name === 'Resolve the coverage report run');
     const e = isRec(resolve) && isRec(resolve.env) ? resolve.env : {};
     expect(String(e.INPUT_RUN_ID)).toContain('github.event.workflow_run.id');

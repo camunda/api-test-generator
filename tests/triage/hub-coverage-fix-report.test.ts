@@ -458,10 +458,20 @@ describe('the workflows that carry the report', () => {
   });
 
   it('hands the selection to the skipped-only report on a zero-candidate run', () => {
-    const fix = jobOf('hub-coverage-fix.yml', 'fix');
+    // The fix job calls a reusable workflow, which hands its job's outputs back to the caller.
+    expect(jobOf('hub-coverage-fix.yml', 'fix').uses).toBe(
+      './.github/workflows/_hub-coverage-fix-agent.yml',
+    );
+    const wf: unknown = load(readFileSync(join(root, '_hub-coverage-fix-agent.yml'), 'utf8'));
+    const on = isRec(wf) && isRec(wf.on) ? wf.on : {};
+    const call = isRec(on.workflow_call) ? on.workflow_call : {};
+    const callOutputs = isRec(call.outputs) ? call.outputs : {};
+    const skippedOut = isRec(callOutputs.skipped) ? callOutputs.skipped : {};
+    expect(String(skippedOut.value)).toContain('jobs.fix.outputs.skipped');
+    const fix = jobOf('_hub-coverage-fix-agent.yml', 'fix');
     const outputs = isRec(fix.outputs) ? fix.outputs : {};
     expect(String(outputs.skipped)).toContain('steps.select.outputs.skipped');
-    const upload = stepsOf('hub-coverage-fix.yml', 'fix').find((s) =>
+    const upload = stepsOf('_hub-coverage-fix-agent.yml', 'fix').find((s) =>
       String(s.name).includes('Upload the selection for the skipped-only report'),
     );
     expect(upload, 'fix job must upload the selection on count==0').toBeTruthy();
