@@ -1357,17 +1357,6 @@
         "summary": "tenantId query param maxLength is not validated, returns 200 instead of 400",
         "url": "https://github.com/camunda/camunda/issues/59378"
       }
-    },
-    {
-      "operationId": "searchElementInstanceIncidents",
-      "scenarioKinds": [
-        "missing-body"
-      ],
-      "reason": "there is a reported issue, the endpoint accepts a request without a body and returns 200 instead of 400",
-      "knownIssue": {
-        "summary": "required request body is not enforced, no body returns 200 instead of 400",
-        "url": "https://github.com/camunda/camunda/issues/70992"
-      }
     }
   ]
 }
